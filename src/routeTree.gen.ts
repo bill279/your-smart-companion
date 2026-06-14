@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedChatRouteImport } from './routes/_authenticated/chat'
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
+import { Route as ApiPublicJarvisToolsSend_gmailRouteImport } from './routes/api/public/jarvis/tools/send_gmail'
 import { Route as ApiPublicJarvisToolsSearch_webRouteImport } from './routes/api/public/jarvis/tools/search_web'
 
 const AuthRoute = AuthRouteImport.update({
@@ -41,6 +42,12 @@ const AuthenticatedChatThreadIdRoute =
     path: '/$threadId',
     getParentRoute: () => AuthenticatedChatRoute,
   } as any)
+const ApiPublicJarvisToolsSend_gmailRoute =
+  ApiPublicJarvisToolsSend_gmailRouteImport.update({
+    id: '/api/public/jarvis/tools/send_gmail',
+    path: '/api/public/jarvis/tools/send_gmail',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicJarvisToolsSearch_webRoute =
   ApiPublicJarvisToolsSearch_webRouteImport.update({
     id: '/api/public/jarvis/tools/search_web',
@@ -54,6 +61,7 @@ export interface FileRoutesByFullPath {
   '/chat': typeof AuthenticatedChatRouteWithChildren
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
+  '/api/public/jarvis/tools/send_gmail': typeof ApiPublicJarvisToolsSend_gmailRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -61,6 +69,7 @@ export interface FileRoutesByTo {
   '/chat': typeof AuthenticatedChatRouteWithChildren
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
+  '/api/public/jarvis/tools/send_gmail': typeof ApiPublicJarvisToolsSend_gmailRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,6 +79,7 @@ export interface FileRoutesById {
   '/_authenticated/chat': typeof AuthenticatedChatRouteWithChildren
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
+  '/api/public/jarvis/tools/send_gmail': typeof ApiPublicJarvisToolsSend_gmailRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -79,6 +89,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/chat/$threadId'
     | '/api/public/jarvis/tools/search_web'
+    | '/api/public/jarvis/tools/send_gmail'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -86,6 +97,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/chat/$threadId'
     | '/api/public/jarvis/tools/search_web'
+    | '/api/public/jarvis/tools/send_gmail'
   id:
     | '__root__'
     | '/'
@@ -94,6 +106,7 @@ export interface FileRouteTypes {
     | '/_authenticated/chat'
     | '/_authenticated/chat/$threadId'
     | '/api/public/jarvis/tools/search_web'
+    | '/api/public/jarvis/tools/send_gmail'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -101,6 +114,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ApiPublicJarvisToolsSearch_webRoute: typeof ApiPublicJarvisToolsSearch_webRoute
+  ApiPublicJarvisToolsSend_gmailRoute: typeof ApiPublicJarvisToolsSend_gmailRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -140,6 +154,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatThreadIdRouteImport
       parentRoute: typeof AuthenticatedChatRoute
     }
+    '/api/public/jarvis/tools/send_gmail': {
+      id: '/api/public/jarvis/tools/send_gmail'
+      path: '/api/public/jarvis/tools/send_gmail'
+      fullPath: '/api/public/jarvis/tools/send_gmail'
+      preLoaderRoute: typeof ApiPublicJarvisToolsSend_gmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/jarvis/tools/search_web': {
       id: '/api/public/jarvis/tools/search_web'
       path: '/api/public/jarvis/tools/search_web'
@@ -177,6 +198,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ApiPublicJarvisToolsSearch_webRoute: ApiPublicJarvisToolsSearch_webRoute,
+  ApiPublicJarvisToolsSend_gmailRoute: ApiPublicJarvisToolsSend_gmailRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
