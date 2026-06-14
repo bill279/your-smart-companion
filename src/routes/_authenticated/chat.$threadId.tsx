@@ -98,65 +98,18 @@ function ThreadView({ threadId }: { threadId: string }) {
     mutationFn: async (content: string) => {
       setPendingUser(content);
       await add({ data: { threadId, role: "user", content } });
-      // If voice session is active, deliver via voice channel
-      if (isConnected) {
-        conversation.sendUserMessage(content);
+      if (!isConnected) {
+        toast.error("Activate the reactor (mic) to start talking to JARVIS.");
         setPendingUser(null);
         return;
       }
-      // Otherwise call text-only: use sendUserMessage requires connection; fall back to a quick textOnly session
-      setPendingAssistant("…");
-      const { token } = await getToken({});
-      let collected = "";
-      const finishedPromise = new Promise<void>((resolve) => {
-        textConversation.current = {
-          resolve,
-          push: (chunk: string) => {
-            collected += chunk;
-            setPendingAssistant(collected || "…");
-          },
-        };
-      });
-      await textSession.current?.endSession().catch(() => {});
-      // simpler: just store the assistant message after we get it via onMessage above (text-only path)
-      // For text-only mode we open a session, send, receive, end.
-      await openTextSession(token);
-      textSession.current?.sendUserMessage(content);
-      await Promise.race([
-        finishedPromise,
-        new Promise((r) => setTimeout(r, 30_000)),
-      ]);
-      setPendingAssistant("");
+      conversation.sendUserMessage(content);
       setPendingUser(null);
-      if (collected) {
-        await add({ data: { threadId, role: "assistant", content: collected } });
-      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
     },
   });
-
-  // Text-only fallback session
-  const textSession = useRef<ReturnType<typeof openHelperConversation> | null>(null);
-  const textConversation = useRef<{ resolve: () => void; push: (s: string) => void } | null>(null);
-
-  async function openTextSession(token: string) {
-    // Reuse the same hook is not possible; for text-only we just send via the existing connection if any
-    // For simplicity, require voice for now if text fallback is unavailable
-    if (!textSession.current) {
-      textSession.current = openHelperConversation({
-        token,
-        onMessage: (m) => {
-          if (m.source === "ai" && m.message) {
-            textConversation.current?.push(m.message);
-            textConversation.current?.resolve();
-          }
-        },
-      });
-      await textSession.current.start();
-    }
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -332,40 +285,4 @@ function Bubble({ role, content }: { role: string; content: string }) {
       </div>
     </div>
   );
-}
-
-/**
- * Lightweight helper that opens a second ElevenLabs conversation purely for
- * text-only fallback. We avoid needing two `useConversation` hooks by using
- * the SDK's lower-level client through dynamic import.
- */
-function openHelperConversation(opts: {
-  token: string;
-  onMessage: (m: { source: string; message?: string }) => void;
-}) {
-  let started = false;
-  let session: { endSession: () => Promise<void>; sendUserMessage: (t: string) => void } | null = null;
-  return {
-    async start() {
-      if (started) return;
-      started = true;
-      const mod = await import("@elevenlabs/client");
-      const { Conversation } = mod as unknown as { Conversation: { startSession: (o: unknown) => Promise<unknown> } };
-      const conv = (await Conversation.startSession({
-        conversationToken: opts.token,
-        connectionType: "websocket",
-        textOnly: true,
-        onMessage: opts.onMessage,
-      })) as { endSession: () => Promise<void>; sendUserMessage: (t: string) => void };
-      session = conv;
-    },
-    sendUserMessage(t: string) {
-      session?.sendUserMessage(t);
-    },
-    async endSession() {
-      await session?.endSession();
-      session = null;
-      started = false;
-    },
-  };
 }
