@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedChatRouteImport } from './routes/_authenticated/chat'
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
+import { Route as ApiPublicJarvisToolsSearch_webRouteImport } from './routes/api/public/jarvis/tools/search_web'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -40,18 +41,26 @@ const AuthenticatedChatThreadIdRoute =
     path: '/$threadId',
     getParentRoute: () => AuthenticatedChatRoute,
   } as any)
+const ApiPublicJarvisToolsSearch_webRoute =
+  ApiPublicJarvisToolsSearch_webRouteImport.update({
+    id: '/api/public/jarvis/tools/search_web',
+    path: '/api/public/jarvis/tools/search_web',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/chat': typeof AuthenticatedChatRouteWithChildren
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
+  '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/chat': typeof AuthenticatedChatRouteWithChildren
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
+  '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -60,12 +69,23 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/chat': typeof AuthenticatedChatRouteWithChildren
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
+  '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/chat' | '/chat/$threadId'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/chat'
+    | '/chat/$threadId'
+    | '/api/public/jarvis/tools/search_web'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/chat' | '/chat/$threadId'
+  to:
+    | '/'
+    | '/auth'
+    | '/chat'
+    | '/chat/$threadId'
+    | '/api/public/jarvis/tools/search_web'
   id:
     | '__root__'
     | '/'
@@ -73,12 +93,14 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/chat'
     | '/_authenticated/chat/$threadId'
+    | '/api/public/jarvis/tools/search_web'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicJarvisToolsSearch_webRoute: typeof ApiPublicJarvisToolsSearch_webRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -118,6 +140,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatThreadIdRouteImport
       parentRoute: typeof AuthenticatedChatRoute
     }
+    '/api/public/jarvis/tools/search_web': {
+      id: '/api/public/jarvis/tools/search_web'
+      path: '/api/public/jarvis/tools/search_web'
+      fullPath: '/api/public/jarvis/tools/search_web'
+      preLoaderRoute: typeof ApiPublicJarvisToolsSearch_webRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -147,6 +176,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicJarvisToolsSearch_webRoute: ApiPublicJarvisToolsSearch_webRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
