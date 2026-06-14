@@ -63,25 +63,26 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.208 0.042 265.755);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
+  /* Jarvis HUD theme — dark navy with cyan and gold */
+  --background: oklch(0.13 0.03 240);
+  --foreground: oklch(0.95 0.06 200);
+  --card: oklch(0.18 0.04 240 / 70%);
+  --card-foreground: oklch(0.95 0.06 200);
+  --popover: oklch(0.18 0.04 240);
+  --popover-foreground: oklch(0.95 0.06 200);
+  --primary: oklch(0.78 0.16 215);
+  --primary-foreground: oklch(0.1 0.02 240);
+  --secondary: oklch(0.25 0.05 240);
+  --secondary-foreground: oklch(0.95 0.06 200);
+  --muted: oklch(0.22 0.04 240);
+  --muted-foreground: oklch(0.7 0.07 210);
+  --accent: oklch(0.82 0.16 80);
+  --accent-foreground: oklch(0.1 0.02 240);
+  --destructive: oklch(0.65 0.22 25);
+  --destructive-foreground: oklch(0.98 0.01 0);
+  --border: oklch(0.78 0.16 215 / 25%);
+  --input: oklch(0.25 0.05 240);
+  --ring: oklch(0.78 0.16 215);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -140,5 +141,58 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background-image:
+      radial-gradient(ellipse at top, oklch(0.78 0.16 215 / 0.08), transparent 60%),
+      radial-gradient(ellipse at bottom, oklch(0.82 0.16 80 / 0.04), transparent 60%),
+      linear-gradient(oklch(0.78 0.16 215 / 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(0.78 0.16 215 / 0.04) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
   }
+}
+
+@layer utilities {
+  .hud-panel {
+    background: linear-gradient(180deg, oklch(0.18 0.04 240 / 0.85), oklch(0.13 0.03 240 / 0.6));
+    border: 1px solid oklch(0.78 0.16 215 / 0.35);
+    box-shadow:
+      0 0 0 1px oklch(0.78 0.16 215 / 0.08) inset,
+      0 0 30px oklch(0.78 0.16 215 / 0.1);
+    backdrop-filter: blur(8px);
+  }
+  .hud-glow {
+    text-shadow: 0 0 12px oklch(0.78 0.16 215 / 0.7);
+  }
+  .hud-corner {
+    position: relative;
+  }
+  .hud-corner::before,
+  .hud-corner::after {
+    content: "";
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-color: var(--primary);
+  }
+  .hud-corner::before {
+    top: -1px; left: -1px;
+    border-top: 2px solid; border-left: 2px solid;
+  }
+  .hud-corner::after {
+    bottom: -1px; right: -1px;
+    border-bottom: 2px solid; border-right: 2px solid;
+  }
+  @keyframes hud-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.7; }
+    50% { transform: scale(1.05); opacity: 1; }
+  }
+  @keyframes hud-spin-slow {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes hud-spin-rev {
+    to { transform: rotate(-360deg); }
+  }
+  .hud-pulse { animation: hud-pulse 2s ease-in-out infinite; }
+  .hud-spin-slow { animation: hud-spin-slow 18s linear infinite; }
+  .hud-spin-rev { animation: hud-spin-rev 24s linear infinite; }
 }
