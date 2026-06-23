@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-r
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useConversation } from "@elevenlabs/react";
+import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send } from "lucide-react";
 import { toast } from "sonner";
@@ -25,7 +25,11 @@ export const Route = createFileRoute("/_authenticated/chat/$threadId")({
 
 function ThreadPage() {
   const { threadId } = useParams({ from: "/_authenticated/chat/$threadId" });
-  return <ThreadView key={threadId} threadId={threadId} />;
+  return (
+    <ConversationProvider>
+      <ThreadView key={threadId} threadId={threadId} />
+    </ConversationProvider>
+  );
 }
 
 function ThreadView({ threadId }: { threadId: string }) {
