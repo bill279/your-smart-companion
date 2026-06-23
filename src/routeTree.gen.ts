@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as AuthenticatedChatRouteImport } from './routes/_authenticated/chat'
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
 import { Route as ApiPublicJarvisToolsSend_outlookRouteImport } from './routes/api/public/jarvis/tools/send_outlook'
@@ -31,6 +32,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiChatRoute = ApiChatRouteImport.update({
+  id: '/api/chat',
+  path: '/api/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedChatRoute = AuthenticatedChatRouteImport.update({
@@ -73,6 +79,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/chat': typeof AuthenticatedChatRouteWithChildren
+  '/api/chat': typeof ApiChatRoute
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/chat': typeof AuthenticatedChatRouteWithChildren
+  '/api/chat': typeof ApiChatRoute
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/chat': typeof AuthenticatedChatRouteWithChildren
+  '/api/chat': typeof ApiChatRoute
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
@@ -107,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/chat'
+    | '/api/chat'
     | '/chat/$threadId'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/chat'
+    | '/api/chat'
     | '/chat/$threadId'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/chat'
+    | '/api/chat'
     | '/_authenticated/chat/$threadId'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
@@ -139,6 +151,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiChatRoute: typeof ApiChatRoute
   ApiPublicJarvisToolsRead_calendarRoute: typeof ApiPublicJarvisToolsRead_calendarRoute
   ApiPublicJarvisToolsSearch_webRoute: typeof ApiPublicJarvisToolsSearch_webRoute
   ApiPublicJarvisToolsSend_gmailRoute: typeof ApiPublicJarvisToolsSend_gmailRoute
@@ -166,6 +179,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/chat': {
+      id: '/api/chat'
+      path: '/api/chat'
+      fullPath: '/api/chat'
+      preLoaderRoute: typeof ApiChatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/chat': {
@@ -239,6 +259,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiChatRoute: ApiChatRoute,
   ApiPublicJarvisToolsRead_calendarRoute:
     ApiPublicJarvisToolsRead_calendarRoute,
   ApiPublicJarvisToolsSearch_webRoute: ApiPublicJarvisToolsSearch_webRoute,
