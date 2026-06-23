@@ -97,17 +97,62 @@ function ThreadView({ threadId }: { threadId: string }) {
   const addMut = useMutation({
     mutationFn: async (content: string) => {
       setPendingUser(content);
-      await add({ data: { threadId, role: "user", content } });
-      if (!isConnected) {
-        toast.error("Activate the reactor (mic) to start talking to JARVIS.");
+      setPendingAssistant("");
+
+      // If voice is connected, route through ElevenLabs instead.
+      if (isConnected) {
+        await add({ data: { threadId, role: "user", content } });
+        conversation.sendUserMessage(content);
         setPendingUser(null);
         return;
       }
-      conversation.sendUserMessage(content);
-      setPendingUser(null);
-    },
-    onSettled: () => {
+
+      // Text chat: stream from Lovable AI.
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) {
+        toast.error("Session expired. Please sign in again.");
+        setPendingUser(null);
+        return;
+      }
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ threadId, content }),
+      });
+
+      if (!res.ok || !res.body) {
+        const msg = await res.text().catch(() => "Request failed");
+        toast.error(msg || "JARVIS is unavailable");
+        setPendingUser(null);
+        return;
+      }
+
+      // user message was saved server-side; reflect it locally
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
+      setPendingUser(null);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        setPendingAssistant(acc);
+      }
+      setPendingAssistant("");
+      qc.invalidateQueries({ queryKey: ["messages", threadId] });
+      qc.invalidateQueries({ queryKey: ["threads"] });
+    },
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : "Failed");
+      setPendingUser(null);
+      setPendingAssistant("");
     },
   });
 
