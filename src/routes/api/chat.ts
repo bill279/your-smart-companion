@@ -1,10 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
-import { streamText } from "ai";
+import { streamText, tool, stepCountIs } from "ai";
+import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
 
-const SYSTEM_PROMPT = `You are JARVIS, a witty, concise, and highly capable personal AI assistant in the style of Tony Stark's JARVIS. Be direct, helpful, and a touch dry. Use markdown for structure (lists, code) when useful. Keep replies focused.`;
+const SYSTEM_PROMPT = `You are JARVIS, a witty, concise, and highly capable personal AI assistant in the style of Tony Stark's JARVIS. Be direct, helpful, and a touch dry. Use markdown for structure (lists, code) when useful. Keep replies focused.
+
+You have live web access via tools:
+- web_search: search the web for current information. Use this whenever the user asks about news, facts, prices, people, products, or anything that may have changed since training.
+- web_scrape: fetch the readable markdown contents of a specific URL.
+
+Always use these tools instead of refusing or saying you cannot browse. Cite sources inline as markdown links when you use them.`;
 
 export const Route = createFileRoute("/api/chat")({
   server: {
