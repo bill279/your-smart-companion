@@ -130,14 +130,13 @@ function ThreadView({ threadId }: { threadId: string }) {
   });
 
   const isConnected = conversation.status === "connected";
+  conversationRef.current = conversation;
 
   async function startVoice() {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const { token } = await getToken({});
-      // Inject prior conversation so the voice agent remembers context.
-      // Take the last 100 turns, then trim from the oldest end so the
-      // total context stays under ~12k chars (ElevenLabs prompt budget).
+      // Build conversational context to inject AFTER connect (no override needed).
       const MAX_CHARS = 12000;
       const recent = (messages ?? []).slice(-100).map(
         (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.content}`,
@@ -151,15 +150,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         total += line.length + 1;
       }
       const history = kept.join("\n");
-      const contextBlock = history
-        ? `\n\n# Prior conversation in this thread (most recent last)\n${history}\n\nContinue from here naturally.`
+      pendingContextRef.current = history
+        ? `Prior conversation in this thread (most recent last):\n${history}\n\nContinue naturally from here. Do not greet again.`
         : "";
       await conversation.startSession({
         conversationToken: token,
         connectionType: "webrtc",
-        overrides: contextBlock
-          ? { agent: { prompt: { prompt: `{{system_prompt}}${contextBlock}` } } }
-          : undefined,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start voice");
