@@ -64,6 +64,21 @@ function ThreadView({ threadId }: { threadId: string }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, pendingAssistant, pendingUser]);
 
+  // Guard against an ElevenLabs SDK bug where malformed error events throw
+  // `undefined is not an object (evaluating 'event.error_event.error_type')`
+  // as an unhandled rejection and crash the chat tree.
+  useEffect(() => {
+    const handler = (e: PromiseRejectionEvent) => {
+      const msg = String((e.reason as { message?: string })?.message ?? e.reason ?? "");
+      if (msg.includes("error_event") || msg.includes("error_type")) {
+        e.preventDefault();
+        console.warn("Suppressed ElevenLabs malformed error event:", msg);
+      }
+    };
+    window.addEventListener("unhandledrejection", handler);
+    return () => window.removeEventListener("unhandledrejection", handler);
+  }, []);
+
   const conversation = useConversation({
     clientTools: {
       web_search: async (params: { query?: string; limit?: number }) => {
