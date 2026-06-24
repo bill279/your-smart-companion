@@ -95,7 +95,18 @@ function ThreadView({ threadId }: { threadId: string }) {
         return JSON.stringify(data);
       },
     },
-    onConnect: () => toast.success("BPA Bot online"),
+    onConnect: () => {
+      toast.success("BPA Bot online");
+      const ctx = pendingContextRef.current;
+      if (ctx) {
+        try {
+          conversationRef.current?.sendContextualUpdate(ctx);
+        } catch (err) {
+          console.warn("contextual update failed", err);
+        }
+        pendingContextRef.current = "";
+      }
+    },
     onDisconnect: () => toast("BPA Bot offline"),
     onError: (e) => toast.error(typeof e === "string" ? e : "Voice error"),
     onMessage: async (message: { source?: string; message?: string }) => {
