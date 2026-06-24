@@ -123,10 +123,21 @@ function ThreadView({ threadId }: { threadId: string }) {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const { token } = await getToken({});
       // Inject prior conversation so the voice agent remembers context.
-      const history = (messages ?? [])
-        .slice(-20)
-        .map((m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.content}`)
-        .join("\n");
+      // Take the last 100 turns, then trim from the oldest end so the
+      // total context stays under ~12k chars (ElevenLabs prompt budget).
+      const MAX_CHARS = 12000;
+      const recent = (messages ?? []).slice(-100).map(
+        (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.content}`,
+      );
+      let total = 0;
+      const kept: string[] = [];
+      for (let i = recent.length - 1; i >= 0; i--) {
+        const line = recent[i];
+        if (total + line.length + 1 > MAX_CHARS) break;
+        kept.unshift(line);
+        total += line.length + 1;
+      }
+      const history = kept.join("\n");
       const contextBlock = history
         ? `\n\n# Prior conversation in this thread (most recent last)\n${history}\n\nContinue from here naturally.`
         : "";
