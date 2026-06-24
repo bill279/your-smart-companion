@@ -397,7 +397,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                   params={{ threadId: t.id }}
                   className="flex-1 truncate"
                 >
-                  {t.title}
+                  {cleanAssistantText(t.title)}
                 </Link>
                 <button
                   onClick={(e) => {
@@ -431,7 +431,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             </div>
           )}
           {messages.map((m) => (
-            <Bubble key={m.id} role={m.role} content={m.role === "assistant" ? cleanAssistantText(m.content) : m.content} />
+            <Bubble key={m.id} role={m.role} content={m.content} />
           ))}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
           {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
@@ -496,6 +496,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
 function Bubble({ role, content }: { role: string; content: string }) {
   const isUser = role === "user";
+  const displayContent = isUser ? content : cleanAssistantText(content);
   return (
     <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
@@ -515,7 +516,7 @@ function Bubble({ role, content }: { role: string; content: string }) {
             isUser ? "prose-invert" : ""
           } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
         </div>
       </div>
     </div>
