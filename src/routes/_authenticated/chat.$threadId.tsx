@@ -4,8 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send } from "lucide-react";
 import { toast } from "sonner";
+import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
   addMessage,
   createThread,
@@ -19,7 +21,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/chat/$threadId")({
   ssr: false,
-  head: () => ({ meta: [{ title: "JARVIS" }] }),
+  head: () => ({ meta: [{ title: "BPA Bot" }] }),
   component: ThreadPage,
 });
 
@@ -75,9 +77,25 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "search failed" });
         return JSON.stringify(data);
       },
+      send_email: async (params: { to?: string; subject?: string; body?: string; cc?: string }) => {
+        if (!params.to || !params.subject || !params.body) {
+          return JSON.stringify({ error: "to, subject and body are required" });
+        }
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return JSON.stringify({ error: "not signed in" });
+        const res = await fetch("/api/public/jarvis/tools/send_email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(params),
+        });
+        const data = await res.json().catch(() => ({ error: "send failed" }));
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
+        return JSON.stringify(data);
+      },
     },
-    onConnect: () => toast.success("JARVIS online"),
-    onDisconnect: () => toast("JARVIS standby"),
+    onConnect: () => toast.success("BPA Bot online"),
+    onDisconnect: () => toast("BPA Bot offline"),
     onError: (e) => toast.error(typeof e === "string" ? e : "Voice error"),
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -104,7 +122,21 @@ function ThreadView({ threadId }: { threadId: string }) {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const { token } = await getToken({});
-      await conversation.startSession({ conversationToken: token, connectionType: "webrtc" });
+      // Inject prior conversation so the voice agent remembers context.
+      const history = (messages ?? [])
+        .slice(-20)
+        .map((m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.content}`)
+        .join("\n");
+      const contextBlock = history
+        ? `\n\n# Prior conversation in this thread (most recent last)\n${history}\n\nContinue from here naturally.`
+        : "";
+      await conversation.startSession({
+        conversationToken: token,
+        connectionType: "webrtc",
+        overrides: contextBlock
+          ? { agent: { prompt: { prompt: `{{system_prompt}}${contextBlock}` } } }
+          : undefined,
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start voice");
     }
@@ -146,7 +178,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
       if (!res.ok || !res.body) {
         const msg = await res.text().catch(() => "Request failed");
-        toast.error(msg || "JARVIS is unavailable");
+        toast.error(msg || "BPA Bot is unavailable");
         setPendingUser(null);
         return;
       }
@@ -207,16 +239,19 @@ function ThreadView({ threadId }: { threadId: string }) {
     <div className="min-h-screen flex">
       {/* Sidebar */}
       <aside className="w-72 hud-panel border-r border-primary/30 flex flex-col">
-        <div className="p-5 border-b border-primary/20">
-          <div className="text-2xl font-bold tracking-[0.4em] text-primary hud-glow">JARVIS</div>
-          <div className="text-[10px] text-muted-foreground tracking-widest mt-1">v1.0 // ONLINE</div>
+        <div className="p-5 border-b border-border">
+          <img src={bpaLogo.url} alt="BP Automation" className="h-8 w-auto mb-2" />
+          <div className="text-base font-semibold text-foreground">BPA Bot</div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            BP Automation assistant
+          </div>
         </div>
 
         <button
           onClick={() => createMut.mutate()}
-          className="mx-4 mt-4 flex items-center gap-2 justify-center py-2 rounded border border-primary/40 hover:bg-primary/10 text-sm tracking-wider"
+          className="mx-4 mt-4 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-sm font-medium"
         >
-          <Plus size={14} /> NEW SESSION
+          <Plus size={14} /> New chat
         </button>
 
         <div className="flex-1 overflow-y-auto p-3 space-y-1 mt-3">
@@ -225,8 +260,8 @@ function ThreadView({ threadId }: { threadId: string }) {
             return (
               <div
                 key={t.id}
-                className={`group flex items-center gap-2 rounded px-2 py-1.5 text-sm cursor-pointer ${
-                  active ? "bg-primary/20 border border-primary/40" : "hover:bg-primary/5"
+                className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer ${
+                  active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
                 }`}
               >
                 <Link
@@ -252,49 +287,40 @@ function ThreadView({ threadId }: { threadId: string }) {
 
         <button
           onClick={signOut}
-          className="m-4 flex items-center gap-2 justify-center py-2 text-xs text-muted-foreground hover:text-primary tracking-wider"
+          className="m-4 flex items-center gap-2 justify-center py-2 text-xs text-muted-foreground hover:text-foreground"
         >
-          <LogOut size={12} /> DISCONNECT
+          <LogOut size={12} /> Sign out
         </button>
       </aside>
 
       {/* Main HUD */}
       <main className="flex-1 flex flex-col relative overflow-hidden">
-        {/* Decorative rings */}
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-20">
-          <div className="absolute w-[600px] h-[600px] rounded-full border border-primary/40 hud-spin-slow" />
-          <div className="absolute w-[480px] h-[480px] rounded-full border border-primary/30 hud-spin-rev" />
-          <div className="absolute w-[360px] h-[360px] rounded-full border border-accent/30 hud-spin-slow" />
-        </div>
-
-        {/* Reactor / voice button */}
-        <div className="relative z-10 pt-10 pb-6 flex flex-col items-center">
+        {/* Voice button */}
+        <div className="relative z-10 pt-6 pb-4 flex flex-col items-center border-b border-border bg-card/40">
           <button
             onClick={isConnected ? stopVoice : startVoice}
-            className={`relative w-32 h-32 rounded-full flex items-center justify-center transition border-2 ${
+            className={`relative w-20 h-20 rounded-full flex items-center justify-center transition border-2 ${
               isConnected
-                ? "border-accent bg-accent/20 hud-pulse"
-                : "border-primary bg-primary/10 hover:bg-primary/20"
+                ? "border-accent bg-accent/15 hud-pulse"
+                : "border-primary bg-primary/5 hover:bg-primary/10"
             }`}
           >
-            {isConnected ? <MicOff size={36} className="text-accent" /> : <Mic size={36} className="text-primary" />}
-            <div className="absolute -inset-2 rounded-full border border-primary/30" />
-            <div className="absolute -inset-5 rounded-full border border-primary/15" />
+            {isConnected ? <MicOff size={26} className="text-accent" /> : <Mic size={26} className="text-primary" />}
           </button>
-          <div className="mt-4 text-xs tracking-[0.3em] text-muted-foreground">
+          <div className="mt-2 text-xs text-muted-foreground">
             {isConnected
               ? conversation.isSpeaking
-                ? "RESPONDING…"
-                : "LISTENING…"
-              : "TAP TO SPEAK"}
+                ? "Speaking…"
+                : "Listening…"
+              : "Tap to talk"}
           </div>
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto px-8 pb-6 space-y-4">
+        <div ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto px-4 md:px-10 py-6 space-y-6">
           {messages.length === 0 && !pendingUser && (
             <div className="text-center text-muted-foreground text-sm pt-12">
-              Good day. How may I assist you?
+              How can I help you today?
             </div>
           )}
           {messages.map((m) => (
@@ -307,21 +333,21 @@ function ThreadView({ threadId }: { threadId: string }) {
         {/* Composer */}
         <form
           onSubmit={onSubmit}
-          className="relative z-10 m-6 hud-panel hud-corner rounded-lg p-3 flex gap-2"
+          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex gap-2"
         >
           <input
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={isConnected ? "Type or speak…" : "Type a command…"}
+            placeholder={isConnected ? "Type or speak…" : "Message BPA Bot…"}
             className="flex-1 bg-transparent outline-none px-3 text-sm"
           />
           <button
             type="submit"
             disabled={!input.trim() || addMut.isPending}
-            className="px-4 py-2 rounded bg-primary text-primary-foreground text-sm tracking-wider disabled:opacity-40 flex items-center gap-2"
+            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-2"
           >
-            <Send size={14} /> SEND
+            <Send size={14} /> Send
           </button>
         </form>
       </main>
@@ -332,19 +358,25 @@ function ThreadView({ threadId }: { threadId: string }) {
 function Bubble({ role, content }: { role: string; content: string }) {
   const isUser = role === "user";
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+      {!isUser && (
+        <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">
+          BP
+        </div>
+      )}
       <div
-        className={`max-w-[75%] rounded-lg px-4 py-2.5 text-sm leading-relaxed border ${
+        className={`max-w-[78%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
           isUser
-            ? "bg-primary/15 border-primary/40 text-foreground"
-            : "bg-card border-accent/40 text-foreground hud-corner"
+            ? "bg-primary text-primary-foreground"
+            : "bg-card border border-border text-foreground"
         }`}
       >
-        <div className="text-[10px] tracking-[0.25em] mb-1 opacity-60">
-          {isUser ? "USER" : "JARVIS"}
-        </div>
-        <div className="prose prose-invert prose-sm max-w-none prose-p:my-1">
-          <ReactMarkdown>{content}</ReactMarkdown>
+        <div
+          className={`prose prose-sm max-w-none ${
+            isUser ? "prose-invert" : ""
+          } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
+        >
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         </div>
       </div>
     </div>
