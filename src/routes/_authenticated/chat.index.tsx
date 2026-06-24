@@ -7,7 +7,7 @@ import { createThread, listThreads } from "@/lib/jarvis.functions";
 export const Route = createFileRoute("/_authenticated/chat/")({
   ssr: false,
   head: () => ({
-    meta: [{ title: "JARVIS" }],
+    meta: [{ title: "BPA Bot" }],
   }),
   component: ChatHome,
 });
