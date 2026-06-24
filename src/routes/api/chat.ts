@@ -71,6 +71,70 @@ export const Route = createFileRoute("/api/chat")({
             role: r.role as "user" | "assistant" | "system",
             content: r.content,
           })),
+          stopWhen: stepCountIs(50),
+          tools: {
+            web_search: tool({
+              description:
+                "Search the live web. Returns a list of results with title, url, and snippet. Use for current events, facts, prices, anything time-sensitive.",
+              inputSchema: z.object({
+                query: z.string().describe("The search query"),
+                limit: z.number().int().min(1).max(10).optional(),
+              }),
+              execute: async ({ query, limit }) => {
+                const key = process.env.FIRECRAWL_API_KEY;
+                if (!key) return { error: "Web search not configured" };
+                const r = await fetch("https://api.firecrawl.dev/v2/search", {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${key}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ query, limit: limit ?? 5 }),
+                });
+                if (!r.ok) return { error: `Search failed (${r.status})` };
+                const j = (await r.json()) as {
+                  data?: { web?: Array<{ title?: string; url?: string; description?: string }> } | Array<{ title?: string; url?: string; description?: string }>;
+                };
+                const arr = Array.isArray(j.data) ? j.data : j.data?.web ?? [];
+                return {
+                  results: arr.slice(0, limit ?? 5).map((x) => ({
+                    title: x.title,
+                    url: x.url,
+                    snippet: x.description,
+                  })),
+                };
+              },
+            }),
+            web_scrape: tool({
+              description: "Fetch the readable markdown contents of a specific URL.",
+              inputSchema: z.object({ url: z.string().url() }),
+              execute: async ({ url }) => {
+                const key = process.env.FIRECRAWL_API_KEY;
+                if (!key) return { error: "Web scrape not configured" };
+                const r = await fetch("https://api.firecrawl.dev/v2/scrape", {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${key}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    url,
+                    formats: ["markdown"],
+                    onlyMainContent: true,
+                  }),
+                });
+                if (!r.ok) return { error: `Scrape failed (${r.status})` };
+                const j = (await r.json()) as {
+                  data?: { markdown?: string; metadata?: { title?: string } };
+                };
+                const md = j.data?.markdown ?? "";
+                return {
+                  title: j.data?.metadata?.title,
+                  markdown: md.length > 8000 ? md.slice(0, 8000) + "\n\n…[truncated]" : md,
+                };
+              },
+            }),
+          },
           onFinish: async ({ text }) => {
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
