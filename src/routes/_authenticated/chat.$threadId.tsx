@@ -33,9 +33,16 @@ const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table d
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
+    .replace(/^\s*Hello there!\s*I'm Alex[\s\S]*?today\??\s*/i, "")
+    .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
     .trim();
+}
+
+function cleanThreadTitle(title: string) {
+  const cleaned = cleanAssistantText(title);
+  return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
 }
 
 export const Route = createFileRoute("/_authenticated/chat/$threadId")({
@@ -397,7 +404,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                   params={{ threadId: t.id }}
                   className="flex-1 truncate"
                 >
-                  {cleanAssistantText(t.title)}
+                  {cleanThreadTitle(t.title)}
                 </Link>
                 <button
                   onClick={(e) => {
