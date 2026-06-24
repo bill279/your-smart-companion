@@ -61,6 +61,21 @@ function ThreadView({ threadId }: { threadId: string }) {
   }, [messages.length, pendingAssistant, pendingUser]);
 
   const conversation = useConversation({
+    clientTools: {
+      web_search: async (params: { query?: string; limit?: number }) => {
+        const query = params.query?.trim();
+        if (!query) return JSON.stringify({ error: "query required" });
+
+        const res = await fetch("/api/public/web-search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, limit: params.limit ?? 5 }),
+        });
+        const data = await res.json().catch(() => ({ error: "search failed" }));
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "search failed" });
+        return JSON.stringify(data);
+      },
+    },
     onConnect: () => toast.success("JARVIS online"),
     onDisconnect: () => toast("JARVIS standby"),
     onError: (e) => toast.error(typeof e === "string" ? e : "Voice error"),
