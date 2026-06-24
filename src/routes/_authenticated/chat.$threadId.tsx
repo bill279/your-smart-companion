@@ -318,27 +318,6 @@ function ThreadView({ threadId }: { threadId: string }) {
 
       {/* Main HUD */}
       <main className="flex-1 flex flex-col relative overflow-hidden">
-        {/* Voice button */}
-        <div className="relative z-10 pt-6 pb-4 flex flex-col items-center border-b border-border bg-card/40">
-          <button
-            onClick={isConnected ? stopVoice : startVoice}
-            className={`relative w-20 h-20 rounded-full flex items-center justify-center transition border-2 ${
-              isConnected
-                ? "border-accent bg-accent/15 hud-pulse"
-                : "border-primary bg-primary/5 hover:bg-primary/10"
-            }`}
-          >
-            {isConnected ? <MicOff size={26} className="text-accent" /> : <Mic size={26} className="text-primary" />}
-          </button>
-          <div className="mt-2 text-xs text-muted-foreground">
-            {isConnected
-              ? conversation.isSpeaking
-                ? "Speaking…"
-                : "Listening…"
-              : "Tap to talk"}
-          </div>
-        </div>
-
         {/* Messages */}
         <div ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto px-4 md:px-10 py-6 space-y-6">
           {messages.length === 0 && !pendingUser && (
@@ -356,13 +335,37 @@ function ThreadView({ threadId }: { threadId: string }) {
         {/* Composer */}
         <form
           onSubmit={onSubmit}
-          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex gap-2"
+          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex items-center gap-2"
         >
+          <button
+            type="button"
+            onClick={isConnected ? stopVoice : startVoice}
+            title={
+              isConnected
+                ? conversation.isSpeaking
+                  ? "Speaking…"
+                  : "Listening… tap to stop"
+                : "Tap to talk"
+            }
+            className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
+              isConnected
+                ? "border-accent bg-accent/15 hud-pulse text-accent"
+                : "border-border bg-secondary hover:bg-secondary/80 text-primary"
+            }`}
+          >
+            {isConnected ? <MicOff size={18} /> : <Mic size={18} />}
+          </button>
           <input
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={isConnected ? "Type or speak…" : "Message BPA Bot…"}
+            placeholder={
+              isConnected
+                ? conversation.isSpeaking
+                  ? "BPA Bot is speaking…"
+                  : "Listening… or type"
+                : "Message BPA Bot…"
+            }
             className="flex-1 bg-transparent outline-none px-3 text-sm"
           />
           <button
