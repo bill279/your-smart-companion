@@ -31,7 +31,11 @@ Never say you are unable to display a visual table directly in this chat interfa
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
 function cleanAssistantText(text: string) {
-  return text.replace(BAD_TABLE_REFUSAL, "Here is the table:").trim();
+  return text
+    .replace(/^\s*\[[^\]]+\]\s*/g, "")
+    .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
+    .replace(BAD_TABLE_REFUSAL, "Here is the table:")
+    .trim();
 }
 
 export const Route = createFileRoute("/_authenticated/chat/$threadId")({
@@ -196,7 +200,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   function buildVoiceContext() {
     const MAX_CHARS = 12000;
     const recent = (messages ?? []).slice(-100).map(
-      (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.content}`,
+      (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
     );
     let total = 0;
     const kept: string[] = [];

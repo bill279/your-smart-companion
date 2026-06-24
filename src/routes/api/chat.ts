@@ -36,7 +36,11 @@ You are BPA Bot. Never refer to yourself as JARVIS or any other name.`;
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
 function cleanAssistantText(text: string) {
-  return text.replace(BAD_TABLE_REFUSAL, "Here is the table:").trim();
+  return text
+    .replace(/^\s*\[[^\]]+\]\s*/g, "")
+    .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
+    .replace(BAD_TABLE_REFUSAL, "Here is the table:")
+    .trim();
 }
 
 export const Route = createFileRoute("/api/chat")({
