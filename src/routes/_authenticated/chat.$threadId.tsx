@@ -55,6 +55,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pendingContextRef = useRef<string>("");
+  const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
 
   const messages = messagesQ.data ?? [];
 
@@ -94,7 +96,18 @@ function ThreadView({ threadId }: { threadId: string }) {
         return JSON.stringify(data);
       },
     },
-    onConnect: () => toast.success("BPA Bot online"),
+    onConnect: () => {
+      toast.success("BPA Bot online");
+      const ctx = pendingContextRef.current;
+      if (ctx) {
+        try {
+          conversationRef.current?.sendContextualUpdate(ctx);
+        } catch (err) {
+          console.warn("contextual update failed", err);
+        }
+        pendingContextRef.current = "";
+      }
+    },
     onDisconnect: () => toast("BPA Bot offline"),
     onError: (e) => toast.error(typeof e === "string" ? e : "Voice error"),
     onMessage: async (message: { source?: string; message?: string }) => {
@@ -117,14 +130,13 @@ function ThreadView({ threadId }: { threadId: string }) {
   });
 
   const isConnected = conversation.status === "connected";
+  conversationRef.current = conversation;
 
   async function startVoice() {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const { token } = await getToken({});
-      // Inject prior conversation so the voice agent remembers context.
-      // Take the last 100 turns, then trim from the oldest end so the
-      // total context stays under ~12k chars (ElevenLabs prompt budget).
+      // Build conversational context to inject AFTER connect (no override needed).
       const MAX_CHARS = 12000;
       const recent = (messages ?? []).slice(-100).map(
         (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.content}`,
@@ -138,15 +150,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         total += line.length + 1;
       }
       const history = kept.join("\n");
-      const contextBlock = history
-        ? `\n\n# Prior conversation in this thread (most recent last)\n${history}\n\nContinue from here naturally.`
+      pendingContextRef.current = history
+        ? `Prior conversation in this thread (most recent last):\n${history}\n\nContinue naturally from here. Do not greet again.`
         : "";
       await conversation.startSession({
         conversationToken: token,
         connectionType: "webrtc",
-        overrides: contextBlock
-          ? { agent: { prompt: { prompt: `{{system_prompt}}${contextBlock}` } } }
-          : undefined,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start voice");
