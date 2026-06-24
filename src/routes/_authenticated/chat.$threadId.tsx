@@ -69,7 +69,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
   const voiceShouldStayOnRef = useRef(false);
   const isStartingVoiceRef = useRef(false);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
 
   const messages = messagesQ.data ?? [];
@@ -149,7 +149,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       toast("BPA Bot offline");
     },
     onError: (e) => {
-      const msg = typeof e === "string" ? e : e instanceof Error ? e.message : "Voice error";
+      const msg = String(e || "Voice error");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       toast.error(msg);
     },
@@ -434,7 +434,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <button
             type="button"
-            onClick={isConnected ? stopVoice : startVoice}
+            onClick={() => {
+              if (isConnected) void stopVoice();
+              else void startVoice();
+            }}
             disabled={isStartingVoice}
             title={
               isStartingVoice
