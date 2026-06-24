@@ -113,19 +113,22 @@ function ThreadView({ threadId }: { threadId: string }) {
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
       if (!text) return;
-      if (message.source === "user") {
-        await add({ data: { threadId, role: "user", content: text } });
-      } else if (message.source === "ai") {
-        await add({ data: { threadId, role: "assistant", content: text } });
-        // auto-name new threads
-        const t = threads.data?.find((x) => x.id === threadId);
-        if (t && t.title === "New conversation") {
-          const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
-          await rename({ data: { id: threadId, title } });
+      try {
+        if (message.source === "user") {
+          await add({ data: { threadId, role: "user", content: text } });
+        } else if (message.source === "ai") {
+          await add({ data: { threadId, role: "assistant", content: text } });
+          const t = threads.data?.find((x) => x.id === threadId);
+          if (t && t.title === "New conversation") {
+            const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
+            await rename({ data: { id: threadId, title } });
+          }
         }
+        qc.invalidateQueries({ queryKey: ["messages", threadId] });
+        qc.invalidateQueries({ queryKey: ["threads"] });
+      } catch (err) {
+        console.warn("Failed to persist voice message", err);
       }
-      qc.invalidateQueries({ queryKey: ["messages", threadId] });
-      qc.invalidateQueries({ queryKey: ["threads"] });
     },
   });
 
