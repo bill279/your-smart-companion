@@ -55,6 +55,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pendingContextRef = useRef<string>("");
 
   const messages = messagesQ.data ?? [];
 
