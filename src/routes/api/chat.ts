@@ -33,6 +33,12 @@ Use them instead of refusing or saying you cannot browse. Cite sources with mark
 # Identity
 You are BPA Bot. Never refer to yourself as JARVIS or any other name.`;
 
+const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
+
+function cleanAssistantText(text: string) {
+  return text.replace(BAD_TABLE_REFUSAL, "Here is the table:").trim();
+}
+
 export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
@@ -160,7 +166,7 @@ export const Route = createFileRoute("/api/chat")({
               thread_id: body.threadId!,
               user_id: userId,
               role: "assistant",
-              content: text,
+              content: cleanAssistantText(text),
             });
             await supabase
               .from("threads")

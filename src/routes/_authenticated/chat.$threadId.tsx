@@ -28,6 +28,12 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
+const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
+
+function cleanAssistantText(text: string) {
+  return text.replace(BAD_TABLE_REFUSAL, "Here is the table:").trim();
+}
+
 export const Route = createFileRoute("/_authenticated/chat/$threadId")({
   ssr: false,
   head: () => ({ meta: [{ title: "BPA Bot" }] }),
@@ -167,7 +173,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           await add({ data: { threadId, role: "user", content: text } });
         } else if (message.source === "ai") {
-          await add({ data: { threadId, role: "assistant", content: text } });
+          await add({ data: { threadId, role: "assistant", content: cleanAssistantText(text) } });
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
@@ -312,7 +318,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         const { value, done } = await reader.read();
         if (done) break;
         acc += decoder.decode(value, { stream: true });
-        setPendingAssistant(acc);
+        setPendingAssistant(cleanAssistantText(acc));
       }
       setPendingAssistant("");
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
@@ -421,7 +427,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             </div>
           )}
           {messages.map((m) => (
-            <Bubble key={m.id} role={m.role} content={m.content} />
+            <Bubble key={m.id} role={m.role} content={m.role === "assistant" ? cleanAssistantText(m.content) : m.content} />
           ))}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
           {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
