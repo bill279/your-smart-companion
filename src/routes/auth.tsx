@@ -8,8 +8,8 @@ export const Route = createFileRoute("/auth")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Sign in — JARVIS" },
-      { name: "description", content: "Authenticate to access your JARVIS assistant." },
+      { title: "Sign in — BPA Bot" },
+      { name: "description", content: "Authenticate to access your BPA Bot assistant." },
     ],
   }),
   component: AuthPage,
@@ -69,7 +69,7 @@ function AuthPage() {
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="hud-panel hud-corner w-full max-w-md p-8 rounded-lg">
         <div className="text-center mb-8">
-          <div className="text-3xl font-bold tracking-[0.4em] text-primary hud-glow">JARVIS</div>
+          <div className="text-3xl font-bold text-primary font-bold">BPA Bot</div>
           <div className="text-xs text-muted-foreground mt-2 tracking-widest">
             JUST A RATHER VERY INTELLIGENT SYSTEM
           </div>

@@ -1,6 +1,7 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -63,26 +64,26 @@
 
 :root {
   --radius: 0.625rem;
-  /* Jarvis HUD theme — dark navy with cyan and gold */
-  --background: oklch(0.13 0.03 240);
-  --foreground: oklch(0.95 0.06 200);
-  --card: oklch(0.18 0.04 240 / 70%);
-  --card-foreground: oklch(0.95 0.06 200);
-  --popover: oklch(0.18 0.04 240);
-  --popover-foreground: oklch(0.95 0.06 200);
-  --primary: oklch(0.78 0.16 215);
-  --primary-foreground: oklch(0.1 0.02 240);
-  --secondary: oklch(0.25 0.05 240);
-  --secondary-foreground: oklch(0.95 0.06 200);
-  --muted: oklch(0.22 0.04 240);
-  --muted-foreground: oklch(0.7 0.07 210);
-  --accent: oklch(0.82 0.16 80);
-  --accent-foreground: oklch(0.1 0.02 240);
+  /* BP Automation brand — deep navy + signature green on clean off-white */
+  --background: oklch(0.985 0.003 240);
+  --foreground: oklch(0.18 0.05 255);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.05 255);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.05 255);
+  --primary: oklch(0.32 0.13 260);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.95 0.01 240);
+  --secondary-foreground: oklch(0.22 0.06 255);
+  --muted: oklch(0.96 0.005 240);
+  --muted-foreground: oklch(0.45 0.02 255);
+  --accent: oklch(0.58 0.16 145);
+  --accent-foreground: oklch(0.99 0 0);
   --destructive: oklch(0.65 0.22 25);
   --destructive-foreground: oklch(0.98 0.01 0);
-  --border: oklch(0.78 0.16 215 / 25%);
-  --input: oklch(0.25 0.05 240);
-  --ring: oklch(0.78 0.16 215);
+  --border: oklch(0.32 0.13 260 / 12%);
+  --input: oklch(0.32 0.13 260 / 18%);
+  --ring: oklch(0.32 0.13 260);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -141,27 +142,18 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    background-image:
-      radial-gradient(ellipse at top, oklch(0.78 0.16 215 / 0.08), transparent 60%),
-      radial-gradient(ellipse at bottom, oklch(0.82 0.16 80 / 0.04), transparent 60%),
-      linear-gradient(oklch(0.78 0.16 215 / 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, oklch(0.78 0.16 215 / 0.04) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 }
 
 @layer utilities {
   .hud-panel {
-    background: linear-gradient(180deg, oklch(0.18 0.04 240 / 0.85), oklch(0.13 0.03 240 / 0.6));
-    border: 1px solid oklch(0.78 0.16 215 / 0.35);
-    box-shadow:
-      0 0 0 1px oklch(0.78 0.16 215 / 0.08) inset,
-      0 0 30px oklch(0.78 0.16 215 / 0.1);
-    backdrop-filter: blur(8px);
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    box-shadow: 0 1px 2px oklch(0.2 0.05 255 / 0.04);
   }
   .hud-glow {
-    text-shadow: 0 0 12px oklch(0.78 0.16 215 / 0.7);
+    text-shadow: none;
   }
   .hud-corner {
     position: relative;
