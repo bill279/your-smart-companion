@@ -237,7 +237,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         overrides: {
           agent: {
             prompt: { prompt: VOICE_SESSION_PROMPT },
-            firstMessage: "",
+            firstMessage: "I'm listening.",
           },
         },
       });
