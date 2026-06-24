@@ -19,6 +19,32 @@ import {
 } from "@/lib/jarvis.functions";
 import { supabase } from "@/integrations/supabase/client";
 
+const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
+
+Format answers for this chat UI. If the user asks for a table, visual table, comparison, schedule, specs, rows/columns, or tabular data, output a GitHub-Flavored Markdown table using pipes, for example:
+| Item | Detail |
+| --- | --- |
+| Example | Value |
+
+Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
+
+const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
+
+function cleanAssistantText(text: string) {
+  return text
+    .replace(/^\s*\[[^\]]+\]\s*/g, "")
+    .replace(/^\s*Hello there!\s*I'm Alex[\s\S]*?today\??\s*/i, "")
+    .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
+    .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
+    .replace(BAD_TABLE_REFUSAL, "Here is the table:")
+    .trim();
+}
+
+function cleanThreadTitle(title: string) {
+  const cleaned = cleanAssistantText(title);
+  return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
+}
+
 export const Route = createFileRoute("/_authenticated/chat/$threadId")({
   ssr: false,
   head: () => ({ meta: [{ title: "BPA Bot" }] }),
@@ -54,9 +80,14 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  const [isStartingVoice, setIsStartingVoice] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
+  const voiceShouldStayOnRef = useRef(false);
+  const isStartingVoiceRef = useRef(false);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const seenVoiceEventsRef = useRef<Set<string>>(new Set());
 
   const messages = messagesQ.data ?? [];
 
@@ -72,11 +103,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       const msg = String((e.reason as { message?: string })?.message ?? e.reason ?? "");
       if (msg.includes("error_event") || msg.includes("error_type")) {
         e.preventDefault();
-        console.warn("Suppressed ElevenLabs malformed error event:", msg);
+        console.warn("Suppressed voice malformed error event:", msg);
       }
     };
     window.addEventListener("unhandledrejection", handler);
-    return () => window.removeEventListener("unhandledrejection", handler);
+    return () => {
+      window.removeEventListener("unhandledrejection", handler);
+      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+    };
   }, []);
 
   const conversation = useConversation({
@@ -113,6 +147,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onConnect: () => {
       toast.success("BPA Bot online");
+      reconnectAttemptsRef.current = 0;
       const ctx = pendingContextRef.current;
       if (ctx) {
         try {
@@ -123,16 +158,33 @@ function ThreadView({ threadId }: { threadId: string }) {
         pendingContextRef.current = "";
       }
     },
-    onDisconnect: () => toast("BPA Bot offline"),
-    onError: (e) => toast.error(typeof e === "string" ? e : "Voice error"),
+    onDisconnect: () => {
+      if (voiceShouldStayOnRef.current) {
+        scheduleVoiceReconnect();
+        return;
+      }
+      toast("BPA Bot offline");
+    },
+    onError: (e) => {
+      const msg = String(e || "Voice error");
+      if (msg.includes("error_event") || msg.includes("error_type")) return;
+      toast.error(msg);
+    },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
       if (!text) return;
+      const voiceMessage = message as { source?: string; message?: string; event_id?: number };
+      const eventKey = `${voiceMessage.source ?? "unknown"}:${voiceMessage.event_id ?? text}`;
+      if (seenVoiceEventsRef.current.has(eventKey)) return;
+      seenVoiceEventsRef.current.add(eventKey);
+      if (seenVoiceEventsRef.current.size > 250) {
+        seenVoiceEventsRef.current = new Set(Array.from(seenVoiceEventsRef.current).slice(-120));
+      }
       try {
         if (message.source === "user") {
           await add({ data: { threadId, role: "user", content: text } });
         } else if (message.source === "ai") {
-          await add({ data: { threadId, role: "assistant", content: text } });
+          await add({ data: { threadId, role: "assistant", content: cleanAssistantText(text) } });
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
@@ -150,36 +202,81 @@ function ThreadView({ threadId }: { threadId: string }) {
   const isConnected = conversation.status === "connected";
   conversationRef.current = conversation;
 
-  async function startVoice() {
+  const reconnectAttemptsRef = useRef(0);
+
+  function buildVoiceContext() {
+    const MAX_CHARS = 12000;
+    const recent = (messages ?? []).slice(-100).map(
+      (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
+    );
+    let total = 0;
+    const kept: string[] = [];
+    for (let i = recent.length - 1; i >= 0; i--) {
+      const line = recent[i];
+      if (total + line.length + 1 > MAX_CHARS) break;
+      kept.unshift(line);
+      total += line.length + 1;
+    }
+    const history = kept.join("\n");
+    return history
+      ? `Prior conversation in this thread (most recent last):\n${history}\n\nContinue naturally from here. Do not greet again. Do not introduce yourself. If asked for a table, output a Markdown table directly.`
+      : "Voice mode is open. Wait for the user's next message. Do not greet, introduce yourself, or start a new conversation. If asked for a table, output a Markdown table directly.";
+  }
+
+  function scheduleVoiceReconnect() {
+    if (reconnectTimerRef.current || isStartingVoiceRef.current) return;
+    if (reconnectAttemptsRef.current >= 5) {
+      voiceShouldStayOnRef.current = false;
+      toast.error("Voice disconnected. Tap the mic to reconnect.");
+      return;
+    }
+    reconnectAttemptsRef.current += 1;
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (voiceShouldStayOnRef.current && conversationRef.current?.status !== "connected") {
+        void startVoice({ reconnecting: true });
+      }
+    }, 900);
+  }
+
+  async function startVoice(options?: { reconnecting?: boolean }) {
+    if (isStartingVoiceRef.current || conversationRef.current?.status === "connected") return;
+    voiceShouldStayOnRef.current = true;
+    isStartingVoiceRef.current = true;
+    setIsStartingVoice(true);
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const { token } = await getToken({});
-      // Build conversational context to inject AFTER connect (no override needed).
-      const MAX_CHARS = 12000;
-      const recent = (messages ?? []).slice(-100).map(
-        (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.content}`,
-      );
-      let total = 0;
-      const kept: string[] = [];
-      for (let i = recent.length - 1; i >= 0; i--) {
-        const line = recent[i];
-        if (total + line.length + 1 > MAX_CHARS) break;
-        kept.unshift(line);
-        total += line.length + 1;
-      }
-      const history = kept.join("\n");
-      pendingContextRef.current = history
-        ? `Prior conversation in this thread (most recent last):\n${history}\n\nContinue naturally from here. Do not greet again.`
-        : "";
+      pendingContextRef.current = buildVoiceContext();
       await conversation.startSession({
         conversationToken: token,
         connectionType: "webrtc",
+        overrides: {
+          agent: {
+            prompt: { prompt: VOICE_SESSION_PROMPT },
+            firstMessage: "I'm listening.",
+          },
+        },
       });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not start voice");
+      if (voiceShouldStayOnRef.current && options?.reconnecting) {
+        scheduleVoiceReconnect();
+      } else {
+        voiceShouldStayOnRef.current = false;
+        toast.error(e instanceof Error ? e.message : "Could not start voice");
+      }
+    } finally {
+      isStartingVoiceRef.current = false;
+      setIsStartingVoice(false);
     }
   }
   async function stopVoice() {
+    voiceShouldStayOnRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     await conversation.endSession();
   }
 
@@ -232,7 +329,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         const { value, done } = await reader.read();
         if (done) break;
         acc += decoder.decode(value, { stream: true });
-        setPendingAssistant(acc);
+        setPendingAssistant(cleanAssistantText(acc));
       }
       setPendingAssistant("");
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
@@ -307,7 +404,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                   params={{ threadId: t.id }}
                   className="flex-1 truncate"
                 >
-                  {t.title}
+                  {cleanThreadTitle(t.title)}
                 </Link>
                 <button
                   onClick={(e) => {
@@ -354,9 +451,15 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <button
             type="button"
-            onClick={isConnected ? stopVoice : startVoice}
+            onClick={() => {
+              if (isConnected) void stopVoice();
+              else void startVoice();
+            }}
+            disabled={isStartingVoice}
             title={
-              isConnected
+              isStartingVoice
+                ? "Connecting…"
+                : isConnected
                 ? conversation.isSpeaking
                   ? "Speaking…"
                   : "Listening… tap to stop"
@@ -365,7 +468,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
               isConnected
                 ? "border-accent bg-accent/15 hud-pulse text-accent"
-                : "border-border bg-secondary hover:bg-secondary/80 text-primary"
+                : "border-border bg-secondary hover:bg-secondary/80 text-primary disabled:opacity-60"
             }`}
           >
             {isConnected ? <MicOff size={18} /> : <Mic size={18} />}
@@ -375,7 +478,9 @@ function ThreadView({ threadId }: { threadId: string }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              isConnected
+              isStartingVoice
+                ? "Connecting voice…"
+                : isConnected
                 ? conversation.isSpeaking
                   ? "BPA Bot is speaking…"
                   : "Listening… or type"
@@ -398,6 +503,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
 function Bubble({ role, content }: { role: string; content: string }) {
   const isUser = role === "user";
+  const displayContent = isUser ? content : cleanAssistantText(content);
   return (
     <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
@@ -415,9 +521,9 @@ function Bubble({ role, content }: { role: string; content: string }) {
         <div
           className={`prose prose-sm max-w-none ${
             isUser ? "prose-invert" : ""
-          } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
+          } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
         </div>
       </div>
     </div>

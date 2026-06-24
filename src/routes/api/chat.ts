@@ -12,11 +12,16 @@ Always respond in clean Markdown that renders beautifully:
 - Lead with a short direct answer (1–2 sentences).
 - Use **bold** for key terms and short bullet lists for steps, options, or comparisons.
 - Use ## headings only for longer multi-part answers; skip them for short replies.
-- Use GitHub-Flavored Markdown tables (| col | col |) whenever the user asks for a table, a comparison, a schedule, specs, or any tabular data. Tables render natively in this chat — never say you cannot display a table.
+- Use GitHub-Flavored Markdown tables (| col | col |) whenever the user asks for a table, a visual table, a comparison, a schedule, specs, rows/columns, or any tabular data. Tables render natively in this chat — never say you cannot display a table or a visual table directly.
 - Use fenced code blocks with a language tag for code.
 - Cite sources inline as [link text](https://...).
 - Never wrap the whole response in a code block. Never dump raw JSON unless explicitly asked.
 - Keep paragraphs short (2–4 lines).
+
+# Conversation behavior
+- Continue from the existing thread history. Do not introduce yourself or greet again after the first exchange.
+- If the user asks for a table, output the Markdown table immediately instead of explaining limitations.
+- Forbidden response: "I am unable to display a visual table directly in this chat interface." Do not say anything equivalent.
 
 # Live web access
 You have tools:
@@ -27,6 +32,18 @@ Use them instead of refusing or saying you cannot browse. Cite sources with mark
 
 # Identity
 You are BPA Bot. Never refer to yourself as JARVIS or any other name.`;
+
+const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
+
+function cleanAssistantText(text: string) {
+  return text
+    .replace(/^\s*\[[^\]]+\]\s*/g, "")
+    .replace(/^\s*Hello there!\s*I'm Alex[\s\S]*?today\??\s*/i, "")
+    .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
+    .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
+    .replace(BAD_TABLE_REFUSAL, "Here is the table:")
+    .trim();
+}
 
 export const Route = createFileRoute("/api/chat")({
   server: {
@@ -155,7 +172,7 @@ export const Route = createFileRoute("/api/chat")({
               thread_id: body.threadId!,
               user_id: userId,
               role: "assistant",
-              content: text,
+              content: cleanAssistantText(text),
             });
             await supabase
               .from("threads")
