@@ -12,7 +12,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentToken,
+  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -96,7 +96,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getToken = useServerFn(getElevenLabsAgentToken);
+  const getSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -199,7 +199,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceError(null);
       hasConnectedVoiceRef.current = true;
       disconnectRequestedRef.current = false;
-      voiceRetryCountRef.current = 0;
       const ctx = pendingContextRef.current;
       if (ctx) {
         try {
@@ -223,8 +222,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         return;
       }
       if (!disconnectRequestedRef.current && hasConnectedVoiceRef.current) {
-        // WebRTC dropped unexpectedly — reconnect ElevenLabs automatically
-        // (no browser fallback; that voice sounds bad).
         pendingContextRef.current = "";
         hasConnectedVoiceRef.current = false;
         isStartingVoiceRef.current = false;
@@ -232,14 +229,8 @@ function ThreadView({ threadId }: { threadId: string }) {
           window.clearTimeout(voiceConnectTimeoutRef.current);
           voiceConnectTimeoutRef.current = null;
         }
-        if (voiceRetryCountRef.current < 3) {
-          voiceRetryCountRef.current += 1;
-          setVoiceMode("connecting");
-          window.setTimeout(() => { void startVoice(); }, 1200);
-        } else {
-          setVoiceMode("error");
-          setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
-        }
+        setVoiceMode("error");
+        setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
         return;
       } else {
         setVoiceMode("off");
@@ -265,15 +256,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       isStartingVoiceRef.current = false;
       pendingContextRef.current = "";
       hasConnectedVoiceRef.current = false;
-      // Retry ElevenLabs (no browser fallback — that voice sounds bad).
-      if (voiceRetryCountRef.current < 3) {
-        voiceRetryCountRef.current += 1;
-        setVoiceMode("connecting");
-        window.setTimeout(() => { void startVoice(); }, 1500);
-      } else {
-        setVoiceMode("error");
-        setVoiceError("Voice had a problem. Tap the mic once to reconnect.");
-      }
+      disconnectRequestedRef.current = true;
+      setVoiceMode("error");
+      setVoiceError("Voice had a problem. Tap the mic once to reconnect.");
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -339,7 +324,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     try {
       const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       permissionStream.getTracks().forEach((track) => track.stop());
-      const { token } = await getToken({});
+      const { signedUrl } = await getSignedUrl({});
       pendingContextRef.current = buildVoiceContext();
       voiceConnectTimeoutRef.current = window.setTimeout(() => {
         if (conversationRef.current?.status !== "connected") {
@@ -355,9 +340,9 @@ function ThreadView({ threadId }: { threadId: string }) {
           }
         }
       }, 15000);
-      conversation.startSession({
-        conversationToken: token,
-        connectionType: "webrtc",
+      await conversation.startSession({
+        signedUrl,
+        connectionType: "websocket",
         overrides: {
           agent: {
             prompt: { prompt: VOICE_SESSION_PROMPT },
@@ -508,7 +493,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     disconnectRequestedRef.current = true;
     voiceCleanupReasonRef.current = "manual";
     hasConnectedVoiceRef.current = false;
-    voiceRetryCountRef.current = 0;
     stopBrowserVoice();
     pendingContextRef.current = "";
     if (voiceConnectTimeoutRef.current) {

@@ -112,3 +112,26 @@ export const getElevenLabsAgentToken = createServerFn({ method: "POST" })
     const json = (await res.json()) as { token: string };
     return { token: json.token, agentId };
   });
+
+export const getElevenLabsAgentSignedUrl = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const agentId = process.env.ELEVENLABS_AGENT_ID;
+    if (!apiKey) throw new Error("ElevenLabs is not connected");
+    if (!agentId) throw new Error("ELEVENLABS_AGENT_ID is not configured");
+
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`,
+      { headers: { "xi-api-key": apiKey } },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 429 && /concurrent|capacity|rate/i.test(text)) {
+        throw new Error("Voice is still closing another session. Wait a few seconds, then tap the mic once.");
+      }
+      throw new Error(`Voice connection failed (${res.status}). Please try again.`);
+    }
+    const json = (await res.json()) as { signed_url: string };
+    return { signedUrl: json.signed_url, agentId };
+  });
