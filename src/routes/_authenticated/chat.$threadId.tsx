@@ -287,6 +287,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingAssistant(cleaned);
           await add({ data: { threadId, role: "assistant", content: cleaned } });
           setPendingAssistant("");
+          liveAssistantRef.current = "";
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
