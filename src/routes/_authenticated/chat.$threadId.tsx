@@ -29,6 +29,9 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
+const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automation'?s assistant\.\s*How can I help\??\s*/i;
+const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
+const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
 type VoiceModeState = "off" | "connecting" | "on" | "closing" | "error";
 
@@ -57,7 +60,10 @@ function cleanAssistantText(text: string) {
     .replace(/^\s*Hello there!\s*I'm Alex[\s\S]*?today\??\s*/i, "")
     .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
+    .replace(BPA_INTRO, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
+    .replace(STRUCTURED_TABLE_REFUSAL, "")
+    .replace(TABLE_RETRY_PROMPT, "")
     .trim();
 }
 
