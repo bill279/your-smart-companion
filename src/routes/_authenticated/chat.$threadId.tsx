@@ -137,6 +137,12 @@ function ThreadView({ threadId }: { threadId: string }) {
   }, []);
 
   const conversation = useConversation({
+    overrides: {
+      agent: {
+        firstMessage: " ",
+        prompt: { prompt: VOICE_SESSION_PROMPT + "\n\nDo not speak or greet until the user speaks first. Wait silently." },
+      },
+    },
     clientTools: {
       web_search: async (params: { query?: string; limit?: number }) => {
         const query = params.query?.trim();
