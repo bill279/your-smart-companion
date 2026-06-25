@@ -566,7 +566,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             onClick={scrollToLatest}
             aria-label="Scroll to latest"
             title="Scroll to latest"
-            className={`absolute bottom-24 right-4 md:right-10 z-30 w-11 h-11 rounded-full border shadow-lg flex items-center justify-center transition ${
+            className={`fixed bottom-24 right-4 md:right-10 z-30 w-11 h-11 rounded-full border shadow-lg flex items-center justify-center transition ${
               showScrollDown
                 ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90"
                 : "bg-card text-muted-foreground border-border hover:bg-secondary hover:text-foreground"
