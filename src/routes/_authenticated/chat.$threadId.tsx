@@ -37,6 +37,13 @@ type VoiceModeState = "off" | "connecting" | "on" | "closing" | "error";
 
 let persistedVoiceRequested = false;
 
+function setPersistedVoiceRequested(value: boolean) {
+  persistedVoiceRequested = value;
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem("bpa-voice-requested", value ? "1" : "0");
+  }
+}
+
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
@@ -91,7 +98,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
   const [voiceMode, setVoiceMode] = useState<VoiceModeState>("off");
-  const [voiceRequested, setVoiceRequested] = useState(persistedVoiceRequested);
+  const [voiceRequested, setVoiceRequested] = useState(
+    () => persistedVoiceRequested || (typeof window !== "undefined" && window.sessionStorage.getItem("bpa-voice-requested") === "1"),
+  );
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
@@ -348,7 +357,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     lastVoiceStartAtRef.current = now;
     voiceDesiredRef.current = true;
-    persistedVoiceRequested = true;
+    setPersistedVoiceRequested(true);
     setVoiceRequested(true);
     clearVoiceReconnect();
     disconnectRequestedRef.current = false;
@@ -417,7 +426,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         scheduleVoiceReconnect();
       } else {
         if (/permission|notallowed/i.test(raw)) {
-          persistedVoiceRequested = false;
+          setPersistedVoiceRequested(false);
           setVoiceRequested(false);
         }
         setVoiceMode("error");
@@ -438,7 +447,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function stopVoice() {
     voiceDesiredRef.current = false;
-    persistedVoiceRequested = false;
+    setPersistedVoiceRequested(false);
     setVoiceRequested(false);
     clearVoiceReconnect();
     voiceReconnectCountRef.current = 0;
