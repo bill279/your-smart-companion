@@ -656,7 +656,7 @@ function Bubble({ role, content }: { role: string; content: string }) {
         </div>
       )}
       <div
-        className={`max-w-[78%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
+        className={`max-w-[78%] min-w-0 overflow-x-auto rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-card border border-border text-foreground"
