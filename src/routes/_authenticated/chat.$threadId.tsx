@@ -107,13 +107,14 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function scrollToLatest() {
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-      window.requestAnimationFrame(() => {
-        el.scrollTop = el.scrollHeight;
-        setShowScrollDown(false);
-      });
-    }
+    if (!el) return;
+    // Find the last actual message bubble inside the scroll container and
+    // bring it into view at the bottom edge of that container only.
+    const bubbles = el.querySelectorAll<HTMLElement>(":scope > div:not([aria-hidden])");
+    const last = bubbles[bubbles.length - 1];
+    const target = last ? last.offsetTop + last.offsetHeight - el.clientHeight + 16 : el.scrollHeight;
+    el.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+    setShowScrollDown(false);
   }
 
   useEffect(() => {
@@ -565,7 +566,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           ))}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
           {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
-          <div ref={latestMessageRef} aria-hidden="true" className="h-1" />
+          <div ref={latestMessageRef} aria-hidden="true" />
         </div>
 
         {/* Composer */}
