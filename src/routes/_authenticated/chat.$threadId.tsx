@@ -104,6 +104,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const connectTimeoutRef = useRef<number | null>(null);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
+  const liveAssistantRef = useRef<string>("");
 
   const messages = messagesQ.data ?? [];
 
@@ -197,6 +198,20 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
         return JSON.stringify(data);
       },
+    },
+    onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
+      // Stream agent text to the chat in real time as ElevenLabs generates it.
+      if (!voiceUserHasSpokenRef.current) return;
+      const kind = part?.type;
+      const chunk = part?.text ?? "";
+      if (kind === "start") {
+        liveAssistantRef.current = chunk;
+      } else if (kind === "delta") {
+        liveAssistantRef.current += chunk;
+      } else if (kind === "stop") {
+        if (chunk) liveAssistantRef.current += chunk;
+      }
+      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onConnect: () => {
       clearVoiceConnectTimeout();
