@@ -113,11 +113,18 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (!el) return;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowScrollDown(distance > 80);
+      setShowScrollDown(distance > 40);
     };
     onScroll();
+    const ro = new ResizeObserver(onScroll);
+    ro.observe(el);
+    const id = window.setInterval(onScroll, 500);
     el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+      window.clearInterval(id);
+    };
   }, [messages.length]);
 
   // Guard against an ElevenLabs SDK bug where malformed error events throw
