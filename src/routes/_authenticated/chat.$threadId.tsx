@@ -88,6 +88,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const isStartingVoiceRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
+  const disconnectRequestedRef = useRef(false);
 
   const messages = messagesQ.data ?? [];
 
@@ -148,6 +149,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     onConnect: () => {
       toast.success("BPA Bot online");
       reconnectAttemptsRef.current = 0;
+      disconnectRequestedRef.current = false;
       const ctx = pendingContextRef.current;
       if (ctx) {
         try {
@@ -159,7 +161,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: () => {
-      if (voiceShouldStayOnRef.current) {
+      if (voiceShouldStayOnRef.current && !disconnectRequestedRef.current) {
         scheduleVoiceReconnect();
         return;
       }
@@ -225,32 +227,34 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function scheduleVoiceReconnect() {
     if (reconnectTimerRef.current || isStartingVoiceRef.current) return;
-    if (reconnectAttemptsRef.current >= 5) {
+    if (reconnectAttemptsRef.current >= 3) {
       voiceShouldStayOnRef.current = false;
       toast.error("Voice disconnected. Tap the mic to reconnect.");
       return;
     }
     reconnectAttemptsRef.current += 1;
+    const delay = reconnectAttemptsRef.current * 1800;
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       if (voiceShouldStayOnRef.current && conversationRef.current?.status !== "connected") {
         void startVoice({ reconnecting: true });
       }
-    }, 900);
+    }, delay);
   }
 
   async function startVoice(options?: { reconnecting?: boolean }) {
     if (isStartingVoiceRef.current || conversationRef.current?.status === "connected") return;
     voiceShouldStayOnRef.current = true;
+    disconnectRequestedRef.current = false;
     isStartingVoiceRef.current = true;
     setIsStartingVoice(true);
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
-      const { token } = await getToken({});
+      const { signedUrl } = await getToken({});
       pendingContextRef.current = buildVoiceContext();
       await conversation.startSession({
-        conversationToken: token,
-        connectionType: "webrtc",
+        signedUrl,
+        connectionType: "websocket",
         overrides: {
           agent: {
             prompt: { prompt: VOICE_SESSION_PROMPT },
@@ -272,6 +276,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
   async function stopVoice() {
     voiceShouldStayOnRef.current = false;
+    disconnectRequestedRef.current = true;
     reconnectAttemptsRef.current = 0;
     if (reconnectTimerRef.current) {
       window.clearTimeout(reconnectTimerRef.current);
