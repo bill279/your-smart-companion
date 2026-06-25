@@ -299,9 +299,18 @@ function ThreadView({ threadId }: { threadId: string }) {
       total += line.length + 1;
     }
     const history = kept.join("\n");
+    const rules = [
+      "Behavioral rules for this session:",
+      "- Do not greet or introduce yourself again.",
+      "- If asked for a table, output a GitHub-Flavored Markdown table directly.",
+      "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
+      "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
+      "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
+      "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
+    ].join("\n");
     return history
-      ? `Prior conversation in this thread (most recent last):\n${history}\n\nContinue naturally from here. Do not greet again. Do not introduce yourself. If asked for a table, output a Markdown table directly.`
-      : "Voice mode is open. Wait for the user's next message. Do not greet, introduce yourself, or start a new conversation. If asked for a table, output a Markdown table directly.";
+      ? `Prior conversation in this thread (most recent last):\n${history}\n\n${rules}\n\nContinue naturally from here.`
+      : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
   async function startVoice() {
