@@ -252,10 +252,17 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+          // Live update: show the user's spoken turn immediately.
+          setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
+          setPendingUser(null);
         } else if (message.source === "ai") {
           if (!voiceUserHasSpokenRef.current) return;
-          await add({ data: { threadId, role: "assistant", content: cleanAssistantText(text) } });
+          const cleaned = cleanAssistantText(text);
+          // Live update: show assistant turn the moment the transcript arrives.
+          setPendingAssistant(cleaned);
+          await add({ data: { threadId, role: "assistant", content: cleaned } });
+          setPendingAssistant("");
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
