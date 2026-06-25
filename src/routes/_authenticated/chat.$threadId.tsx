@@ -12,7 +12,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentToken,
+  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -33,14 +33,7 @@ const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automatio
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
-let persistedVoiceRequested = false;
-
-function setPersistedVoiceRequested(value: boolean) {
-  persistedVoiceRequested = value;
-  if (typeof window !== "undefined") {
-    window.sessionStorage.setItem("bpa-voice-requested", value ? "1" : "0");
-  }
-}
+type VoiceUiState = "idle" | "starting" | "connected" | "stopping";
 
 function cleanAssistantText(text: string) {
   return text
@@ -84,7 +77,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentToken = useServerFn(getElevenLabsAgentToken);
+  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -95,17 +88,17 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
-  const [voiceStarting, setVoiceStarting] = useState(false);
-  const [voiceRequested, setVoiceRequested] = useState(
-    () => persistedVoiceRequested || (typeof window !== "undefined" && window.sessionStorage.getItem("bpa-voice-requested") === "1"),
-  );
+  const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
-  const voiceDesiredRef = useRef(false);
-  const isStartingRef = useRef(false);
+  const voiceStateRef = useRef<VoiceUiState>("idle");
+  const startAttemptRef = useRef(0);
+  const connectTimeoutRef = useRef<number | null>(null);
+  const hasConnectedVoiceRef = useRef(false);
+  const voiceUserHasSpokenRef = useRef(false);
 
   const messages = messagesQ.data ?? [];
 
@@ -127,7 +120,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.addEventListener("unhandledrejection", handler);
     return () => {
       window.removeEventListener("unhandledrejection", handler);
-      voiceDesiredRef.current = false;
+      voiceStateRef.current = "idle";
+      clearVoiceConnectTimeout();
       try {
         conversationRef.current?.endSession();
       } catch (err) {
@@ -137,12 +131,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   }, []);
 
   const conversation = useConversation({
-    overrides: {
-      agent: {
-        firstMessage: " ",
-        prompt: { prompt: VOICE_SESSION_PROMPT + "\n\nDo not speak or greet until the user speaks first. Wait silently." },
-      },
-    },
     clientTools: {
       web_search: async (params: { query?: string; limit?: number }) => {
         const query = params.query?.trim();
@@ -175,32 +163,39 @@ function ThreadView({ threadId }: { threadId: string }) {
       },
     },
     onConnect: () => {
+      clearVoiceConnectTimeout();
+      hasConnectedVoiceRef.current = true;
+      voiceStateRef.current = "connected";
+      setVoiceUiState("connected");
       setVoiceError(null);
-      if (!voiceDesiredRef.current) {
-        try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
-        return;
-      }
+      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
       if (ctx) {
         try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
       }
     },
-    onDisconnect: () => {
-      if (!voiceDesiredRef.current) return;
-      voiceDesiredRef.current = false;
-      setPersistedVoiceRequested(false);
-      setVoiceRequested(false);
-      setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
+    onDisconnect: (details?: { reason?: string; message?: string }) => {
+      clearVoiceConnectTimeout();
+      const wasStopping = voiceStateRef.current === "stopping";
+      voiceStateRef.current = "idle";
+      setVoiceUiState("idle");
+      pendingContextRef.current = "";
+      voiceUserHasSpokenRef.current = false;
+      if (wasStopping) return;
+      if (hasConnectedVoiceRef.current || details?.reason === "error") {
+        setVoiceError(details?.message || "Voice disconnected. Tap the mic once to reconnect.");
+      }
     },
     onError: (e) => {
       const msg = String(e || "");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
-      voiceDesiredRef.current = false;
-      setPersistedVoiceRequested(false);
-      setVoiceRequested(false);
-      setVoiceError("Voice failed to connect. Tap the mic once to try again.");
+      clearVoiceConnectTimeout();
+      voiceStateRef.current = "idle";
+      setVoiceUiState("idle");
+      voiceUserHasSpokenRef.current = false;
+      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -214,8 +209,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
       try {
         if (message.source === "user") {
+          voiceUserHasSpokenRef.current = true;
+          try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           await add({ data: { threadId, role: "user", content: text } });
         } else if (message.source === "ai") {
+          if (!voiceUserHasSpokenRef.current) return;
           await add({ data: { threadId, role: "assistant", content: cleanAssistantText(text) } });
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
@@ -232,8 +230,19 @@ function ThreadView({ threadId }: { threadId: string }) {
   });
 
   const isConnected = conversation.status === "connected";
-  const isConnecting = conversation.status === "connecting";
   conversationRef.current = conversation;
+
+  function setVoiceState(next: VoiceUiState) {
+    voiceStateRef.current = next;
+    setVoiceUiState(next);
+  }
+
+  function clearVoiceConnectTimeout() {
+    if (connectTimeoutRef.current !== null) {
+      window.clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+  }
 
   function buildVoiceContext() {
     const MAX_CHARS = 12000;
@@ -255,28 +264,36 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   async function startVoice() {
-    if (isStartingRef.current) return;
-    if (conversationRef.current?.status === "connected" || conversationRef.current?.status === "connecting") return;
-    isStartingRef.current = true;
-    setVoiceStarting(true);
-    voiceDesiredRef.current = true;
-    setPersistedVoiceRequested(true);
-    setVoiceRequested(true);
+    if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    const attemptId = startAttemptRef.current + 1;
+    startAttemptRef.current = attemptId;
+    hasConnectedVoiceRef.current = false;
+    voiceUserHasSpokenRef.current = false;
+    setVoiceState("starting");
     setVoiceError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
-      const { token } = await getAgentToken({});
+      const { signedUrl } = await getAgentSignedUrl({});
+      if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
-      await conversation.startSession({
-        conversationToken: token,
-        connectionType: "webrtc",
+      clearVoiceConnectTimeout();
+      connectTimeoutRef.current = window.setTimeout(() => {
+        if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
+        setVoiceState("idle");
+        pendingContextRef.current = "";
+        setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
+        try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
+      }, 20000);
+      conversation.startSession({
+        signedUrl,
+        connectionType: "websocket",
       });
     } catch (e) {
+      clearVoiceConnectTimeout();
       const raw = e instanceof Error ? e.message : "Could not start voice";
-      voiceDesiredRef.current = false;
-      setPersistedVoiceRequested(false);
-      setVoiceRequested(false);
+      setVoiceState("idle");
+      pendingContextRef.current = "";
       if (/permission|notallowed/i.test(raw)) {
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
         toast.error("Microphone blocked");
@@ -284,33 +301,25 @@ function ThreadView({ threadId }: { threadId: string }) {
         console.warn("startVoice failed", raw);
         setVoiceError("Voice failed to connect. Tap the mic once to try again.");
       }
-    } finally {
-      isStartingRef.current = false;
-      setVoiceStarting(false);
     }
   }
 
   async function stopVoice() {
-    voiceDesiredRef.current = false;
-    setPersistedVoiceRequested(false);
-    setVoiceRequested(false);
-    setVoiceStarting(false);
+    startAttemptRef.current += 1;
+    clearVoiceConnectTimeout();
+    setVoiceState("stopping");
     pendingContextRef.current = "";
     setVoiceError(null);
     try {
       await conversation.endSession();
     } catch (err) {
       console.warn("endSession failed", err);
+    } finally {
+      hasConnectedVoiceRef.current = false;
+      voiceUserHasSpokenRef.current = false;
+      setVoiceState("idle");
     }
   }
-
-  // Auto-start if user previously requested voice on this thread/session.
-  useEffect(() => {
-    if (voiceRequested && !isConnected && !isConnecting && !isStartingRef.current) {
-      void startVoice();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const addMut = useMutation({
     mutationFn: async (content: string) => {
@@ -319,6 +328,8 @@ function ThreadView({ threadId }: { threadId: string }) {
 
       // If voice is connected, route through ElevenLabs instead.
       if (isConnected) {
+        voiceUserHasSpokenRef.current = true;
+        try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
         conversation.sendUserMessage(content);
         setPendingUser(null);
@@ -402,8 +413,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceActive = voiceRequested;
-  const voiceConnecting = voiceStarting || (voiceActive && !isConnected && isConnecting);
+  const voiceActive = voiceUiState === "connected" || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceConnecting = voiceUiState === "starting";
 
   return (
     <div className="min-h-screen flex">
