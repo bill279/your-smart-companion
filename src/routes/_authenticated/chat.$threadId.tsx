@@ -104,8 +104,12 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const messages = messagesQ.data ?? [];
 
-  useEffect(() => {
+  function scrollToLatest() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }
+
+  useEffect(() => {
+    scrollToLatest();
   }, [messages.length, pendingAssistant, pendingUser]);
 
   useEffect(() => {
@@ -556,17 +560,17 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         {/* Composer */}
-        {showScrollDown && (
+        {(messages.length > 0 || pendingUser || pendingAssistant) && (
           <button
             type="button"
-            onClick={() =>
-              scrollRef.current?.scrollTo({
-                top: scrollRef.current.scrollHeight,
-                behavior: "smooth",
-              })
-            }
+            onClick={scrollToLatest}
             aria-label="Scroll to latest"
-            className="absolute bottom-24 right-4 md:right-10 z-30 w-11 h-11 rounded-full bg-primary text-primary-foreground border border-primary shadow-lg flex items-center justify-center hover:bg-primary/90"
+            title="Scroll to latest"
+            className={`absolute bottom-24 right-4 md:right-10 z-30 w-11 h-11 rounded-full border shadow-lg flex items-center justify-center transition ${
+              showScrollDown
+                ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90"
+                : "bg-card text-muted-foreground border-border hover:bg-secondary hover:text-foreground"
+            }`}
           >
             <ArrowDown size={18} />
           </button>
