@@ -288,7 +288,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     try {
       const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       permissionStream.getTracks().forEach((track) => track.stop());
-      const { signedUrl } = await getToken({});
+      const { token } = await getToken({});
       pendingContextRef.current = buildVoiceContext();
       voiceConnectTimeoutRef.current = window.setTimeout(() => {
         if (conversationRef.current?.status !== "connected") {
@@ -305,7 +305,8 @@ function ThreadView({ threadId }: { threadId: string }) {
         }
       }, 15000);
       conversation.startSession({
-        signedUrl,
+        conversationToken: token,
+        connectionType: "webrtc",
         overrides: {
           agent: {
             prompt: { prompt: VOICE_SESSION_PROMPT },
