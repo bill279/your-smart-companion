@@ -107,5 +107,15 @@ export const getElevenLabsAgentToken = createServerFn({ method: "POST" })
       throw new Error(`ElevenLabs token request failed (${res.status}): ${text}`);
     }
     const json = (await res.json()) as { token: string };
-    return { token: json.token, agentId };
+
+    const signedUrlRes = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`,
+      { headers: { "xi-api-key": apiKey } },
+    );
+    if (!signedUrlRes.ok) {
+      const text = await signedUrlRes.text();
+      throw new Error(`ElevenLabs signed URL request failed (${signedUrlRes.status}): ${text}`);
+    }
+    const signedUrlJson = (await signedUrlRes.json()) as { signed_url: string };
+    return { token: json.token, signedUrl: signedUrlJson.signed_url, agentId };
   });
