@@ -12,7 +12,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentSignedUrl,
+  getElevenLabsAgentToken,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -84,7 +84,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const getAgentToken = useServerFn(getElevenLabsAgentToken);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -95,6 +95,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  const [voiceStarting, setVoiceStarting] = useState(false);
   const [voiceRequested, setVoiceRequested] = useState(
     () => persistedVoiceRequested || (typeof window !== "undefined" && window.sessionStorage.getItem("bpa-voice-requested") === "1"),
   );
@@ -105,8 +106,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
   const voiceDesiredRef = useRef(false);
   const isStartingRef = useRef(false);
-  const reconnectTimerRef = useRef<number | null>(null);
-  const reconnectAttemptsRef = useRef(0);
 
   const messages = messagesQ.data ?? [];
 
@@ -128,7 +127,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.addEventListener("unhandledrejection", handler);
     return () => {
       window.removeEventListener("unhandledrejection", handler);
-      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
       voiceDesiredRef.current = false;
       try {
         conversationRef.current?.endSession();
@@ -171,7 +169,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       },
     },
     onConnect: () => {
-      reconnectAttemptsRef.current = 0;
       setVoiceError(null);
       if (!voiceDesiredRef.current) {
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
@@ -184,13 +181,20 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: () => {
-      if (voiceDesiredRef.current) scheduleReconnect();
+      if (!voiceDesiredRef.current) return;
+      voiceDesiredRef.current = false;
+      setPersistedVoiceRequested(false);
+      setVoiceRequested(false);
+      setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
     },
     onError: (e) => {
       const msg = String(e || "");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
-      if (voiceDesiredRef.current) scheduleReconnect();
+      voiceDesiredRef.current = false;
+      setPersistedVoiceRequested(false);
+      setVoiceRequested(false);
+      setVoiceError("Voice failed to connect. Tap the mic once to try again.");
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -244,27 +248,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       : "Voice mode is open. Wait for the user's next message. Do not greet, introduce yourself, or start a new conversation. If asked for a table, output a Markdown table directly.";
   }
 
-  function scheduleReconnect() {
-    if (!voiceDesiredRef.current || reconnectTimerRef.current) return;
-    if (reconnectAttemptsRef.current >= 5) {
-      voiceDesiredRef.current = false;
-      setPersistedVoiceRequested(false);
-      setVoiceRequested(false);
-      setVoiceError("Voice keeps dropping. Tap the mic to try again.");
-      return;
-    }
-    const wait = Math.min(1500 * Math.pow(1.6, reconnectAttemptsRef.current), 8000);
-    reconnectAttemptsRef.current += 1;
-    reconnectTimerRef.current = window.setTimeout(() => {
-      reconnectTimerRef.current = null;
-      if (voiceDesiredRef.current) void startVoice();
-    }, wait);
-  }
-
   async function startVoice() {
     if (isStartingRef.current) return;
     if (conversationRef.current?.status === "connected" || conversationRef.current?.status === "connecting") return;
     isStartingRef.current = true;
+    setVoiceStarting(true);
     voiceDesiredRef.current = true;
     setPersistedVoiceRequested(true);
     setVoiceRequested(true);
@@ -272,32 +260,27 @@ function ThreadView({ threadId }: { threadId: string }) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
-      const { signedUrl } = await getSignedUrl({});
+      const { token } = await getAgentToken({});
       pendingContextRef.current = buildVoiceContext();
       await conversation.startSession({
-        signedUrl,
-        connectionType: "websocket",
-        overrides: {
-          agent: {
-            prompt: { prompt: VOICE_SESSION_PROMPT },
-            firstMessage: "",
-          },
-        },
+        conversationToken: token,
+        connectionType: "webrtc",
       });
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Could not start voice";
+      voiceDesiredRef.current = false;
+      setPersistedVoiceRequested(false);
+      setVoiceRequested(false);
       if (/permission|notallowed/i.test(raw)) {
-        voiceDesiredRef.current = false;
-        setPersistedVoiceRequested(false);
-        setVoiceRequested(false);
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
         toast.error("Microphone blocked");
       } else {
         console.warn("startVoice failed", raw);
-        scheduleReconnect();
+        setVoiceError("Voice failed to connect. Tap the mic once to try again.");
       }
     } finally {
       isStartingRef.current = false;
+      setVoiceStarting(false);
     }
   }
 
@@ -305,11 +288,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     voiceDesiredRef.current = false;
     setPersistedVoiceRequested(false);
     setVoiceRequested(false);
-    reconnectAttemptsRef.current = 0;
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
+    setVoiceStarting(false);
     pendingContextRef.current = "";
     setVoiceError(null);
     try {
@@ -418,7 +397,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const voiceActive = voiceRequested;
-  const voiceConnecting = voiceActive && !isConnected;
+  const voiceConnecting = voiceStarting || (voiceActive && !isConnected && isConnecting);
 
   return (
     <div className="min-h-screen flex">
