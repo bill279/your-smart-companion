@@ -210,6 +210,13 @@ function ThreadView({ threadId }: { threadId: string }) {
     onError: (e) => {
       const msg = String(e || "Voice error");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
+      if (voiceConnectTimeoutRef.current) {
+        window.clearTimeout(voiceConnectTimeoutRef.current);
+        voiceConnectTimeoutRef.current = null;
+      }
+      isStartingVoiceRef.current = false;
+      pendingContextRef.current = "";
+      hasConnectedVoiceRef.current = false;
       const friendly = /concurrent|capacity|rate/i.test(msg)
         ? "Voice is still closing another session. Wait a few seconds, then tap the mic once."
         : msg;
@@ -279,7 +286,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceMode("connecting");
     setVoiceError(null);
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permissionStream.getTracks().forEach((track) => track.stop());
       const { signedUrl } = await getToken({});
       pendingContextRef.current = buildVoiceContext();
       voiceConnectTimeoutRef.current = window.setTimeout(() => {
