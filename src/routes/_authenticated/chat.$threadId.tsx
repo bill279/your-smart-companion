@@ -32,6 +32,25 @@ const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table d
 
 type VoiceModeState = "off" | "connecting" | "on" | "closing" | "error";
 
+type BrowserSpeechRecognition = EventTarget & {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => BrowserSpeechRecognition;
+    webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+  }
+}
+
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
@@ -94,6 +113,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastVoiceStartAtRef = useRef(0);
   const voiceConnectTimeoutRef = useRef<number | null>(null);
   const voiceCleanupReasonRef = useRef<"manual" | "timeout" | null>(null);
+  const browserRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const browserVoiceActiveRef = useRef(false);
+  const browserVoiceRestartTimerRef = useRef<number | null>(null);
+  const browserVoiceTranscriptRef = useRef("");
 
   const messages = messagesQ.data ?? [];
 
@@ -116,6 +139,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     return () => {
       window.removeEventListener("unhandledrejection", handler);
       if (voiceConnectTimeoutRef.current) window.clearTimeout(voiceConnectTimeoutRef.current);
+      stopBrowserVoice();
       disconnectRequestedRef.current = true;
       try {
         conversationRef.current?.endSession();
@@ -319,6 +343,10 @@ function ThreadView({ threadId }: { threadId: string }) {
       const friendly = /permission|notallowed/i.test(raw)
         ? "Microphone access is blocked. Allow microphone access, then tap the mic once."
         : raw;
+      if (/concurrent|capacity|rate|closing another session/i.test(raw)) {
+        startBrowserVoice();
+        return;
+      }
       voiceCleanupReasonRef.current = "timeout";
       setVoiceMode("error");
       setVoiceError(friendly);
@@ -334,10 +362,116 @@ function ThreadView({ threadId }: { threadId: string }) {
       isStartingVoiceRef.current = false;
     }
   }
+
+  function startBrowserVoice() {
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setVoiceMode("error");
+      setVoiceError("Voice is unavailable in this browser. Type your message instead.");
+      toast.error("Voice is unavailable in this browser.");
+      return;
+    }
+
+    browserVoiceActiveRef.current = true;
+    browserVoiceTranscriptRef.current = "";
+    disconnectRequestedRef.current = false;
+    hasConnectedVoiceRef.current = true;
+    setVoiceMode("on");
+    setVoiceError(null);
+    toast.success("Voice mode on");
+
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      let finalText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) finalText += result[0].transcript;
+      }
+      const text = finalText.trim();
+      if (!text || text === browserVoiceTranscriptRef.current) return;
+      browserVoiceTranscriptRef.current = text;
+      addMut.mutate(text);
+    };
+    recognition.onerror = (event) => {
+      if (!browserVoiceActiveRef.current) return;
+      if (event.error === "no-speech" || event.error === "aborted") return;
+      const msg = event.error === "not-allowed"
+        ? "Microphone access is blocked. Allow microphone access, then tap the mic once."
+        : "Voice listening had a problem. Tap the mic once to restart.";
+      setVoiceMode("error");
+      setVoiceError(msg);
+      toast.error(msg);
+    };
+    recognition.onend = () => {
+      if (!browserVoiceActiveRef.current) return;
+      if (browserVoiceRestartTimerRef.current) window.clearTimeout(browserVoiceRestartTimerRef.current);
+      browserVoiceRestartTimerRef.current = window.setTimeout(() => {
+        try {
+          recognition.start();
+        } catch {
+          // Already listening or browser rejected an immediate restart.
+        }
+      }, 350);
+    };
+    browserRecognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch (err) {
+      console.warn("browser voice start failed", err);
+    }
+  }
+
+  function stopBrowserVoice() {
+    browserVoiceActiveRef.current = false;
+    if (browserVoiceRestartTimerRef.current) {
+      window.clearTimeout(browserVoiceRestartTimerRef.current);
+      browserVoiceRestartTimerRef.current = null;
+    }
+    window.speechSynthesis?.cancel();
+    const recognition = browserRecognitionRef.current;
+    browserRecognitionRef.current = null;
+    if (recognition) {
+      recognition.onend = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      try {
+        recognition.abort();
+      } catch (err) {
+        console.warn("browser voice stop failed", err);
+      }
+    }
+  }
+
+  function speakBrowserVoice(text: string) {
+    if (!browserVoiceActiveRef.current || !text.trim() || !window.speechSynthesis) return;
+    const recognition = browserRecognitionRef.current;
+    try {
+      recognition?.stop();
+    } catch {
+      // Ignore if already stopped.
+    }
+    const utterance = new SpeechSynthesisUtterance(text.replace(/\|/g, " ").slice(0, 1200));
+    utterance.rate = 1;
+    utterance.onend = () => {
+      if (!browserVoiceActiveRef.current || !recognition) return;
+      try {
+        recognition.start();
+      } catch {
+        // The normal onend restart loop will retry if needed.
+      }
+    };
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  }
+
   async function stopVoice() {
     disconnectRequestedRef.current = true;
     voiceCleanupReasonRef.current = "manual";
     hasConnectedVoiceRef.current = false;
+    stopBrowserVoice();
     pendingContextRef.current = "";
     if (voiceConnectTimeoutRef.current) {
       window.clearTimeout(voiceConnectTimeoutRef.current);
@@ -403,6 +537,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         acc += decoder.decode(value, { stream: true });
         setPendingAssistant(cleanAssistantText(acc));
       }
+      speakBrowserVoice(cleanAssistantText(acc));
       setPendingAssistant("");
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
@@ -530,6 +665,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             type="button"
             onClick={() => {
               if (isConnected) void stopVoice();
+              else if (voiceMode === "on") void stopVoice();
               else void startVoice();
             }}
             disabled={voiceMode === "connecting" || voiceMode === "closing"}
@@ -538,19 +674,19 @@ function ThreadView({ threadId }: { threadId: string }) {
                 ? "Connecting…"
                 : voiceMode === "closing"
                 ? "Closing…"
-                : isConnected
+                : isConnected || voiceMode === "on"
                 ? conversation.isSpeaking
                   ? "Speaking…"
                   : "Listening… tap to stop"
                 : "Tap to talk"
             }
             className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
-              isConnected
+              isConnected || voiceMode === "on"
                 ? "border-accent bg-accent/15 hud-pulse text-accent"
                 : "border-border bg-secondary hover:bg-secondary/80 text-primary disabled:opacity-60"
             }`}
           >
-            {isConnected ? <MicOff size={18} /> : <Mic size={18} />}
+            {isConnected || voiceMode === "on" ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
           <input
             autoFocus
@@ -561,7 +697,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                 ? "Connecting voice…"
                 : voiceMode === "closing"
                 ? "Closing voice…"
-                : isConnected
+                : isConnected || voiceMode === "on"
                 ? conversation.isSpeaking
                   ? "BPA Bot is speaking…"
                   : "Listening… or type"
