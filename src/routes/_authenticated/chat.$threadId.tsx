@@ -104,6 +104,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const connectTimeoutRef = useRef<number | null>(null);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
+  const liveAssistantRef = useRef<string>("");
 
   const messages = messagesQ.data ?? [];
 
@@ -198,6 +199,20 @@ function ThreadView({ threadId }: { threadId: string }) {
         return JSON.stringify(data);
       },
     },
+    onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
+      // Stream agent text to the chat in real time as ElevenLabs generates it.
+      if (!voiceUserHasSpokenRef.current) return;
+      const kind = part?.type;
+      const chunk = part?.text ?? "";
+      if (kind === "start") {
+        liveAssistantRef.current = chunk;
+      } else if (kind === "delta") {
+        liveAssistantRef.current += chunk;
+      } else if (kind === "stop") {
+        if (chunk) liveAssistantRef.current += chunk;
+      }
+      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
+    },
     onConnect: () => {
       clearVoiceConnectTimeout();
       hasConnectedVoiceRef.current = true;
@@ -272,6 +287,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingAssistant(cleaned);
           await add({ data: { threadId, role: "assistant", content: cleaned } });
           setPendingAssistant("");
+          liveAssistantRef.current = "";
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
