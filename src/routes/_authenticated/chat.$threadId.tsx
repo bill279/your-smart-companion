@@ -107,17 +107,12 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function scrollToLatest() {
     const el = scrollRef.current;
-    latestMessageRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     if (el) {
-      el.scrollTo({ top: el.scrollHeight + el.clientHeight, behavior: "smooth" });
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       window.requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight;
         setShowScrollDown(false);
       });
-    }
-    // Fallback: also scroll the window in case the page itself is scrolling
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
     }
   }
 
