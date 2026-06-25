@@ -124,6 +124,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const browserVoiceRestartTimerRef = useRef<number | null>(null);
   const browserVoiceTranscriptRef = useRef("");
   const browserVoiceSpeakingRef = useRef(false);
+  const voiceRetryCountRef = useRef(0);
 
   const messages = messagesQ.data ?? [];
 
@@ -221,8 +222,8 @@ function ThreadView({ threadId }: { threadId: string }) {
         return;
       }
       if (!disconnectRequestedRef.current && hasConnectedVoiceRef.current) {
-        // WebRTC dropped unexpectedly — keep voice mode alive with the
-        // browser-native fallback so the user doesn't have to tap the mic.
+        // WebRTC dropped unexpectedly — reconnect ElevenLabs automatically
+        // (no browser fallback; that voice sounds bad).
         pendingContextRef.current = "";
         hasConnectedVoiceRef.current = false;
         isStartingVoiceRef.current = false;
@@ -230,7 +231,14 @@ function ThreadView({ threadId }: { threadId: string }) {
           window.clearTimeout(voiceConnectTimeoutRef.current);
           voiceConnectTimeoutRef.current = null;
         }
-        startBrowserVoice();
+        if (voiceRetryCountRef.current < 3) {
+          voiceRetryCountRef.current += 1;
+          setVoiceMode("connecting");
+          window.setTimeout(() => { void startVoice(); }, 1200);
+        } else {
+          setVoiceMode("error");
+          setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
+        }
         return;
       } else {
         setVoiceMode("off");
@@ -256,9 +264,15 @@ function ThreadView({ threadId }: { threadId: string }) {
       isStartingVoiceRef.current = false;
       pendingContextRef.current = "";
       hasConnectedVoiceRef.current = false;
-      // Any provider error → silently fall back to the browser voice loop
-      // so the user stays in voice mode without manual recovery.
-      startBrowserVoice();
+      // Retry ElevenLabs (no browser fallback — that voice sounds bad).
+      if (voiceRetryCountRef.current < 3) {
+        voiceRetryCountRef.current += 1;
+        setVoiceMode("connecting");
+        window.setTimeout(() => { void startVoice(); }, 1500);
+      } else {
+        setVoiceMode("error");
+        setVoiceError("Voice had a problem. Tap the mic once to reconnect.");
+      }
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -356,7 +370,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         ? "Microphone access is blocked. Allow microphone access, then tap the mic once."
         : raw;
       if (/concurrent|capacity|rate|closing another session/i.test(raw)) {
-        startBrowserVoice();
+        voiceCleanupReasonRef.current = "timeout";
+        setVoiceMode("error");
+        setVoiceError("Voice is busy closing the previous session. Wait a few seconds and tap the mic.");
+        disconnectRequestedRef.current = true;
         return;
       }
       voiceCleanupReasonRef.current = "timeout";
@@ -490,6 +507,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     disconnectRequestedRef.current = true;
     voiceCleanupReasonRef.current = "manual";
     hasConnectedVoiceRef.current = false;
+    voiceRetryCountRef.current = 0;
     stopBrowserVoice();
     pendingContextRef.current = "";
     if (voiceConnectTimeoutRef.current) {
@@ -556,7 +574,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         acc += decoder.decode(value, { stream: true });
         setPendingAssistant(cleanAssistantText(acc));
       }
-      speakBrowserVoice(cleanAssistantText(acc));
       setPendingAssistant("");
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
