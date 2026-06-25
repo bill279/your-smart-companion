@@ -89,6 +89,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
   const [voiceMode, setVoiceMode] = useState<VoiceModeState>("off");
+  const [voiceRequested, setVoiceRequested] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
@@ -336,6 +337,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     lastVoiceStartAtRef.current = now;
     voiceDesiredRef.current = true;
+    setVoiceRequested(true);
     clearVoiceReconnect();
     disconnectRequestedRef.current = false;
     hasConnectedVoiceRef.current = false;
@@ -419,6 +421,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function stopVoice() {
     voiceDesiredRef.current = false;
+    setVoiceRequested(false);
     clearVoiceReconnect();
     voiceReconnectCountRef.current = 0;
     disconnectRequestedRef.current = true;
@@ -528,6 +531,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
+  const voiceActive = voiceRequested || isConnected || voiceMode === "on";
+  const voiceConnecting = voiceMode === "connecting" && !voiceActive;
+
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
@@ -615,40 +621,39 @@ function ThreadView({ threadId }: { threadId: string }) {
           <button
             type="button"
             onClick={() => {
-              if (isConnected) void stopVoice();
-              else if (voiceMode === "on") void stopVoice();
+              if (voiceActive) void stopVoice();
               else void startVoice();
             }}
-            disabled={voiceMode === "connecting" || voiceMode === "closing"}
+            disabled={voiceMode === "closing"}
             title={
-              voiceMode === "connecting"
+              voiceConnecting
                 ? "Connecting…"
                 : voiceMode === "closing"
                 ? "Closing…"
-                : isConnected || voiceMode === "on"
+                : voiceActive
                 ? conversation.isSpeaking
                   ? "Speaking…"
                   : "Listening… tap to stop"
                 : "Tap to talk"
             }
             className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
-              isConnected || voiceMode === "on"
+              voiceActive
                 ? "border-accent bg-accent/15 hud-pulse text-accent"
                 : "border-border bg-secondary hover:bg-secondary/80 text-primary disabled:opacity-60"
             }`}
           >
-            {isConnected || voiceMode === "on" ? <MicOff size={18} /> : <Mic size={18} />}
+            {voiceActive ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
           <input
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              voiceMode === "connecting"
+              voiceConnecting
                 ? "Connecting voice…"
                 : voiceMode === "closing"
                 ? "Closing voice…"
-                : isConnected || voiceMode === "on"
+                : voiceActive
                 ? conversation.isSpeaking
                   ? "BPA Bot is speaking…"
                   : "Listening… or type"
