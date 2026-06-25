@@ -319,6 +319,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       const friendly = /permission|notallowed/i.test(raw)
         ? "Microphone access is blocked. Allow microphone access, then tap the mic once."
         : raw;
+      voiceCleanupReasonRef.current = "timeout";
       setVoiceMode("error");
       setVoiceError(friendly);
       disconnectRequestedRef.current = true;
