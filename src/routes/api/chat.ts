@@ -166,6 +166,72 @@ export const Route = createFileRoute("/api/chat")({
                 };
               },
             }),
+            send_email: tool({
+              description:
+                "Send an email from the user's connected Gmail (or Outlook) account. Use when the user asks to email someone, send a message, or email themselves.",
+              inputSchema: z.object({
+                to: z.string().email().describe("Recipient email address"),
+                subject: z.string().min(1).max(200),
+                body: z.string().min(1).max(20000),
+                cc: z.string().email().optional(),
+              }),
+              execute: async ({ to, subject, body: emailBody, cc }) => {
+                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
+                if (process.env.GOOGLE_MAIL_API_KEY) {
+                  const lines = [`To: ${to}`];
+                  if (cc) lines.push(`Cc: ${cc}`);
+                  lines.push(
+                    `Subject: ${subject}`,
+                    "Content-Type: text/plain; charset=UTF-8",
+                    "",
+                    emailBody,
+                  );
+                  const raw = Buffer.from(lines.join("\r\n"))
+                    .toString("base64")
+                    .replace(/\+/g, "-")
+                    .replace(/\//g, "_")
+                    .replace(/=+$/, "");
+                  const r = await fetch(
+                    "https://connector-gateway.lovable.dev/google_mail/gmail/v1/users/me/messages/send",
+                    {
+                      method: "POST",
+                      headers: gatewayHeaders("GOOGLE_MAIL_API_KEY"),
+                      body: JSON.stringify({ raw }),
+                    },
+                  );
+                  if (!r.ok) {
+                    const t = await r.text();
+                    return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
+                  }
+                  return { ok: true, provider: "gmail", to, subject };
+                }
+                if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                  const r = await fetch(
+                    "https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail",
+                    {
+                      method: "POST",
+                      headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
+                      body: JSON.stringify({
+                        message: {
+                          subject,
+                          body: { contentType: "Text", content: emailBody },
+                          toRecipients: [{ emailAddress: { address: to } }],
+                          ...(cc
+                            ? { ccRecipients: [{ emailAddress: { address: cc } }] }
+                            : {}),
+                        },
+                      }),
+                    },
+                  );
+                  if (!r.ok) {
+                    const t = await r.text();
+                    return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
+                  }
+                  return { ok: true, provider: "outlook", to, subject };
+                }
+                return { error: "No email provider connected." };
+              },
+            }),
           },
           onFinish: async ({ text }) => {
             await supabase.from("messages").insert({
