@@ -113,7 +113,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (!el) return;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowScrollDown(distance > 200);
+      setShowScrollDown(distance > 80);
     };
     onScroll();
     el.addEventListener("scroll", onScroll);
