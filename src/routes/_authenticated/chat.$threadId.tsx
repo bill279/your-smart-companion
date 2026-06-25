@@ -117,6 +117,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const browserVoiceActiveRef = useRef(false);
   const browserVoiceRestartTimerRef = useRef<number | null>(null);
   const browserVoiceTranscriptRef = useRef("");
+  const browserVoiceSpeakingRef = useRef(false);
 
   const messages = messagesQ.data ?? [];
 
@@ -407,6 +408,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
     recognition.onend = () => {
       if (!browserVoiceActiveRef.current) return;
+      if (browserVoiceSpeakingRef.current) return;
       if (browserVoiceRestartTimerRef.current) window.clearTimeout(browserVoiceRestartTimerRef.current);
       browserVoiceRestartTimerRef.current = window.setTimeout(() => {
         try {
@@ -431,6 +433,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       browserVoiceRestartTimerRef.current = null;
     }
     window.speechSynthesis?.cancel();
+    browserVoiceSpeakingRef.current = false;
     const recognition = browserRecognitionRef.current;
     browserRecognitionRef.current = null;
     if (recognition) {
@@ -455,13 +458,18 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     const utterance = new SpeechSynthesisUtterance(text.replace(/\|/g, " ").slice(0, 1200));
     utterance.rate = 1;
+    browserVoiceSpeakingRef.current = true;
     utterance.onend = () => {
+      browserVoiceSpeakingRef.current = false;
       if (!browserVoiceActiveRef.current || !recognition) return;
       try {
         recognition.start();
       } catch {
         // The normal onend restart loop will retry if needed.
       }
+    };
+    utterance.onerror = () => {
+      browserVoiceSpeakingRef.current = false;
     };
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
@@ -480,7 +488,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceMode("closing");
     setVoiceError(null);
     try {
-      await conversation.endSession();
+      if (conversation.status === "connected") await conversation.endSession();
     } finally {
       setVoiceMode("off");
     }
