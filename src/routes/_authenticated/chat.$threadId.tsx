@@ -93,6 +93,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const hasConnectedVoiceRef = useRef(false);
   const lastVoiceStartAtRef = useRef(0);
   const voiceConnectTimeoutRef = useRef<number | null>(null);
+  const voiceCleanupReasonRef = useRef<"manual" | "timeout" | null>(null);
 
   const messages = messagesQ.data ?? [];
 
@@ -177,6 +178,17 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: () => {
+      if (voiceCleanupReasonRef.current === "timeout") {
+        voiceCleanupReasonRef.current = null;
+        hasConnectedVoiceRef.current = false;
+        isStartingVoiceRef.current = false;
+        pendingContextRef.current = "";
+        if (voiceConnectTimeoutRef.current) {
+          window.clearTimeout(voiceConnectTimeoutRef.current);
+          voiceConnectTimeoutRef.current = null;
+        }
+        return;
+      }
       if (!disconnectRequestedRef.current && hasConnectedVoiceRef.current) {
         setVoiceMode("error");
         setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
@@ -184,7 +196,8 @@ function ThreadView({ threadId }: { threadId: string }) {
       } else {
         setVoiceMode("off");
         setVoiceError(null);
-        toast("BPA Bot offline");
+        if (voiceCleanupReasonRef.current !== "manual") toast("BPA Bot offline");
+        voiceCleanupReasonRef.current = null;
       }
       pendingContextRef.current = "";
       hasConnectedVoiceRef.current = false;
@@ -272,6 +285,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceConnectTimeoutRef.current = window.setTimeout(() => {
         if (conversationRef.current?.status !== "connected") {
           disconnectRequestedRef.current = true;
+          voiceCleanupReasonRef.current = "timeout";
           hasConnectedVoiceRef.current = false;
           setVoiceMode("error");
           setVoiceError("Voice did not connect. Tap the mic once to try again.");
@@ -312,6 +326,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
   async function stopVoice() {
     disconnectRequestedRef.current = true;
+    voiceCleanupReasonRef.current = "manual";
     hasConnectedVoiceRef.current = false;
     pendingContextRef.current = "";
     if (voiceConnectTimeoutRef.current) {
