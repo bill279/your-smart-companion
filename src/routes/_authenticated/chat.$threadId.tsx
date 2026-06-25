@@ -549,9 +549,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         {/* Composer */}
-        {voiceError && (
-          <></>
-        )}
         {showScrollDown && (
           <button
             type="button"
