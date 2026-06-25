@@ -359,7 +359,6 @@ function ThreadView({ threadId }: { threadId: string }) {
             scheduleVoiceReconnect();
           } else {
             disconnectRequestedRef.current = true;
-            setVoiceRequested(false);
             setVoiceMode("error");
             setVoiceError("Voice did not connect. Tap the mic once to try again.");
           }
@@ -392,7 +391,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           setVoiceError(null);
           scheduleVoiceReconnect(4000);
         } else {
-          setVoiceRequested(false);
           setVoiceMode("error");
           setVoiceError("Voice is busy closing the previous session. Wait a few seconds and tap the mic.");
           disconnectRequestedRef.current = true;
@@ -405,7 +403,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceError(null);
         scheduleVoiceReconnect();
       } else {
-        setVoiceRequested(false);
+        if (/permission|notallowed/i.test(raw)) setVoiceRequested(false);
         setVoiceMode("error");
         setVoiceError(friendly);
         disconnectRequestedRef.current = true;
