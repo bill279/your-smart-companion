@@ -35,25 +35,6 @@ const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details 
 
 type VoiceModeState = "off" | "connecting" | "on" | "closing" | "error";
 
-type BrowserSpeechRecognition = EventTarget & {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-  onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-};
-
-declare global {
-  interface Window {
-    SpeechRecognition?: new () => BrowserSpeechRecognition;
-    webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
-  }
-}
-
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
@@ -119,12 +100,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastVoiceStartAtRef = useRef(0);
   const voiceConnectTimeoutRef = useRef<number | null>(null);
   const voiceCleanupReasonRef = useRef<"manual" | "timeout" | null>(null);
-  const browserRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
-  const browserVoiceActiveRef = useRef(false);
-  const browserVoiceRestartTimerRef = useRef<number | null>(null);
-  const browserVoiceTranscriptRef = useRef("");
-  const browserVoiceSpeakingRef = useRef(false);
-  const voiceRetryCountRef = useRef(0);
 
   const messages = messagesQ.data ?? [];
 
@@ -147,7 +122,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     return () => {
       window.removeEventListener("unhandledrejection", handler);
       if (voiceConnectTimeoutRef.current) window.clearTimeout(voiceConnectTimeoutRef.current);
-      stopBrowserVoice();
       disconnectRequestedRef.current = true;
       try {
         conversationRef.current?.endSession();
@@ -378,122 +352,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
   }
 
-  function startBrowserVoice() {
-    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!Recognition) {
-      setVoiceMode("error");
-      setVoiceError("Voice is unavailable in this browser. Type your message instead.");
-      toast.error("Voice is unavailable in this browser.");
-      return;
-    }
-
-    browserVoiceActiveRef.current = true;
-    browserVoiceTranscriptRef.current = "";
-    disconnectRequestedRef.current = false;
-    hasConnectedVoiceRef.current = true;
-    setVoiceMode("on");
-    setVoiceError(null);
-    toast.success("Voice mode on");
-
-    const recognition = new Recognition();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = "en-US";
-    recognition.onresult = (event) => {
-      let finalText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) finalText += result[0].transcript;
-      }
-      const text = finalText.trim();
-      if (!text || text === browserVoiceTranscriptRef.current) return;
-      browserVoiceTranscriptRef.current = text;
-      addMut.mutate(text);
-    };
-    recognition.onerror = (event) => {
-      if (!browserVoiceActiveRef.current) return;
-      if (event.error === "no-speech" || event.error === "aborted") return;
-      const msg = event.error === "not-allowed"
-        ? "Microphone access is blocked. Allow microphone access, then tap the mic once."
-        : "Voice listening had a problem. Tap the mic once to restart.";
-      setVoiceMode("error");
-      setVoiceError(msg);
-      toast.error(msg);
-    };
-    recognition.onend = () => {
-      if (!browserVoiceActiveRef.current) return;
-      if (browserVoiceSpeakingRef.current) return;
-      if (browserVoiceRestartTimerRef.current) window.clearTimeout(browserVoiceRestartTimerRef.current);
-      browserVoiceRestartTimerRef.current = window.setTimeout(() => {
-        try {
-          recognition.start();
-        } catch {
-          // Already listening or browser rejected an immediate restart.
-        }
-      }, 350);
-    };
-    browserRecognitionRef.current = recognition;
-    try {
-      recognition.start();
-    } catch (err) {
-      console.warn("browser voice start failed", err);
-    }
-  }
-
-  function stopBrowserVoice() {
-    browserVoiceActiveRef.current = false;
-    if (browserVoiceRestartTimerRef.current) {
-      window.clearTimeout(browserVoiceRestartTimerRef.current);
-      browserVoiceRestartTimerRef.current = null;
-    }
-    window.speechSynthesis?.cancel();
-    browserVoiceSpeakingRef.current = false;
-    const recognition = browserRecognitionRef.current;
-    browserRecognitionRef.current = null;
-    if (recognition) {
-      recognition.onend = null;
-      recognition.onresult = null;
-      recognition.onerror = null;
-      try {
-        recognition.abort();
-      } catch (err) {
-        console.warn("browser voice stop failed", err);
-      }
-    }
-  }
-
-  function speakBrowserVoice(text: string) {
-    if (!browserVoiceActiveRef.current || !text.trim() || !window.speechSynthesis) return;
-    const recognition = browserRecognitionRef.current;
-    browserVoiceSpeakingRef.current = true;
-    try {
-      recognition?.stop();
-    } catch {
-      // Ignore if already stopped.
-    }
-    const utterance = new SpeechSynthesisUtterance(text.replace(/\|/g, " ").slice(0, 1200));
-    utterance.rate = 1;
-    utterance.onend = () => {
-      browserVoiceSpeakingRef.current = false;
-      if (!browserVoiceActiveRef.current || !recognition) return;
-      try {
-        recognition.start();
-      } catch {
-        // The normal onend restart loop will retry if needed.
-      }
-    };
-    utterance.onerror = () => {
-      browserVoiceSpeakingRef.current = false;
-    };
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-  }
-
   async function stopVoice() {
     disconnectRequestedRef.current = true;
     voiceCleanupReasonRef.current = "manual";
     hasConnectedVoiceRef.current = false;
-    stopBrowserVoice();
     pendingContextRef.current = "";
     if (voiceConnectTimeoutRef.current) {
       window.clearTimeout(voiceConnectTimeoutRef.current);
