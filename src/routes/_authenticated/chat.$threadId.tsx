@@ -175,7 +175,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
       }
     },
-    onDisconnect: (details?: { reason?: string; message?: string }) => {
+    onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
       clearVoiceConnectTimeout();
       const wasStopping = voiceStateRef.current === "stopping";
       voiceStateRef.current = "idle";
@@ -183,8 +183,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       pendingContextRef.current = "";
       voiceUserHasSpokenRef.current = false;
       if (wasStopping) return;
+      const closeText = details?.closeReason || details?.message || "";
+      if (/quota/i.test(closeText)) {
+        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+        return;
+      }
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
-        setVoiceError(details?.message || "Voice disconnected. Tap the mic once to reconnect.");
+        setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
     },
     onError: (e) => {
@@ -195,7 +200,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
+      setVoiceError(/quota/i.test(msg) ? "ElevenLabs voice quota is exhausted. Text chat still works." : msg || "Voice failed to connect. Tap the mic once to try again.");
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -297,6 +302,8 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (/permission|notallowed/i.test(raw)) {
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
         toast.error("Microphone blocked");
+      } else if (/quota/i.test(raw)) {
+        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       } else {
         console.warn("startVoice failed", raw);
         setVoiceError("Voice failed to connect. Tap the mic once to try again.");
