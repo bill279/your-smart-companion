@@ -458,7 +458,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const voiceConnecting = voiceUiState === "starting";
 
   return (
-    <div className="h-dvh flex relative overflow-hidden">
+    <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
@@ -555,7 +555,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
         </div>
         {/* Messages */}
-        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
+        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
           {messages.length === 0 && !pendingUser && (
             <div className="text-center text-muted-foreground text-sm pt-12">
               How can I help you today?
@@ -656,7 +656,7 @@ function Bubble({ role, content }: { role: string; content: string }) {
         </div>
       )}
       <div
-        className={`max-w-[78%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
+        className={`max-w-[78%] min-w-0 overflow-x-auto rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-card border border-border text-foreground"
