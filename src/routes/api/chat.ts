@@ -73,6 +73,8 @@ export const Route = createFileRoute("/api/chat")({
           return new Response("Unauthorized", { status: 401 });
         }
         const userId = claims.claims.sub;
+        const userEmail =
+          (claims.claims as { email?: string }).email ?? null;
 
         const body = (await request.json()) as { threadId?: string; content?: string };
         if (!body.threadId || !body.content?.trim()) {
@@ -97,9 +99,12 @@ export const Route = createFileRoute("/api/chat")({
         if (histErr) return new Response(histErr.message, { status: 400 });
 
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
+        const systemWithUser = userEmail
+          ? `${SYSTEM_PROMPT}\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
+          : `${SYSTEM_PROMPT}\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
         const result = streamText({
           model: gateway("google/gemini-3-flash-preview"),
-          system: SYSTEM_PROMPT,
+          system: systemWithUser,
           messages: (rows ?? []).map((r) => ({
             role: r.role as "user" | "assistant" | "system",
             content: r.content,
