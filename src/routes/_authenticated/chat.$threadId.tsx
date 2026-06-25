@@ -221,9 +221,17 @@ function ThreadView({ threadId }: { threadId: string }) {
         return;
       }
       if (!disconnectRequestedRef.current && hasConnectedVoiceRef.current) {
-        setVoiceMode("error");
-        setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
-        toast.error("Voice disconnected. Tap the mic once to reconnect.");
+        // WebRTC dropped unexpectedly — keep voice mode alive with the
+        // browser-native fallback so the user doesn't have to tap the mic.
+        pendingContextRef.current = "";
+        hasConnectedVoiceRef.current = false;
+        isStartingVoiceRef.current = false;
+        if (voiceConnectTimeoutRef.current) {
+          window.clearTimeout(voiceConnectTimeoutRef.current);
+          voiceConnectTimeoutRef.current = null;
+        }
+        startBrowserVoice();
+        return;
       } else {
         setVoiceMode("off");
         setVoiceError(null);
@@ -248,12 +256,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       isStartingVoiceRef.current = false;
       pendingContextRef.current = "";
       hasConnectedVoiceRef.current = false;
-      const friendly = /concurrent|capacity|rate/i.test(msg)
-        ? "Voice is still closing another session. Wait a few seconds, then tap the mic once."
-        : msg;
-      setVoiceMode("error");
-      setVoiceError(friendly);
-      toast.error(friendly);
+      // Any provider error → silently fall back to the browser voice loop
+      // so the user stays in voice mode without manual recovery.
+      startBrowserVoice();
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
