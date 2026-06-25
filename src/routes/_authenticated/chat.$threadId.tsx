@@ -92,6 +92,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const disconnectRequestedRef = useRef(false);
   const hasConnectedVoiceRef = useRef(false);
   const lastVoiceStartAtRef = useRef(0);
+  const voiceConnectTimeoutRef = useRef<number | null>(null);
 
   const messages = messagesQ.data ?? [];
 
@@ -113,6 +114,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.addEventListener("unhandledrejection", handler);
     return () => {
       window.removeEventListener("unhandledrejection", handler);
+      if (voiceConnectTimeoutRef.current) window.clearTimeout(voiceConnectTimeoutRef.current);
       disconnectRequestedRef.current = true;
       try {
         conversationRef.current?.endSession();
@@ -156,6 +158,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onConnect: () => {
       toast.success("BPA Bot online");
+      if (voiceConnectTimeoutRef.current) {
+        window.clearTimeout(voiceConnectTimeoutRef.current);
+        voiceConnectTimeoutRef.current = null;
+      }
       setVoiceMode("on");
       setVoiceError(null);
       hasConnectedVoiceRef.current = true;
@@ -183,6 +189,10 @@ function ThreadView({ threadId }: { threadId: string }) {
       pendingContextRef.current = "";
       hasConnectedVoiceRef.current = false;
       isStartingVoiceRef.current = false;
+      if (voiceConnectTimeoutRef.current) {
+        window.clearTimeout(voiceConnectTimeoutRef.current);
+        voiceConnectTimeoutRef.current = null;
+      }
     },
     onError: (e) => {
       const msg = String(e || "Voice error");
@@ -259,6 +269,19 @@ function ThreadView({ threadId }: { threadId: string }) {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const { signedUrl } = await getToken({});
       pendingContextRef.current = buildVoiceContext();
+      voiceConnectTimeoutRef.current = window.setTimeout(() => {
+        if (conversationRef.current?.status !== "connected") {
+          disconnectRequestedRef.current = true;
+          hasConnectedVoiceRef.current = false;
+          setVoiceMode("error");
+          setVoiceError("Voice did not connect. Tap the mic once to try again.");
+          try {
+            conversationRef.current?.endSession();
+          } catch (err) {
+            console.warn("voice timeout cleanup failed", err);
+          }
+        }
+      }, 15000);
       conversation.startSession({
         signedUrl,
         overrides: {
@@ -278,6 +301,10 @@ function ThreadView({ threadId }: { threadId: string }) {
       disconnectRequestedRef.current = true;
       hasConnectedVoiceRef.current = false;
       pendingContextRef.current = "";
+      if (voiceConnectTimeoutRef.current) {
+        window.clearTimeout(voiceConnectTimeoutRef.current);
+        voiceConnectTimeoutRef.current = null;
+      }
       toast.error(friendly);
     } finally {
       isStartingVoiceRef.current = false;
@@ -287,6 +314,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     disconnectRequestedRef.current = true;
     hasConnectedVoiceRef.current = false;
     pendingContextRef.current = "";
+    if (voiceConnectTimeoutRef.current) {
+      window.clearTimeout(voiceConnectTimeoutRef.current);
+      voiceConnectTimeoutRef.current = null;
+    }
     setVoiceMode("closing");
     setVoiceError(null);
     try {
