@@ -35,6 +35,8 @@ const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details 
 
 type VoiceModeState = "off" | "connecting" | "on" | "closing" | "error";
 
+let persistedVoiceRequested = false;
+
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
@@ -89,7 +91,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
   const [voiceMode, setVoiceMode] = useState<VoiceModeState>("off");
-  const [voiceRequested, setVoiceRequested] = useState(false);
+  const [voiceRequested, setVoiceRequested] = useState(persistedVoiceRequested);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
@@ -129,7 +131,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       clearVoiceReconnect();
       if (voiceConnectTimeoutRef.current) window.clearTimeout(voiceConnectTimeoutRef.current);
       disconnectRequestedRef.current = true;
-      voiceDesiredRef.current = false;
       try {
         conversationRef.current?.endSession();
       } catch (err) {
@@ -339,6 +340,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     lastVoiceStartAtRef.current = now;
     voiceDesiredRef.current = true;
+    persistedVoiceRequested = true;
     setVoiceRequested(true);
     clearVoiceReconnect();
     disconnectRequestedRef.current = false;
@@ -406,7 +408,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceError(null);
         scheduleVoiceReconnect();
       } else {
-        if (/permission|notallowed/i.test(raw)) setVoiceRequested(false);
+        if (/permission|notallowed/i.test(raw)) {
+          persistedVoiceRequested = false;
+          setVoiceRequested(false);
+        }
         setVoiceMode("error");
         setVoiceError(friendly);
         disconnectRequestedRef.current = true;
@@ -425,6 +430,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function stopVoice() {
     voiceDesiredRef.current = false;
+    persistedVoiceRequested = false;
     setVoiceRequested(false);
     clearVoiceReconnect();
     voiceReconnectCountRef.current = 0;
