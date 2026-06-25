@@ -222,6 +222,8 @@ function ThreadView({ threadId }: { threadId: string }) {
           window.clearTimeout(voiceConnectTimeoutRef.current);
           voiceConnectTimeoutRef.current = null;
         }
+        disconnectRequestedRef.current = false;
+        voiceCleanupReasonRef.current = null;
         setVoiceMode("on");
         setVoiceError(null);
         scheduleVoiceReconnect();
@@ -358,9 +360,10 @@ function ThreadView({ threadId }: { threadId: string }) {
             setVoiceError(null);
             scheduleVoiceReconnect();
           } else {
-            disconnectRequestedRef.current = true;
+            disconnectRequestedRef.current = false;
             setVoiceMode("error");
-            setVoiceError("Voice did not connect. Tap the mic once to try again.");
+            setVoiceError(null);
+            scheduleVoiceReconnect();
           }
           try {
             conversationRef.current?.endSession();
