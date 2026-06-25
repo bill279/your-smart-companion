@@ -457,6 +457,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   function speakBrowserVoice(text: string) {
     if (!browserVoiceActiveRef.current || !text.trim() || !window.speechSynthesis) return;
     const recognition = browserRecognitionRef.current;
+    browserVoiceSpeakingRef.current = true;
     try {
       recognition?.stop();
     } catch {
@@ -464,7 +465,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     const utterance = new SpeechSynthesisUtterance(text.replace(/\|/g, " ").slice(0, 1200));
     utterance.rate = 1;
-    browserVoiceSpeakingRef.current = true;
     utterance.onend = () => {
       browserVoiceSpeakingRef.current = false;
       if (!browserVoiceActiveRef.current || !recognition) return;
