@@ -566,7 +566,7 @@ function ThreadView({ threadId }: { threadId: string }) {
               })
             }
             aria-label="Scroll to latest"
-            className="absolute bottom-24 right-4 md:right-10 z-20 w-10 h-10 rounded-full bg-card border border-border shadow-md flex items-center justify-center text-foreground hover:bg-secondary"
+            className="absolute bottom-24 right-4 md:right-10 z-30 w-11 h-11 rounded-full bg-primary text-primary-foreground border border-primary shadow-lg flex items-center justify-center hover:bg-primary/90"
           >
             <ArrowDown size={18} />
           </button>
