@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
@@ -91,6 +91,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
@@ -106,6 +107,18 @@ function ThreadView({ threadId }: { threadId: string }) {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, pendingAssistant, pendingUser]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setShowScrollDown(distance > 200);
+    };
+    onScroll();
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [messages.length]);
 
   // Guard against an ElevenLabs SDK bug where malformed error events throw
   // `undefined is not an object (evaluating 'event.error_event.error_type')`
@@ -536,6 +549,21 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         {/* Composer */}
+        {showScrollDown && (
+          <button
+            type="button"
+            onClick={() =>
+              scrollRef.current?.scrollTo({
+                top: scrollRef.current.scrollHeight,
+                behavior: "smooth",
+              })
+            }
+            aria-label="Scroll to latest"
+            className="absolute bottom-24 right-4 md:right-10 z-20 w-10 h-10 rounded-full bg-card border border-border shadow-md flex items-center justify-center text-foreground hover:bg-secondary"
+          >
+            <ArrowDown size={18} />
+          </button>
+        )}
         {voiceError && (
           <div className="relative z-10 mx-4 md:mx-10 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {voiceError}
