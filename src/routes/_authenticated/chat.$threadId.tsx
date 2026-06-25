@@ -199,6 +199,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceError(null);
       hasConnectedVoiceRef.current = true;
       disconnectRequestedRef.current = false;
+      voiceRetryCountRef.current = 0;
       const ctx = pendingContextRef.current;
       if (ctx) {
         try {
