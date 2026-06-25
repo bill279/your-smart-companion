@@ -27,7 +27,7 @@ Always respond in clean Markdown that renders beautifully:
 You have tools:
 - web_search — search the live web. Use it for anything time-sensitive: companies, people, news, prices, products, current facts.
 - web_scrape — fetch the readable markdown of a specific URL.
-- send_email — send an email from the user's connected Gmail/Outlook. Use when the user asks to email someone (including themselves).
+- send_email — send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone (including themselves).
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
 
@@ -197,7 +197,7 @@ export const Route = createFileRoute("/api/chat")({
             }),
             send_email: tool({
               description:
-                "Send an email from the user's connected Gmail (or Outlook) account. Use when the user asks to email someone, send a message, or email themselves.",
+                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves.",
               inputSchema: z.object({
                 to: z.string().email().describe("Recipient email address"),
                 subject: z.string().min(1).max(200),
@@ -224,7 +224,31 @@ th{background:#0b2545;color:#fff;font-weight:600;} tr:nth-child(even) td{backgro
 hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
 </style></head><body><div class="container">${inner}</div></body></html>`;
                 };
-                if (process.env.GOOGLE_MAIL_API_KEY) {
+                 if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                   const r = await fetch(
+                     "https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail",
+                     {
+                       method: "POST",
+                       headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
+                       body: JSON.stringify({
+                         message: {
+                           subject,
+                           body: { contentType: "HTML", content: renderHtml(emailBody) },
+                           toRecipients: [{ emailAddress: { address: to } }],
+                           ...(cc
+                             ? { ccRecipients: [{ emailAddress: { address: cc } }] }
+                             : {}),
+                         },
+                       }),
+                     },
+                   );
+                   if (!r.ok) {
+                     const t = await r.text();
+                     return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
+                   }
+                   return { ok: true, provider: "outlook", to, subject };
+                 }
+                 if (process.env.GOOGLE_MAIL_API_KEY) {
                   const boundary = `bpa_${Math.random().toString(36).slice(2)}`;
                   const lines = [`To: ${to}`];
                   if (cc) lines.push(`Cc: ${cc}`);
@@ -264,30 +288,6 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
                   }
                   return { ok: true, provider: "gmail", to, subject };
-                }
-                if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
-                  const r = await fetch(
-                    "https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail",
-                    {
-                      method: "POST",
-                      headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
-                      body: JSON.stringify({
-                        message: {
-                          subject,
-                          body: { contentType: "HTML", content: renderHtml(emailBody) },
-                          toRecipients: [{ emailAddress: { address: to } }],
-                          ...(cc
-                            ? { ccRecipients: [{ emailAddress: { address: cc } }] }
-                            : {}),
-                        },
-                      }),
-                    },
-                  );
-                  if (!r.ok) {
-                    const t = await r.text();
-                    return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
-                  }
-                  return { ok: true, provider: "outlook", to, subject };
                 }
                 return { error: "No email provider connected." };
               },
