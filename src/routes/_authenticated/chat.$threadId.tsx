@@ -113,11 +113,18 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (!el) return;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowScrollDown(distance > 80);
+      setShowScrollDown(distance > 40);
     };
     onScroll();
+    const ro = new ResizeObserver(onScroll);
+    ro.observe(el);
+    const id = window.setInterval(onScroll, 500);
     el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+      window.clearInterval(id);
+    };
   }, [messages.length]);
 
   // Guard against an ElevenLabs SDK bug where malformed error events throw
@@ -559,7 +566,7 @@ function ThreadView({ threadId }: { threadId: string }) {
               })
             }
             aria-label="Scroll to latest"
-            className="absolute bottom-24 right-4 md:right-10 z-20 w-10 h-10 rounded-full bg-card border border-border shadow-md flex items-center justify-center text-foreground hover:bg-secondary"
+            className="absolute bottom-24 right-4 md:right-10 z-30 w-11 h-11 rounded-full bg-primary text-primary-foreground border border-primary shadow-lg flex items-center justify-center hover:bg-primary/90"
           >
             <ArrowDown size={18} />
           </button>
