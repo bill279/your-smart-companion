@@ -566,7 +566,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           ))}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
           {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
-          <div ref={latestMessageRef} aria-hidden="true" className="h-1" />
+          <div ref={latestMessageRef} aria-hidden="true" />
         </div>
 
         {/* Composer */}
