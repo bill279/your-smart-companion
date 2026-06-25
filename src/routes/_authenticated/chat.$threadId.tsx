@@ -93,6 +93,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const latestMessageRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
@@ -106,8 +107,13 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function scrollToLatest() {
     const el = scrollRef.current;
+    latestMessageRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      el.scrollTo({ top: el.scrollHeight + el.clientHeight, behavior: "smooth" });
+      window.requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+        setShowScrollDown(false);
+      });
     }
     // Fallback: also scroll the window in case the page itself is scrolling
     if (typeof window !== "undefined") {
@@ -553,7 +559,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
         </div>
         {/* Messages */}
-        <div ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
+        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
           {messages.length === 0 && !pendingUser && (
             <div className="text-center text-muted-foreground text-sm pt-12">
               How can I help you today?
@@ -564,6 +570,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           ))}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
           {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
+          <div ref={latestMessageRef} aria-hidden="true" className="h-1" />
         </div>
 
         {/* Composer */}
