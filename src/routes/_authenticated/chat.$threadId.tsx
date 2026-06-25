@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X } from "lucide-react";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
@@ -90,6 +90,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
   const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
@@ -424,19 +425,44 @@ function ThreadView({ threadId }: { threadId: string }) {
   const voiceConnecting = voiceUiState === "starting";
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex relative">
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       {/* Sidebar */}
-      <aside className="w-72 hud-panel border-r border-primary/30 flex flex-col">
+      <aside
+        className={`fixed md:static inset-y-0 left-0 z-40 w-72 hud-panel border-r border-primary/30 flex flex-col transform transition-transform md:transform-none ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        }`}
+      >
         <div className="p-5 border-b border-border">
-          <img src={bpaLogo.url} alt="BP Automation" className="h-8 w-auto mb-2" />
-          <div className="text-base font-semibold text-foreground">BPA Bot</div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            BP Automation assistant
+          <div className="flex items-start justify-between">
+            <div>
+              <img src={bpaLogo.url} alt="BP Automation" className="h-8 w-auto mb-2" />
+              <div className="text-base font-semibold text-foreground">BPA Bot</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                BP Automation assistant
+              </div>
+            </div>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden text-muted-foreground hover:text-foreground p-1"
+              aria-label="Close menu"
+            >
+              <X size={18} />
+            </button>
           </div>
         </div>
 
         <button
-          onClick={() => createMut.mutate()}
+          onClick={() => {
+            setSidebarOpen(false);
+            createMut.mutate();
+          }}
           className="mx-4 mt-4 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-sm font-medium"
         >
           <Plus size={14} /> New chat
@@ -456,6 +482,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                   to="/chat/$threadId"
                   params={{ threadId: t.id }}
                   className="flex-1 truncate"
+                  onClick={() => setSidebarOpen(false)}
                 >
                   {cleanThreadTitle(t.title)}
                 </Link>
@@ -483,6 +510,17 @@ function ThreadView({ threadId }: { threadId: string }) {
 
       {/* Main HUD */}
       <main className="flex-1 flex flex-col relative overflow-hidden">
+        {/* Mobile header */}
+        <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-card">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 rounded-md hover:bg-secondary text-foreground"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+          <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
+        </div>
         {/* Messages */}
         <div ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto px-4 md:px-10 py-6 space-y-6">
           {messages.length === 0 && !pendingUser && (
