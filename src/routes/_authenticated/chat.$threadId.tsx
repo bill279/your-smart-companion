@@ -201,21 +201,8 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: () => {
-      if (voiceDesiredRef.current && !disconnectRequestedRef.current) {
-        voiceCleanupReasonRef.current = null;
-        pendingContextRef.current = "";
-        hasConnectedVoiceRef.current = false;
-        isStartingVoiceRef.current = false;
-        if (voiceConnectTimeoutRef.current) {
-          window.clearTimeout(voiceConnectTimeoutRef.current);
-          voiceConnectTimeoutRef.current = null;
-        }
-        setVoiceMode("on");
-        setVoiceError(null);
-        scheduleVoiceReconnect();
-        return;
-      }
-      if (voiceCleanupReasonRef.current === "timeout") {
+      const shouldStayInVoiceMode = voiceDesiredRef.current && voiceCleanupReasonRef.current !== "manual";
+      if (voiceCleanupReasonRef.current === "timeout" && !shouldStayInVoiceMode) {
         voiceCleanupReasonRef.current = null;
         hasConnectedVoiceRef.current = false;
         isStartingVoiceRef.current = false;
@@ -226,7 +213,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         }
         return;
       }
-      if (!disconnectRequestedRef.current && hasConnectedVoiceRef.current) {
+      if (shouldStayInVoiceMode) {
         pendingContextRef.current = "";
         hasConnectedVoiceRef.current = false;
         isStartingVoiceRef.current = false;
