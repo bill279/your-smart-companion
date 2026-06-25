@@ -98,24 +98,17 @@ export const getElevenLabsAgentToken = createServerFn({ method: "POST" })
     if (!apiKey) throw new Error("ElevenLabs is not connected");
     if (!agentId) throw new Error("ELEVENLABS_AGENT_ID is not configured");
 
-    const res = await fetch(
-      `https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${encodeURIComponent(agentId)}`,
-      { headers: { "xi-api-key": apiKey } },
-    );
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`ElevenLabs token request failed (${res.status}): ${text}`);
-    }
-    const json = (await res.json()) as { token: string };
-
     const signedUrlRes = await fetch(
       `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`,
       { headers: { "xi-api-key": apiKey } },
     );
     if (!signedUrlRes.ok) {
       const text = await signedUrlRes.text();
-      throw new Error(`ElevenLabs signed URL request failed (${signedUrlRes.status}): ${text}`);
+      if (signedUrlRes.status === 429 && /concurrent|capacity|rate/i.test(text)) {
+        throw new Error("Voice is still closing another session. Wait a few seconds, then tap the mic once.");
+      }
+      throw new Error(`Voice connection failed (${signedUrlRes.status}). Please try again.`);
     }
     const signedUrlJson = (await signedUrlRes.json()) as { signed_url: string };
-    return { token: json.token, signedUrl: signedUrlJson.signed_url, agentId };
+    return { signedUrl: signedUrlJson.signed_url, agentId };
   });
