@@ -95,6 +95,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  const [voiceStarting, setVoiceStarting] = useState(false);
   const [voiceRequested, setVoiceRequested] = useState(
     () => persistedVoiceRequested || (typeof window !== "undefined" && window.sessionStorage.getItem("bpa-voice-requested") === "1"),
   );
@@ -251,6 +252,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (isStartingRef.current) return;
     if (conversationRef.current?.status === "connected" || conversationRef.current?.status === "connecting") return;
     isStartingRef.current = true;
+    setVoiceStarting(true);
     voiceDesiredRef.current = true;
     setPersistedVoiceRequested(true);
     setVoiceRequested(true);
@@ -278,6 +280,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     } finally {
       isStartingRef.current = false;
+      setVoiceStarting(false);
     }
   }
 
@@ -285,6 +288,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     voiceDesiredRef.current = false;
     setPersistedVoiceRequested(false);
     setVoiceRequested(false);
+    setVoiceStarting(false);
     pendingContextRef.current = "";
     setVoiceError(null);
     try {
@@ -393,7 +397,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const voiceActive = voiceRequested;
-  const voiceConnecting = voiceActive && !isConnected;
+  const voiceConnecting = voiceStarting || (voiceActive && !isConnected && isConnecting);
 
   return (
     <div className="min-h-screen flex">
