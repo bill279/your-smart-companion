@@ -28,6 +28,8 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
+// (Voice agent prompt is configured in ElevenLabs; keep this for reference / contextual updates.)
+
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automation'?s assistant\.\s*How can I help\??\s*/i;
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
@@ -222,6 +224,15 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
+      // If the session was previously connected and dropped for any non-error
+      // reason (typically ElevenLabs idle timeout), silently reconnect so the
+      // user stays in voice mode until they explicitly tap to stop.
+      if (hasConnectedVoiceRef.current && details?.reason !== "error") {
+        setTimeout(() => {
+          if (voiceStateRef.current === "idle") void startVoice();
+        }, 300);
+        return;
+      }
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
@@ -250,10 +261,17 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+          // Live update: show the user's spoken turn immediately.
+          setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
+          setPendingUser(null);
         } else if (message.source === "ai") {
           if (!voiceUserHasSpokenRef.current) return;
-          await add({ data: { threadId, role: "assistant", content: cleanAssistantText(text) } });
+          const cleaned = cleanAssistantText(text);
+          // Live update: show assistant turn the moment the transcript arrives.
+          setPendingAssistant(cleaned);
+          await add({ data: { threadId, role: "assistant", content: cleaned } });
+          setPendingAssistant("");
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
@@ -297,9 +315,18 @@ function ThreadView({ threadId }: { threadId: string }) {
       total += line.length + 1;
     }
     const history = kept.join("\n");
+    const rules = [
+      "Behavioral rules for this session:",
+      "- Do not greet or introduce yourself again.",
+      "- If asked for a table, output a GitHub-Flavored Markdown table directly.",
+      "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
+      "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
+      "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
+      "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
+    ].join("\n");
     return history
-      ? `Prior conversation in this thread (most recent last):\n${history}\n\nContinue naturally from here. Do not greet again. Do not introduce yourself. If asked for a table, output a Markdown table directly.`
-      : "Voice mode is open. Wait for the user's next message. Do not greet, introduce yourself, or start a new conversation. If asked for a table, output a Markdown table directly.";
+      ? `Prior conversation in this thread (most recent last):\n${history}\n\n${rules}\n\nContinue naturally from here.`
+      : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
   async function startVoice() {
