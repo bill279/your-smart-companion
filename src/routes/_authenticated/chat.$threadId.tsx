@@ -550,6 +550,24 @@ function ThreadView({ threadId }: { threadId: string }) {
 
         {/* Composer */}
         {voiceError && (
+          <></>
+        )}
+        {showScrollDown && (
+          <button
+            type="button"
+            onClick={() =>
+              scrollRef.current?.scrollTo({
+                top: scrollRef.current.scrollHeight,
+                behavior: "smooth",
+              })
+            }
+            aria-label="Scroll to latest"
+            className="absolute bottom-24 right-4 md:right-10 z-20 w-10 h-10 rounded-full bg-card border border-border shadow-md flex items-center justify-center text-foreground hover:bg-secondary"
+          >
+            <ArrowDown size={18} />
+          </button>
+        )}
+        {voiceError && (
           <div className="relative z-10 mx-4 md:mx-10 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {voiceError}
           </div>
