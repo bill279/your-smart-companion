@@ -224,6 +224,15 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
+      // If the session was previously connected and dropped for any non-error
+      // reason (typically ElevenLabs idle timeout), silently reconnect so the
+      // user stays in voice mode until they explicitly tap to stop.
+      if (hasConnectedVoiceRef.current && details?.reason !== "error") {
+        setTimeout(() => {
+          if (voiceStateRef.current === "idle") void startVoice();
+        }, 300);
+        return;
+      }
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
