@@ -29,6 +29,30 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
+const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automation'?s assistant\.\s*How can I help\??\s*/i;
+const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
+const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
+
+type VoiceModeState = "off" | "connecting" | "on" | "closing" | "error";
+
+type BrowserSpeechRecognition = EventTarget & {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => BrowserSpeechRecognition;
+    webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+  }
+}
 
 function cleanAssistantText(text: string) {
   return text
@@ -36,7 +60,10 @@ function cleanAssistantText(text: string) {
     .replace(/^\s*Hello there!\s*I'm Alex[\s\S]*?today\??\s*/i, "")
     .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
+    .replace(BPA_INTRO, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
+    .replace(STRUCTURED_TABLE_REFUSAL, "")
+    .replace(TABLE_RETRY_PROMPT, "")
     .trim();
 }
 
@@ -80,15 +107,23 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
-  const [isStartingVoice, setIsStartingVoice] = useState(false);
+  const [voiceMode, setVoiceMode] = useState<VoiceModeState>("off");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
-  const voiceShouldStayOnRef = useRef(false);
   const isStartingVoiceRef = useRef(false);
-  const reconnectTimerRef = useRef<number | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
   const disconnectRequestedRef = useRef(false);
+  const hasConnectedVoiceRef = useRef(false);
+  const lastVoiceStartAtRef = useRef(0);
+  const voiceConnectTimeoutRef = useRef<number | null>(null);
+  const voiceCleanupReasonRef = useRef<"manual" | "timeout" | null>(null);
+  const browserRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const browserVoiceActiveRef = useRef(false);
+  const browserVoiceRestartTimerRef = useRef<number | null>(null);
+  const browserVoiceTranscriptRef = useRef("");
+  const browserVoiceSpeakingRef = useRef(false);
 
   const messages = messagesQ.data ?? [];
 
@@ -110,7 +145,14 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.addEventListener("unhandledrejection", handler);
     return () => {
       window.removeEventListener("unhandledrejection", handler);
-      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      if (voiceConnectTimeoutRef.current) window.clearTimeout(voiceConnectTimeoutRef.current);
+      stopBrowserVoice();
+      disconnectRequestedRef.current = true;
+      try {
+        conversationRef.current?.endSession();
+      } catch (err) {
+        console.warn("voice cleanup failed", err);
+      }
     };
   }, []);
 
@@ -148,7 +190,13 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onConnect: () => {
       toast.success("BPA Bot online");
-      reconnectAttemptsRef.current = 0;
+      if (voiceConnectTimeoutRef.current) {
+        window.clearTimeout(voiceConnectTimeoutRef.current);
+        voiceConnectTimeoutRef.current = null;
+      }
+      setVoiceMode("on");
+      setVoiceError(null);
+      hasConnectedVoiceRef.current = true;
       disconnectRequestedRef.current = false;
       const ctx = pendingContextRef.current;
       if (ctx) {
@@ -161,16 +209,51 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: () => {
-      if (voiceShouldStayOnRef.current && !disconnectRequestedRef.current) {
-        scheduleVoiceReconnect();
+      if (voiceCleanupReasonRef.current === "timeout") {
+        voiceCleanupReasonRef.current = null;
+        hasConnectedVoiceRef.current = false;
+        isStartingVoiceRef.current = false;
+        pendingContextRef.current = "";
+        if (voiceConnectTimeoutRef.current) {
+          window.clearTimeout(voiceConnectTimeoutRef.current);
+          voiceConnectTimeoutRef.current = null;
+        }
         return;
       }
-      toast("BPA Bot offline");
+      if (!disconnectRequestedRef.current && hasConnectedVoiceRef.current) {
+        setVoiceMode("error");
+        setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
+        toast.error("Voice disconnected. Tap the mic once to reconnect.");
+      } else {
+        setVoiceMode("off");
+        setVoiceError(null);
+        if (voiceCleanupReasonRef.current !== "manual") toast("BPA Bot offline");
+        voiceCleanupReasonRef.current = null;
+      }
+      pendingContextRef.current = "";
+      hasConnectedVoiceRef.current = false;
+      isStartingVoiceRef.current = false;
+      if (voiceConnectTimeoutRef.current) {
+        window.clearTimeout(voiceConnectTimeoutRef.current);
+        voiceConnectTimeoutRef.current = null;
+      }
     },
     onError: (e) => {
       const msg = String(e || "Voice error");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
-      toast.error(msg);
+      if (voiceConnectTimeoutRef.current) {
+        window.clearTimeout(voiceConnectTimeoutRef.current);
+        voiceConnectTimeoutRef.current = null;
+      }
+      isStartingVoiceRef.current = false;
+      pendingContextRef.current = "";
+      hasConnectedVoiceRef.current = false;
+      const friendly = /concurrent|capacity|rate/i.test(msg)
+        ? "Voice is still closing another session. Wait a few seconds, then tap the mic once."
+        : msg;
+      setVoiceMode("error");
+      setVoiceError(friendly);
+      toast.error(friendly);
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -204,8 +287,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const isConnected = conversation.status === "connected";
   conversationRef.current = conversation;
 
-  const reconnectAttemptsRef = useRef(0);
-
   function buildVoiceContext() {
     const MAX_CHARS = 12000;
     const recent = (messages ?? []).slice(-100).map(
@@ -225,64 +306,198 @@ function ThreadView({ threadId }: { threadId: string }) {
       : "Voice mode is open. Wait for the user's next message. Do not greet, introduce yourself, or start a new conversation. If asked for a table, output a Markdown table directly.";
   }
 
-  function scheduleVoiceReconnect() {
-    if (reconnectTimerRef.current || isStartingVoiceRef.current) return;
-    if (reconnectAttemptsRef.current >= 3) {
-      voiceShouldStayOnRef.current = false;
-      toast.error("Voice disconnected. Tap the mic to reconnect.");
-      return;
-    }
-    reconnectAttemptsRef.current += 1;
-    const delay = reconnectAttemptsRef.current * 1800;
-    reconnectTimerRef.current = window.setTimeout(() => {
-      reconnectTimerRef.current = null;
-      if (voiceShouldStayOnRef.current && conversationRef.current?.status !== "connected") {
-        void startVoice({ reconnecting: true });
-      }
-    }, delay);
-  }
-
-  async function startVoice(options?: { reconnecting?: boolean }) {
+  async function startVoice() {
     if (isStartingVoiceRef.current || conversationRef.current?.status === "connected") return;
-    voiceShouldStayOnRef.current = true;
+    const now = Date.now();
+    if (now - lastVoiceStartAtRef.current < 2500) return;
+    lastVoiceStartAtRef.current = now;
     disconnectRequestedRef.current = false;
+    hasConnectedVoiceRef.current = false;
     isStartingVoiceRef.current = true;
-    setIsStartingVoice(true);
+    setVoiceMode("connecting");
+    setVoiceError(null);
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      const { signedUrl } = await getToken({});
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permissionStream.getTracks().forEach((track) => track.stop());
+      const { token } = await getToken({});
       pendingContextRef.current = buildVoiceContext();
-      await conversation.startSession({
-        signedUrl,
-        connectionType: "websocket",
+      voiceConnectTimeoutRef.current = window.setTimeout(() => {
+        if (conversationRef.current?.status !== "connected") {
+          disconnectRequestedRef.current = true;
+          voiceCleanupReasonRef.current = "timeout";
+          hasConnectedVoiceRef.current = false;
+          setVoiceMode("error");
+          setVoiceError("Voice did not connect. Tap the mic once to try again.");
+          try {
+            conversationRef.current?.endSession();
+          } catch (err) {
+            console.warn("voice timeout cleanup failed", err);
+          }
+        }
+      }, 15000);
+      conversation.startSession({
+        conversationToken: token,
+        connectionType: "webrtc",
         overrides: {
           agent: {
             prompt: { prompt: VOICE_SESSION_PROMPT },
-            firstMessage: "I'm listening.",
+            firstMessage: "",
           },
         },
       });
     } catch (e) {
-      if (voiceShouldStayOnRef.current && options?.reconnecting) {
-        scheduleVoiceReconnect();
-      } else {
-        voiceShouldStayOnRef.current = false;
-        toast.error(e instanceof Error ? e.message : "Could not start voice");
+      const raw = e instanceof Error ? e.message : "Could not start voice";
+      const friendly = /permission|notallowed/i.test(raw)
+        ? "Microphone access is blocked. Allow microphone access, then tap the mic once."
+        : raw;
+      if (/concurrent|capacity|rate|closing another session/i.test(raw)) {
+        startBrowserVoice();
+        return;
       }
+      voiceCleanupReasonRef.current = "timeout";
+      setVoiceMode("error");
+      setVoiceError(friendly);
+      disconnectRequestedRef.current = true;
+      hasConnectedVoiceRef.current = false;
+      pendingContextRef.current = "";
+      if (voiceConnectTimeoutRef.current) {
+        window.clearTimeout(voiceConnectTimeoutRef.current);
+        voiceConnectTimeoutRef.current = null;
+      }
+      toast.error(friendly);
     } finally {
       isStartingVoiceRef.current = false;
-      setIsStartingVoice(false);
     }
   }
-  async function stopVoice() {
-    voiceShouldStayOnRef.current = false;
-    disconnectRequestedRef.current = true;
-    reconnectAttemptsRef.current = 0;
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
+
+  function startBrowserVoice() {
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setVoiceMode("error");
+      setVoiceError("Voice is unavailable in this browser. Type your message instead.");
+      toast.error("Voice is unavailable in this browser.");
+      return;
     }
-    await conversation.endSession();
+
+    browserVoiceActiveRef.current = true;
+    browserVoiceTranscriptRef.current = "";
+    disconnectRequestedRef.current = false;
+    hasConnectedVoiceRef.current = true;
+    setVoiceMode("on");
+    setVoiceError(null);
+    toast.success("Voice mode on");
+
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      let finalText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) finalText += result[0].transcript;
+      }
+      const text = finalText.trim();
+      if (!text || text === browserVoiceTranscriptRef.current) return;
+      browserVoiceTranscriptRef.current = text;
+      addMut.mutate(text);
+    };
+    recognition.onerror = (event) => {
+      if (!browserVoiceActiveRef.current) return;
+      if (event.error === "no-speech" || event.error === "aborted") return;
+      const msg = event.error === "not-allowed"
+        ? "Microphone access is blocked. Allow microphone access, then tap the mic once."
+        : "Voice listening had a problem. Tap the mic once to restart.";
+      setVoiceMode("error");
+      setVoiceError(msg);
+      toast.error(msg);
+    };
+    recognition.onend = () => {
+      if (!browserVoiceActiveRef.current) return;
+      if (browserVoiceSpeakingRef.current) return;
+      if (browserVoiceRestartTimerRef.current) window.clearTimeout(browserVoiceRestartTimerRef.current);
+      browserVoiceRestartTimerRef.current = window.setTimeout(() => {
+        try {
+          recognition.start();
+        } catch {
+          // Already listening or browser rejected an immediate restart.
+        }
+      }, 350);
+    };
+    browserRecognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch (err) {
+      console.warn("browser voice start failed", err);
+    }
+  }
+
+  function stopBrowserVoice() {
+    browserVoiceActiveRef.current = false;
+    if (browserVoiceRestartTimerRef.current) {
+      window.clearTimeout(browserVoiceRestartTimerRef.current);
+      browserVoiceRestartTimerRef.current = null;
+    }
+    window.speechSynthesis?.cancel();
+    browserVoiceSpeakingRef.current = false;
+    const recognition = browserRecognitionRef.current;
+    browserRecognitionRef.current = null;
+    if (recognition) {
+      recognition.onend = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      try {
+        recognition.abort();
+      } catch (err) {
+        console.warn("browser voice stop failed", err);
+      }
+    }
+  }
+
+  function speakBrowserVoice(text: string) {
+    if (!browserVoiceActiveRef.current || !text.trim() || !window.speechSynthesis) return;
+    const recognition = browserRecognitionRef.current;
+    browserVoiceSpeakingRef.current = true;
+    try {
+      recognition?.stop();
+    } catch {
+      // Ignore if already stopped.
+    }
+    const utterance = new SpeechSynthesisUtterance(text.replace(/\|/g, " ").slice(0, 1200));
+    utterance.rate = 1;
+    utterance.onend = () => {
+      browserVoiceSpeakingRef.current = false;
+      if (!browserVoiceActiveRef.current || !recognition) return;
+      try {
+        recognition.start();
+      } catch {
+        // The normal onend restart loop will retry if needed.
+      }
+    };
+    utterance.onerror = () => {
+      browserVoiceSpeakingRef.current = false;
+    };
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function stopVoice() {
+    disconnectRequestedRef.current = true;
+    voiceCleanupReasonRef.current = "manual";
+    hasConnectedVoiceRef.current = false;
+    stopBrowserVoice();
+    pendingContextRef.current = "";
+    if (voiceConnectTimeoutRef.current) {
+      window.clearTimeout(voiceConnectTimeoutRef.current);
+      voiceConnectTimeoutRef.current = null;
+    }
+    setVoiceMode("closing");
+    setVoiceError(null);
+    try {
+      if (conversation.status === "connected") await conversation.endSession();
+    } finally {
+      setVoiceMode("off");
+    }
   }
 
   const addMut = useMutation({
@@ -336,6 +551,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         acc += decoder.decode(value, { stream: true });
         setPendingAssistant(cleanAssistantText(acc));
       }
+      speakBrowserVoice(cleanAssistantText(acc));
       setPendingAssistant("");
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
@@ -450,6 +666,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         {/* Composer */}
+        {voiceError && (
+          <div className="relative z-10 mx-4 md:mx-10 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {voiceError}
+          </div>
+        )}
         <form
           onSubmit={onSubmit}
           className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex items-center gap-2"
@@ -458,34 +679,39 @@ function ThreadView({ threadId }: { threadId: string }) {
             type="button"
             onClick={() => {
               if (isConnected) void stopVoice();
+              else if (voiceMode === "on") void stopVoice();
               else void startVoice();
             }}
-            disabled={isStartingVoice}
+            disabled={voiceMode === "connecting" || voiceMode === "closing"}
             title={
-              isStartingVoice
+              voiceMode === "connecting"
                 ? "Connecting…"
-                : isConnected
+                : voiceMode === "closing"
+                ? "Closing…"
+                : isConnected || voiceMode === "on"
                 ? conversation.isSpeaking
                   ? "Speaking…"
                   : "Listening… tap to stop"
                 : "Tap to talk"
             }
             className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
-              isConnected
+              isConnected || voiceMode === "on"
                 ? "border-accent bg-accent/15 hud-pulse text-accent"
                 : "border-border bg-secondary hover:bg-secondary/80 text-primary disabled:opacity-60"
             }`}
           >
-            {isConnected ? <MicOff size={18} /> : <Mic size={18} />}
+            {isConnected || voiceMode === "on" ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
           <input
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              isStartingVoice
+              voiceMode === "connecting"
                 ? "Connecting voice…"
-                : isConnected
+                : voiceMode === "closing"
+                ? "Closing voice…"
+                : isConnected || voiceMode === "on"
                 ? conversation.isSpeaking
                   ? "BPA Bot is speaking…"
                   : "Listening… or type"
