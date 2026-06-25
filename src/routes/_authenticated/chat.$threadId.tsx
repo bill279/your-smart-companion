@@ -105,7 +105,14 @@ function ThreadView({ threadId }: { threadId: string }) {
   const messages = messagesQ.data ?? [];
 
   function scrollToLatest() {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+    // Fallback: also scroll the window in case the page itself is scrolling
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+    }
   }
 
   useEffect(() => {
