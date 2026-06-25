@@ -30,6 +30,8 @@ Never say you are unable to display a visual table directly in this chat interfa
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
+type VoiceModeState = "off" | "connecting" | "on" | "closing" | "error";
+
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
@@ -80,15 +82,16 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
-  const [isStartingVoice, setIsStartingVoice] = useState(false);
+  const [voiceMode, setVoiceMode] = useState<VoiceModeState>("off");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
-  const voiceShouldStayOnRef = useRef(false);
   const isStartingVoiceRef = useRef(false);
-  const reconnectTimerRef = useRef<number | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
   const disconnectRequestedRef = useRef(false);
+  const hasConnectedVoiceRef = useRef(false);
+  const lastVoiceStartAtRef = useRef(0);
 
   const messages = messagesQ.data ?? [];
 
@@ -110,7 +113,12 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.addEventListener("unhandledrejection", handler);
     return () => {
       window.removeEventListener("unhandledrejection", handler);
-      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      disconnectRequestedRef.current = true;
+      try {
+        conversationRef.current?.endSession();
+      } catch (err) {
+        console.warn("voice cleanup failed", err);
+      }
     };
   }, []);
 
@@ -148,7 +156,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onConnect: () => {
       toast.success("BPA Bot online");
-      reconnectAttemptsRef.current = 0;
+      setVoiceMode("on");
+      setVoiceError(null);
+      hasConnectedVoiceRef.current = true;
       disconnectRequestedRef.current = false;
       const ctx = pendingContextRef.current;
       if (ctx) {
@@ -161,16 +171,28 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: () => {
-      if (voiceShouldStayOnRef.current && !disconnectRequestedRef.current) {
-        scheduleVoiceReconnect();
-        return;
+      if (!disconnectRequestedRef.current && hasConnectedVoiceRef.current) {
+        setVoiceMode("error");
+        setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
+        toast.error("Voice disconnected. Tap the mic once to reconnect.");
+      } else {
+        setVoiceMode("off");
+        setVoiceError(null);
+        toast("BPA Bot offline");
       }
-      toast("BPA Bot offline");
+      pendingContextRef.current = "";
+      hasConnectedVoiceRef.current = false;
+      isStartingVoiceRef.current = false;
     },
     onError: (e) => {
       const msg = String(e || "Voice error");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
-      toast.error(msg);
+      const friendly = /concurrent|capacity|rate/i.test(msg)
+        ? "Voice is still closing another session. Wait a few seconds, then tap the mic once."
+        : msg;
+      setVoiceMode("error");
+      setVoiceError(friendly);
+      toast.error(friendly);
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -204,8 +226,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const isConnected = conversation.status === "connected";
   conversationRef.current = conversation;
 
-  const reconnectAttemptsRef = useRef(0);
-
   function buildVoiceContext() {
     const MAX_CHARS = 12000;
     const recent = (messages ?? []).slice(-100).map(
@@ -225,64 +245,55 @@ function ThreadView({ threadId }: { threadId: string }) {
       : "Voice mode is open. Wait for the user's next message. Do not greet, introduce yourself, or start a new conversation. If asked for a table, output a Markdown table directly.";
   }
 
-  function scheduleVoiceReconnect() {
-    if (reconnectTimerRef.current || isStartingVoiceRef.current) return;
-    if (reconnectAttemptsRef.current >= 3) {
-      voiceShouldStayOnRef.current = false;
-      toast.error("Voice disconnected. Tap the mic to reconnect.");
-      return;
-    }
-    reconnectAttemptsRef.current += 1;
-    const delay = reconnectAttemptsRef.current * 1800;
-    reconnectTimerRef.current = window.setTimeout(() => {
-      reconnectTimerRef.current = null;
-      if (voiceShouldStayOnRef.current && conversationRef.current?.status !== "connected") {
-        void startVoice({ reconnecting: true });
-      }
-    }, delay);
-  }
-
-  async function startVoice(options?: { reconnecting?: boolean }) {
+  async function startVoice() {
     if (isStartingVoiceRef.current || conversationRef.current?.status === "connected") return;
-    voiceShouldStayOnRef.current = true;
+    const now = Date.now();
+    if (now - lastVoiceStartAtRef.current < 2500) return;
+    lastVoiceStartAtRef.current = now;
     disconnectRequestedRef.current = false;
+    hasConnectedVoiceRef.current = false;
     isStartingVoiceRef.current = true;
-    setIsStartingVoice(true);
+    setVoiceMode("connecting");
+    setVoiceError(null);
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const { signedUrl } = await getToken({});
       pendingContextRef.current = buildVoiceContext();
-      await conversation.startSession({
+      conversation.startSession({
         signedUrl,
-        connectionType: "websocket",
         overrides: {
           agent: {
             prompt: { prompt: VOICE_SESSION_PROMPT },
-            firstMessage: "I'm listening.",
+            firstMessage: "",
           },
         },
       });
     } catch (e) {
-      if (voiceShouldStayOnRef.current && options?.reconnecting) {
-        scheduleVoiceReconnect();
-      } else {
-        voiceShouldStayOnRef.current = false;
-        toast.error(e instanceof Error ? e.message : "Could not start voice");
-      }
+      const raw = e instanceof Error ? e.message : "Could not start voice";
+      const friendly = /permission|notallowed/i.test(raw)
+        ? "Microphone access is blocked. Allow microphone access, then tap the mic once."
+        : raw;
+      setVoiceMode("error");
+      setVoiceError(friendly);
+      disconnectRequestedRef.current = true;
+      hasConnectedVoiceRef.current = false;
+      pendingContextRef.current = "";
+      toast.error(friendly);
     } finally {
       isStartingVoiceRef.current = false;
-      setIsStartingVoice(false);
     }
   }
   async function stopVoice() {
-    voiceShouldStayOnRef.current = false;
     disconnectRequestedRef.current = true;
-    reconnectAttemptsRef.current = 0;
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
+    hasConnectedVoiceRef.current = false;
+    pendingContextRef.current = "";
+    setVoiceMode("closing");
+    setVoiceError(null);
+    try {
+      await conversation.endSession();
+    } finally {
+      setVoiceMode("off");
     }
-    await conversation.endSession();
   }
 
   const addMut = useMutation({
@@ -450,6 +461,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         {/* Composer */}
+        {voiceError && (
+          <div className="relative z-10 mx-4 md:mx-10 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {voiceError}
+          </div>
+        )}
         <form
           onSubmit={onSubmit}
           className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex items-center gap-2"
@@ -460,10 +476,12 @@ function ThreadView({ threadId }: { threadId: string }) {
               if (isConnected) void stopVoice();
               else void startVoice();
             }}
-            disabled={isStartingVoice}
+            disabled={voiceMode === "connecting" || voiceMode === "closing"}
             title={
-              isStartingVoice
+              voiceMode === "connecting"
                 ? "Connecting…"
+                : voiceMode === "closing"
+                ? "Closing…"
                 : isConnected
                 ? conversation.isSpeaking
                   ? "Speaking…"
@@ -483,8 +501,10 @@ function ThreadView({ threadId }: { threadId: string }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              isStartingVoice
+              voiceMode === "connecting"
                 ? "Connecting voice…"
+                : voiceMode === "closing"
+                ? "Closing voice…"
                 : isConnected
                 ? conversation.isSpeaking
                   ? "BPA Bot is speaking…"
