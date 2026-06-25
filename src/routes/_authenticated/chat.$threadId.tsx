@@ -114,6 +114,14 @@ function ThreadView({ threadId }: { threadId: string }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, pendingAssistant, pendingUser]);
 
+  useEffect(() => {
+    if (!voiceRequested) return;
+    voiceDesiredRef.current = true;
+    if (conversationRef.current?.status !== "connected" && !isStartingVoiceRef.current) {
+      scheduleVoiceReconnect(1000);
+    }
+  }, [voiceRequested]);
+
   // Guard against an ElevenLabs SDK bug where malformed error events throw
   // `undefined is not an object (evaluating 'event.error_event.error_type')`
   // as an unhandled rejection and crash the chat tree.
