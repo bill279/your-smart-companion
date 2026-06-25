@@ -97,6 +97,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
   const disconnectRequestedRef = useRef(false);
   const hasConnectedVoiceRef = useRef(false);
+  const hasEverConnectedVoiceRef = useRef(false);
+  const voiceDesiredRef = useRef(false);
+  const voiceReconnectTimerRef = useRef<number | null>(null);
+  const voiceReconnectCountRef = useRef(0);
   const lastVoiceStartAtRef = useRef(0);
   const voiceConnectTimeoutRef = useRef<number | null>(null);
   const voiceCleanupReasonRef = useRef<"manual" | "timeout" | null>(null);
@@ -121,8 +125,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.addEventListener("unhandledrejection", handler);
     return () => {
       window.removeEventListener("unhandledrejection", handler);
+      clearVoiceReconnect();
       if (voiceConnectTimeoutRef.current) window.clearTimeout(voiceConnectTimeoutRef.current);
       disconnectRequestedRef.current = true;
+      voiceDesiredRef.current = false;
       try {
         conversationRef.current?.endSession();
       } catch (err) {
@@ -164,7 +170,17 @@ function ThreadView({ threadId }: { threadId: string }) {
       },
     },
     onConnect: () => {
+      if (!voiceDesiredRef.current) {
+        try {
+          conversationRef.current?.endSession();
+        } catch (err) {
+          console.warn("stale voice session cleanup failed", err);
+        }
+        return;
+      }
       toast.success("BPA Bot online");
+      clearVoiceReconnect();
+      voiceReconnectCountRef.current = 0;
       if (voiceConnectTimeoutRef.current) {
         window.clearTimeout(voiceConnectTimeoutRef.current);
         voiceConnectTimeoutRef.current = null;
@@ -172,6 +188,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceMode("on");
       setVoiceError(null);
       hasConnectedVoiceRef.current = true;
+      hasEverConnectedVoiceRef.current = true;
       disconnectRequestedRef.current = false;
       const ctx = pendingContextRef.current;
       if (ctx) {
@@ -195,7 +212,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         }
         return;
       }
-      if (!disconnectRequestedRef.current && hasConnectedVoiceRef.current) {
+      if (voiceDesiredRef.current && !disconnectRequestedRef.current) {
         pendingContextRef.current = "";
         hasConnectedVoiceRef.current = false;
         isStartingVoiceRef.current = false;
@@ -203,8 +220,9 @@ function ThreadView({ threadId }: { threadId: string }) {
           window.clearTimeout(voiceConnectTimeoutRef.current);
           voiceConnectTimeoutRef.current = null;
         }
-        setVoiceMode("error");
-        setVoiceError("Voice disconnected. Tap the mic once to reconnect.");
+        setVoiceMode("on");
+        setVoiceError(null);
+        scheduleVoiceReconnect();
         return;
       } else {
         setVoiceMode("off");
@@ -230,9 +248,15 @@ function ThreadView({ threadId }: { threadId: string }) {
       isStartingVoiceRef.current = false;
       pendingContextRef.current = "";
       hasConnectedVoiceRef.current = false;
-      disconnectRequestedRef.current = true;
-      setVoiceMode("error");
-      setVoiceError("Voice had a problem. Tap the mic once to reconnect.");
+      if (voiceDesiredRef.current) {
+        setVoiceMode("on");
+        setVoiceError(null);
+        scheduleVoiceReconnect();
+      } else {
+        disconnectRequestedRef.current = true;
+        setVoiceMode("error");
+        setVoiceError("Voice had a problem. Tap the mic once to reconnect.");
+      }
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -285,15 +309,37 @@ function ThreadView({ threadId }: { threadId: string }) {
       : "Voice mode is open. Wait for the user's next message. Do not greet, introduce yourself, or start a new conversation. If asked for a table, output a Markdown table directly.";
   }
 
-  async function startVoice() {
+  function clearVoiceReconnect() {
+    if (voiceReconnectTimerRef.current) {
+      window.clearTimeout(voiceReconnectTimerRef.current);
+      voiceReconnectTimerRef.current = null;
+    }
+  }
+
+  function scheduleVoiceReconnect(delayMs = 2500) {
+    if (!voiceDesiredRef.current || voiceReconnectTimerRef.current) return;
+    const wait = Math.min(delayMs + voiceReconnectCountRef.current * 1000, 8000);
+    voiceReconnectCountRef.current += 1;
+    voiceReconnectTimerRef.current = window.setTimeout(() => {
+      voiceReconnectTimerRef.current = null;
+      if (voiceDesiredRef.current) void startVoice({ silent: true });
+    }, wait);
+  }
+
+  async function startVoice(options: { silent?: boolean } = {}) {
     if (isStartingVoiceRef.current || conversationRef.current?.status === "connected") return;
     const now = Date.now();
-    if (now - lastVoiceStartAtRef.current < 2500) return;
+    if (now - lastVoiceStartAtRef.current < 2500) {
+      if (voiceDesiredRef.current) scheduleVoiceReconnect(2600 - (now - lastVoiceStartAtRef.current));
+      return;
+    }
     lastVoiceStartAtRef.current = now;
+    voiceDesiredRef.current = true;
+    clearVoiceReconnect();
     disconnectRequestedRef.current = false;
     hasConnectedVoiceRef.current = false;
     isStartingVoiceRef.current = true;
-    setVoiceMode("connecting");
+    setVoiceMode(options.silent ? "on" : "connecting");
     setVoiceError(null);
     try {
       const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -302,11 +348,17 @@ function ThreadView({ threadId }: { threadId: string }) {
       pendingContextRef.current = buildVoiceContext();
       voiceConnectTimeoutRef.current = window.setTimeout(() => {
         if (conversationRef.current?.status !== "connected") {
-          disconnectRequestedRef.current = true;
           voiceCleanupReasonRef.current = "timeout";
           hasConnectedVoiceRef.current = false;
-          setVoiceMode("error");
-          setVoiceError("Voice did not connect. Tap the mic once to try again.");
+          if (voiceDesiredRef.current && hasEverConnectedVoiceRef.current) {
+            setVoiceMode("on");
+            setVoiceError(null);
+            scheduleVoiceReconnect();
+          } else {
+            disconnectRequestedRef.current = true;
+            setVoiceMode("error");
+            setVoiceError("Voice did not connect. Tap the mic once to try again.");
+          }
           try {
             conversationRef.current?.endSession();
           } catch (err) {
@@ -331,15 +383,27 @@ function ThreadView({ threadId }: { threadId: string }) {
         : raw;
       if (/concurrent|capacity|rate|closing another session/i.test(raw)) {
         voiceCleanupReasonRef.current = "timeout";
-        setVoiceMode("error");
-        setVoiceError("Voice is busy closing the previous session. Wait a few seconds and tap the mic.");
-        disconnectRequestedRef.current = true;
+        if (voiceDesiredRef.current && hasEverConnectedVoiceRef.current) {
+          setVoiceMode("on");
+          setVoiceError(null);
+          scheduleVoiceReconnect(4000);
+        } else {
+          setVoiceMode("error");
+          setVoiceError("Voice is busy closing the previous session. Wait a few seconds and tap the mic.");
+          disconnectRequestedRef.current = true;
+        }
         return;
       }
       voiceCleanupReasonRef.current = "timeout";
-      setVoiceMode("error");
-      setVoiceError(friendly);
-      disconnectRequestedRef.current = true;
+      if (voiceDesiredRef.current && hasEverConnectedVoiceRef.current && !/permission|notallowed/i.test(raw)) {
+        setVoiceMode("on");
+        setVoiceError(null);
+        scheduleVoiceReconnect();
+      } else {
+        setVoiceMode("error");
+        setVoiceError(friendly);
+        disconnectRequestedRef.current = true;
+      }
       hasConnectedVoiceRef.current = false;
       pendingContextRef.current = "";
       if (voiceConnectTimeoutRef.current) {
@@ -353,6 +417,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   async function stopVoice() {
+    voiceDesiredRef.current = false;
+    clearVoiceReconnect();
+    voiceReconnectCountRef.current = 0;
     disconnectRequestedRef.current = true;
     voiceCleanupReasonRef.current = "manual";
     hasConnectedVoiceRef.current = false;
