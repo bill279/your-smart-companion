@@ -224,7 +224,31 @@ th{background:#0b2545;color:#fff;font-weight:600;} tr:nth-child(even) td{backgro
 hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
 </style></head><body><div class="container">${inner}</div></body></html>`;
                 };
-                if (process.env.GOOGLE_MAIL_API_KEY) {
+                 if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                   const r = await fetch(
+                     "https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail",
+                     {
+                       method: "POST",
+                       headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
+                       body: JSON.stringify({
+                         message: {
+                           subject,
+                           body: { contentType: "HTML", content: renderHtml(emailBody) },
+                           toRecipients: [{ emailAddress: { address: to } }],
+                           ...(cc
+                             ? { ccRecipients: [{ emailAddress: { address: cc } }] }
+                             : {}),
+                         },
+                       }),
+                     },
+                   );
+                   if (!r.ok) {
+                     const t = await r.text();
+                     return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
+                   }
+                   return { ok: true, provider: "outlook", to, subject };
+                 }
+                 if (process.env.GOOGLE_MAIL_API_KEY) {
                   const boundary = `bpa_${Math.random().toString(36).slice(2)}`;
                   const lines = [`To: ${to}`];
                   if (cc) lines.push(`Cc: ${cc}`);
@@ -264,30 +288,6 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
                   }
                   return { ok: true, provider: "gmail", to, subject };
-                }
-                if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
-                  const r = await fetch(
-                    "https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail",
-                    {
-                      method: "POST",
-                      headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
-                      body: JSON.stringify({
-                        message: {
-                          subject,
-                          body: { contentType: "HTML", content: renderHtml(emailBody) },
-                          toRecipients: [{ emailAddress: { address: to } }],
-                          ...(cc
-                            ? { ccRecipients: [{ emailAddress: { address: cc } }] }
-                            : {}),
-                        },
-                      }),
-                    },
-                  );
-                  if (!r.ok) {
-                    const t = await r.text();
-                    return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
-                  }
-                  return { ok: true, provider: "outlook", to, subject };
                 }
                 return { error: "No email provider connected." };
               },
