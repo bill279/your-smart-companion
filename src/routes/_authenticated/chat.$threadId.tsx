@@ -449,7 +449,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const voiceConnecting = voiceUiState === "starting";
 
   return (
-    <div className="min-h-screen flex relative">
+    <div className="h-dvh flex relative overflow-hidden">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
