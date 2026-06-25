@@ -33,8 +33,6 @@ const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automatio
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
-type VoiceModeState = "off" | "connecting" | "on" | "closing" | "error";
-
 let persistedVoiceRequested = false;
 
 function setPersistedVoiceRequested(value: boolean) {
