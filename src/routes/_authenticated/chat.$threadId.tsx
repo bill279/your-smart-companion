@@ -458,6 +458,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
       "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
       "- BE CONCISE: keep spoken replies short and conversational. Avoid long monologues so the user can interject naturally.",
+      "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
+      "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
+      "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
     ].join("\n");
     return history
       ? `Prior conversation in this thread (most recent last):\n${history}\n\n${rules}\n\nContinue naturally from here.`
