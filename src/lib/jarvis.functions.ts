@@ -41,7 +41,7 @@ export const getThreadMessages = createServerFn({ method: "GET" })
   .handler(async ({ context, data }) => {
     const { data: rows, error } = await context.supabase
       .from("messages")
-      .select("id,role,content,created_at")
+      .select("id,role,content,created_at,attachments")
       .eq("thread_id", data.threadId)
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
@@ -55,6 +55,16 @@ export const addMessage = createServerFn({ method: "POST" })
       threadId: z.string().uuid(),
       role: z.enum(["user", "assistant", "system"]),
       content: z.string().min(1),
+      attachments: z
+        .array(
+          z.object({
+            path: z.string(),
+            name: z.string(),
+            mimeType: z.string(),
+            size: z.number().int().optional(),
+          }),
+        )
+        .optional(),
     }).parse(d),
   )
   .handler(async ({ context, data }) => {
@@ -65,8 +75,9 @@ export const addMessage = createServerFn({ method: "POST" })
         user_id: context.userId,
         role: data.role,
         content: data.content,
+        attachments: data.attachments ?? [],
       })
-      .select("id,role,content,created_at")
+      .select("id,role,content,created_at,attachments")
       .single();
     if (error) throw new Error(error.message);
     await context.supabase

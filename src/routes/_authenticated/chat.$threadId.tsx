@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
@@ -17,6 +17,7 @@ import {
   listThreads,
   renameThread,
 } from "@/lib/jarvis.functions";
+import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
@@ -80,6 +81,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const createUploadUrl = useServerFn(createChatUploadUrl);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -90,6 +92,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  type Attachment = { path: string; name: string; mimeType: string; size: number };
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -406,7 +412,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const addMut = useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async ({ content, files }: { content: string; files: Attachment[] }) => {
       setPendingUser(content);
       setPendingAssistant("");
 
@@ -435,7 +441,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ threadId, content }),
+        body: JSON.stringify({ threadId, content, attachments: files }),
       });
 
       if (!res.ok || !res.body) {
@@ -472,9 +478,48 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const v = input.trim();
-    if (!v) return;
+    if (!v && attachments.length === 0) return;
+    if (uploading) return;
+    const files = attachments;
     setInput("");
-    addMut.mutate(v);
+    setAttachments([]);
+    addMut.mutate({ content: v || (files.length === 1 ? `Sent: ${files[0].name}` : `Sent ${files.length} files`), files });
+  }
+
+  async function handleFilesSelected(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    const incoming = Array.from(fileList);
+    if (attachments.length + incoming.length > 5) {
+      toast.error("Up to 5 files per message");
+      return;
+    }
+    setUploading(true);
+    try {
+      for (const file of incoming) {
+        if (file.size > 20 * 1024 * 1024) {
+          toast.error(`${file.name} is over 20MB`);
+          continue;
+        }
+        try {
+          const { path, token } = await createUploadUrl({
+            data: { threadId, name: file.name, mimeType: file.type || "application/octet-stream", size: file.size },
+          });
+          const { error } = await supabase.storage
+            .from("chat-uploads")
+            .uploadToSignedUrl(path, token, file, { contentType: file.type || undefined });
+          if (error) throw new Error(error.message);
+          setAttachments((cur) => [
+            ...cur,
+            { path, name: file.name, mimeType: file.type || "application/octet-stream", size: file.size },
+          ]);
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : `Failed to upload ${file.name}`);
+        }
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   const createMut = useMutation({
@@ -611,9 +656,17 @@ function ThreadView({ threadId }: { threadId: string }) {
               How can I help you today?
             </div>
           )}
-          {messages.map((m) => (
-            <Bubble key={m.id} role={m.role} content={m.content} />
-          ))}
+          {messages.map((m) => {
+            const att = (m as unknown as { attachments?: Attachment[] | null }).attachments;
+            return (
+              <Bubble
+                key={m.id}
+                role={m.role}
+                content={m.content}
+                attachments={Array.isArray(att) ? att : []}
+              />
+            );
+          })}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
           {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
           <div ref={latestMessageRef} aria-hidden="true" />
@@ -642,8 +695,35 @@ function ThreadView({ threadId }: { threadId: string }) {
         )}
         <form
           onSubmit={onSubmit}
-          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex items-center gap-2"
+          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex flex-col gap-2"
         >
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-1 pt-1">
+              {attachments.map((a) => (
+                <div
+                  key={a.path}
+                  className="flex items-center gap-1.5 rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs text-foreground"
+                >
+                  {a.mimeType.startsWith("image/") ? <ImageIcon size={12} /> : <FileText size={12} />}
+                  <span className="max-w-[160px] truncate">{a.name}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAttachments((cur) => cur.filter((x) => x.path !== a.path))
+                    }
+                    className="text-muted-foreground hover:text-destructive ml-1"
+                    aria-label={`Remove ${a.name}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              {uploading && (
+                <span className="text-xs text-muted-foreground self-center">Uploading…</span>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => {
@@ -668,6 +748,23 @@ function ThreadView({ threadId }: { threadId: string }) {
             {voiceActive ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
           <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/csv,text/markdown"
+            className="hidden"
+            onChange={(e) => handleFilesSelected(e.target.files)}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title="Attach file"
+            className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center border border-border bg-secondary hover:bg-secondary/80 text-primary disabled:opacity-40"
+          >
+            <Paperclip size={16} />
+          </button>
+          <input
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -684,18 +781,27 @@ function ThreadView({ threadId }: { threadId: string }) {
           />
           <button
             type="submit"
-            disabled={!input.trim() || addMut.isPending}
+            disabled={(!input.trim() && attachments.length === 0) || addMut.isPending || uploading}
             className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-2"
           >
             <Send size={14} /> Send
           </button>
+          </div>
         </form>
       </main>
     </div>
   );
 }
 
-function Bubble({ role, content }: { role: string; content: string }) {
+function Bubble({
+  role,
+  content,
+  attachments = [],
+}: {
+  role: string;
+  content: string;
+  attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
+}) {
   const isUser = role === "user";
   const displayContent = isUser ? content : cleanAssistantText(content);
   return (
@@ -712,6 +818,23 @@ function Bubble({ role, content }: { role: string; content: string }) {
             : "bg-card border border-border text-foreground"
         }`}
       >
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {attachments.map((a) => (
+              <div
+                key={a.path}
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${
+                  isUser
+                    ? "bg-primary-foreground/15 text-primary-foreground"
+                    : "bg-secondary text-foreground border border-border"
+                }`}
+              >
+                {a.mimeType.startsWith("image/") ? "🖼️" : "📎"}
+                <span className="max-w-[180px] truncate">{a.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div
           className={`prose prose-sm max-w-none ${
             isUser ? "prose-invert" : ""
