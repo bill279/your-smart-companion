@@ -18,6 +18,7 @@ import {
   renameThread,
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
+import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
