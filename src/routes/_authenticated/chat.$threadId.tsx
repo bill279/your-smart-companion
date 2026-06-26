@@ -702,6 +702,21 @@ function ThreadView({ threadId }: { threadId: string }) {
             <Menu size={20} />
           </button>
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
+          {quota && quota.available && quota.limit > 0 && (
+            <span
+              title={`Voice quota: ${quota.percentUsed}% used`}
+              className={
+                "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
+                (quotaTone === "danger"
+                  ? "bg-destructive/15 text-destructive"
+                  : quotaTone === "warn"
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  : "bg-secondary text-muted-foreground")
+              }
+            >
+              🎙 {quota.percentUsed}%
+            </span>
+          )}
         </div>
         {/* Messages */}
         <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
