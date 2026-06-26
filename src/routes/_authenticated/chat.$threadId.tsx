@@ -530,12 +530,12 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const addMut = useMutation({
-    mutationFn: async ({ content, files }: { content: string; files: Attachment[] }) => {
-      setPendingUser(content);
+    mutationFn: async ({ content, files, regenerate }: { content: string; files: Attachment[]; regenerate?: boolean }) => {
+      if (!regenerate) setPendingUser(content);
       setPendingAssistant("");
 
       // If voice is connected, route through ElevenLabs instead.
-      if (isConnected) {
+      if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
@@ -553,14 +553,28 @@ function ThreadView({ threadId }: { threadId: string }) {
         return;
       }
 
-      const res = await fetch("/api/chat", {
+      const controller = new AbortController();
+      abortRef.current = controller;
+      let res: Response;
+      try {
+        res = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ threadId, content, attachments: files }),
+        body: JSON.stringify({ threadId, content, attachments: files, regenerate }),
+        signal: controller.signal,
       });
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          setPendingUser(null);
+          setPendingAssistant("");
+          qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          return;
+        }
+        throw err;
+      }
 
       if (!res.ok || !res.body) {
         const msg = await res.text().catch(() => "Request failed");
@@ -576,22 +590,101 @@ function ThreadView({ threadId }: { threadId: string }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-        setPendingAssistant(cleanAssistantText(acc));
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+          setPendingAssistant(cleanAssistantText(acc));
+        }
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") throw err;
       }
       setPendingAssistant("");
+      abortRef.current = null;
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
     },
     onError: (e) => {
+      if ((e as Error).name === "AbortError") return;
       toast.error(e instanceof Error ? e.message : "Failed");
       setPendingUser(null);
       setPendingAssistant("");
     },
   });
+
+  function stopGenerating() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }
+
+  function regenerate() {
+    if (addMut.isPending) return;
+    if (isConnected) {
+      toast.error("Regenerate is for text chat. Stop voice first.");
+      return;
+    }
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+    addMut.mutate({ content: "", files: [], regenerate: true });
+  }
+
+  function buildChatMarkdown() {
+    const lines = [`# ${cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "BPA Bot chat")}`, ""];
+    for (const m of messages) {
+      lines.push(`## ${m.role === "user" ? "You" : "BPA Bot"} — ${new Date(m.created_at).toLocaleString()}`);
+      lines.push("");
+      lines.push(m.role === "assistant" ? cleanAssistantText(m.content) : m.content);
+      lines.push("");
+    }
+    return lines.join("\n");
+  }
+
+  function exportMarkdown() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    const md = buildChatMarkdown();
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bpa-bot-chat-${threadId.slice(0, 8)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportPrint() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    window.print();
+  }
+
+  async function exportEmailToMe() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    const { data: u } = await supabase.auth.getUser();
+    const to = u.user?.email;
+    if (!to) return toast.error("Could not find your email on file.");
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    if (!token) return toast.error("Sign in again");
+    const subject = `BPA Bot — ${cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "Conversation")}`;
+    const body = buildChatMarkdown();
+    const promise = fetch("/api/public/jarvis/tools/send_email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to, subject, body }),
+    }).then(async (r) => {
+      if (!r.ok) throw new Error(await r.text().catch(() => "Send failed"));
+    });
+    toast.promise(promise, {
+      loading: `Emailing chat to ${to}…`,
+      success: `Sent to ${to}`,
+      error: (e) => (e instanceof Error ? e.message : "Send failed"),
+    });
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
