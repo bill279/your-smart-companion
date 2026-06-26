@@ -3,6 +3,13 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
+@media print {
+  aside, form, [aria-label="Open menu"], [aria-label="Export chat"], .print\:hidden { display: none !important; }
+  .md\:hidden.fixed { display: none !important; }
+  main { overflow: visible !important; }
+  body, html { background: white !important; color: black !important; }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /*
