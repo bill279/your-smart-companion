@@ -412,7 +412,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const addMut = useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async ({ content, files }: { content: string; files: Attachment[] }) => {
       setPendingUser(content);
       setPendingAssistant("");
 
@@ -441,7 +441,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ threadId, content }),
+        body: JSON.stringify({ threadId, content, attachments: files }),
       });
 
       if (!res.ok || !res.body) {
@@ -478,9 +478,48 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const v = input.trim();
-    if (!v) return;
+    if (!v && attachments.length === 0) return;
+    if (uploading) return;
+    const files = attachments;
     setInput("");
-    addMut.mutate(v);
+    setAttachments([]);
+    addMut.mutate({ content: v || (files.length === 1 ? `Sent: ${files[0].name}` : `Sent ${files.length} files`), files });
+  }
+
+  async function handleFilesSelected(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    const incoming = Array.from(fileList);
+    if (attachments.length + incoming.length > 5) {
+      toast.error("Up to 5 files per message");
+      return;
+    }
+    setUploading(true);
+    try {
+      for (const file of incoming) {
+        if (file.size > 20 * 1024 * 1024) {
+          toast.error(`${file.name} is over 20MB`);
+          continue;
+        }
+        try {
+          const { path, token } = await createUploadUrl({
+            data: { threadId, name: file.name, mimeType: file.type || "application/octet-stream", size: file.size },
+          });
+          const { error } = await supabase.storage
+            .from("chat-uploads")
+            .uploadToSignedUrl(path, token, file, { contentType: file.type || undefined });
+          if (error) throw new Error(error.message);
+          setAttachments((cur) => [
+            ...cur,
+            { path, name: file.name, mimeType: file.type || "application/octet-stream", size: file.size },
+          ]);
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : `Failed to upload ${file.name}`);
+        }
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   const createMut = useMutation({
