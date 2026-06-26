@@ -646,6 +646,42 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <Users size={12} /> Saved contacts
         </Link>
+        {quota && quota.available && quota.limit > 0 && (
+          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
+            <div className="flex items-center justify-between text-[11px] mb-1.5">
+              <span className="font-medium text-foreground">Voice quota</span>
+              <span
+                className={
+                  quotaTone === "danger"
+                    ? "text-destructive font-semibold"
+                    : quotaTone === "warn"
+                    ? "text-amber-500 font-semibold"
+                    : "text-muted-foreground"
+                }
+              >
+                {quota.percentUsed}% used
+              </span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+              <div
+                className={
+                  quotaTone === "danger"
+                    ? "h-full bg-destructive"
+                    : quotaTone === "warn"
+                    ? "h-full bg-amber-500"
+                    : "h-full bg-primary"
+                }
+                style={{ width: `${Math.min(100, quota.percentUsed)}%` }}
+              />
+            </div>
+            <div className="mt-1.5 text-[10px] text-muted-foreground">
+              {quota.remaining.toLocaleString()} chars left
+              {quota.resetAt
+                ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
+                : ""}
+            </div>
+          </div>
+        )}
         <button
           onClick={signOut}
           className="m-4 flex items-center gap-2 justify-center py-2 text-xs text-muted-foreground hover:text-foreground"
