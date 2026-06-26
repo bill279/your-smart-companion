@@ -371,6 +371,11 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function startVoice() {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
+      toast.error("Voice quota exhausted — text chat still works.");
+      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+      return;
+    }
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
     hasConnectedVoiceRef.current = false;
