@@ -131,7 +131,7 @@ export const Route = createFileRoute("/api/chat")({
               thread_id: body.threadId ?? null,
               action,
               summary,
-              payload,
+              payload: payload as never,
               status,
             });
           } catch {
