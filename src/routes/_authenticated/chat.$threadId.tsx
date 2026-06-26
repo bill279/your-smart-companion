@@ -1079,16 +1079,59 @@ function ThreadView({ threadId }: { threadId: string }) {
             }
             className="flex-1 bg-transparent outline-none px-3 text-sm"
           />
-          <button
-            type="submit"
-            disabled={(!input.trim() && attachments.length === 0) || addMut.isPending || uploading}
-            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-2"
-          >
-            <Send size={14} /> Send
-          </button>
+          {addMut.isPending && !isConnected ? (
+            <button
+              type="button"
+              onClick={stopGenerating}
+              className="px-4 py-2 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 flex items-center gap-2"
+              title="Stop generating"
+            >
+              <Square size={14} /> Stop
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={(!input.trim() && attachments.length === 0) || uploading}
+              className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-2"
+            >
+              <Send size={14} /> Send
+            </button>
+          )}
           </div>
         </form>
+        {/* Regenerate action below composer when there's an assistant message and we're idle */}
+        {!addMut.isPending && !isConnected && messages.some((m) => m.role === "assistant") && (
+          <div className="relative z-10 -mt-4 mb-4 flex justify-center">
+            <button
+              type="button"
+              onClick={regenerate}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 px-3 py-1 rounded-full border border-border bg-card"
+              title="Regenerate last response"
+            >
+              <RotateCcw size={12} /> Regenerate
+            </button>
+          </div>
+        )}
       </main>
+    </div>
+  );
+}
+
+function ExportMenu({ onPrint, onMarkdown, onEmail }: { onPrint: () => void; onMarkdown: () => void; onEmail: () => void }) {
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="absolute right-0 top-full mt-1 w-56 rounded-md border border-border bg-card shadow-lg z-50 overflow-hidden"
+    >
+      <button onClick={onPrint} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <Printer size={14} /> Print / Save as PDF
+      </button>
+      <button onClick={onMarkdown} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <Download size={14} /> Download Markdown
+      </button>
+      <button onClick={onEmail} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <Mail size={14} /> Email chat to me
+      </button>
     </div>
   );
 }
