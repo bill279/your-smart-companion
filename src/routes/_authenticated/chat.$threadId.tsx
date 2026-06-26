@@ -657,7 +657,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             </div>
           )}
           {messages.map((m) => (
-            <Bubble key={m.id} role={m.role} content={m.content} />
+            <Bubble key={m.id} role={m.role} content={m.content} attachments={(m as { attachments?: Attachment[] }).attachments ?? []} />
           ))}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
           {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
