@@ -119,14 +119,31 @@ export const Route = createFileRoute("/api/chat")({
           threadId?: string;
           content?: string;
           attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
+          regenerate?: boolean;
         };
         const attachments = body.attachments ?? [];
-        if (!body.threadId || (!body.content?.trim() && attachments.length === 0)) {
+        if (!body.threadId || (!body.regenerate && !body.content?.trim() && attachments.length === 0)) {
           return new Response("Bad request", { status: 400 });
         }
         const userText = body.content?.trim() ?? "";
 
-        // Save user message (with attachments metadata)
+        // Save user message (with attachments metadata). Skip when regenerating —
+        // we re-use the existing last user turn and just produce a new assistant reply.
+        if (body.regenerate) {
+          // Delete the most recent assistant message in this thread so the new
+          // stream replaces it cleanly.
+          const { data: lastAssistant } = await supabase
+            .from("messages")
+            .select("id,created_at")
+            .eq("thread_id", body.threadId)
+            .eq("role", "assistant")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (lastAssistant?.id) {
+            await supabase.from("messages").delete().eq("id", lastAssistant.id);
+          }
+        } else {
         const { error: insErr } = await supabase.from("messages").insert({
           thread_id: body.threadId,
           user_id: userId,
@@ -139,6 +156,7 @@ export const Route = createFileRoute("/api/chat")({
           attachments,
         });
         if (insErr) return new Response(insErr.message, { status: 400 });
+        }
 
         // Generate signed URLs for any attachments on the just-sent message
         // (used as multimodal blocks for the model on this turn).
