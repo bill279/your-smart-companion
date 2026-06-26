@@ -320,7 +320,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
       // Stream agent text to the chat in real time as ElevenLabs generates it.
-      if (!voiceUserHasSpokenRef.current) return;
       const kind = part?.type;
       const chunk = part?.text ?? "";
       if (kind === "start") {
@@ -351,7 +350,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       pendingContextRef.current = "";
-      voiceUserHasSpokenRef.current = false;
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
@@ -367,6 +365,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         }, 300);
         return;
       }
+      voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
@@ -400,7 +399,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           await add({ data: { threadId, role: "user", content: text } });
           setPendingUser(null);
         } else if (message.source === "ai") {
-          if (!voiceUserHasSpokenRef.current) return;
           const cleaned = cleanAssistantText(text);
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
@@ -460,6 +458,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
       "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
       "- BE CONCISE: keep spoken replies short and conversational. Avoid long monologues so the user can interject naturally.",
+      "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
+      "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
+      "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
     ].join("\n");
     return history
       ? `Prior conversation in this thread (most recent last):\n${history}\n\n${rules}\n\nContinue naturally from here.`
