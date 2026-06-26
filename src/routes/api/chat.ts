@@ -346,6 +346,101 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 return { ok: true, contact: data };
               },
             }),
+            list_calendar_events: tool({
+              description:
+                "List upcoming events from the user's connected Google Calendar within a date range.",
+              inputSchema: z.object({
+                days: z.number().int().min(1).max(60).optional().describe("How many days ahead to look. Default 7."),
+                max_results: z.number().int().min(1).max(50).optional(),
+              }),
+              execute: async ({ days, max_results }) => {
+                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
+                if (!process.env.GOOGLE_CALENDAR_API_KEY) {
+                  return { error: "Google Calendar is not connected." };
+                }
+                const now = new Date();
+                const end = new Date(now.getTime() + (days ?? 7) * 86400000);
+                const params = new URLSearchParams({
+                  timeMin: now.toISOString(),
+                  timeMax: end.toISOString(),
+                  singleEvents: "true",
+                  orderBy: "startTime",
+                  maxResults: String(max_results ?? 10),
+                });
+                const r = await fetch(
+                  `https://connector-gateway.lovable.dev/google_calendar/calendar/v3/calendars/primary/events?${params}`,
+                  { headers: gatewayHeaders("GOOGLE_CALENDAR_API_KEY") },
+                );
+                if (!r.ok) {
+                  const t = await r.text();
+                  return { error: `Calendar read failed (${r.status})`, detail: t.slice(0, 200) };
+                }
+                const j = (await r.json()) as {
+                  items?: Array<{
+                    id: string;
+                    summary?: string;
+                    start?: { dateTime?: string; date?: string; timeZone?: string };
+                    end?: { dateTime?: string; date?: string; timeZone?: string };
+                    location?: string;
+                    htmlLink?: string;
+                    attendees?: Array<{ email?: string }>;
+                  }>;
+                };
+                return {
+                  events: (j.items ?? []).map((e) => ({
+                    id: e.id,
+                    title: e.summary ?? "(no title)",
+                    start: e.start?.dateTime ?? e.start?.date,
+                    end: e.end?.dateTime ?? e.end?.date,
+                    location: e.location,
+                    link: e.htmlLink,
+                    attendees: (e.attendees ?? []).map((a) => a.email).filter(Boolean),
+                  })),
+                };
+              },
+            }),
+            create_calendar_event: tool({
+              description:
+                "Create a new event on the user's primary Google Calendar. Only call after the user has approved the draft.",
+              inputSchema: z.object({
+                title: z.string().min(1).max(200),
+                start: z.string().describe("ISO 8601 start datetime, e.g. 2026-07-01T15:00:00-04:00"),
+                end: z.string().describe("ISO 8601 end datetime"),
+                description: z.string().max(5000).optional(),
+                location: z.string().max(500).optional(),
+                attendees: z.array(z.string().email()).optional(),
+                timezone: z.string().optional().describe("IANA timezone, e.g. America/New_York"),
+              }),
+              execute: async ({ title, start, end, description, location, attendees, timezone }) => {
+                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
+                if (!process.env.GOOGLE_CALENDAR_API_KEY) {
+                  return { error: "Google Calendar is not connected." };
+                }
+                const r = await fetch(
+                  "https://connector-gateway.lovable.dev/google_calendar/calendar/v3/calendars/primary/events",
+                  {
+                    method: "POST",
+                    headers: gatewayHeaders("GOOGLE_CALENDAR_API_KEY"),
+                    body: JSON.stringify({
+                      summary: title,
+                      description,
+                      location,
+                      start: { dateTime: start, ...(timezone ? { timeZone: timezone } : {}) },
+                      end: { dateTime: end, ...(timezone ? { timeZone: timezone } : {}) },
+                      ...(attendees && attendees.length
+                        ? { attendees: attendees.map((email) => ({ email })) }
+                        : {}),
+                    }),
+                  },
+                );
+                if (!r.ok) {
+                  const t = await r.text();
+                  return { error: `Calendar create failed (${r.status})`, detail: t.slice(0, 200) };
+                }
+                const j = (await r.json()) as { id?: string; htmlLink?: string };
+                return { ok: true, id: j.id, link: j.htmlLink };
+              },
+            }),
           },
           onFinish: async ({ text }) => {
             await supabase.from("messages").insert({
