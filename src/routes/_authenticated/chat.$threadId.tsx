@@ -81,6 +81,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const createUploadUrl = useServerFn(createChatUploadUrl);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -91,6 +92,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  type Attachment = { path: string; name: string; mimeType: string; size: number };
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
