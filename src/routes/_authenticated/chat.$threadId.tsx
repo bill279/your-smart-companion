@@ -866,6 +866,13 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <Users size={12} /> Saved contacts
         </Link>
+        <Link
+          to="/activity"
+          onClick={() => setSidebarOpen(false)}
+          className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          <Sparkles size={12} /> Activity & memory
+        </Link>
         {quota && quota.available && quota.limit > 0 && (
           <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
             <div className="flex items-center justify-between text-[11px] mb-1.5">
