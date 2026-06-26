@@ -350,7 +350,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       pendingContextRef.current = "";
-      voiceUserHasSpokenRef.current = false;
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
@@ -366,6 +365,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         }, 300);
         return;
       }
+      voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
