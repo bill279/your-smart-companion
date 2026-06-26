@@ -628,36 +628,63 @@ function ThreadView({ threadId }: { threadId: string }) {
           <Plus size={14} /> New chat
         </button>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-1 mt-3">
-          {threads.data?.map((t) => {
-            const active = t.id === threadId;
-            return (
-              <div
-                key={t.id}
-                className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer ${
-                  active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
-                }`}
-              >
-                <Link
-                  to="/chat/$threadId"
-                  params={{ threadId: t.id }}
-                  className="flex-1 truncate"
-                  onClick={() => setSidebarOpen(false)}
+        <div className="mx-4 mt-3 relative">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={chatSearch}
+            onChange={(e) => setChatSearch(e.target.value)}
+            placeholder="Search chats…"
+            className="w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-1 mt-2">
+          {chatSearch.trim() && searchResults.data ? (
+            <SearchResults
+              data={searchResults.data}
+              activeId={threadId}
+              onPick={() => {
+                setSidebarOpen(false);
+                setChatSearch("");
+              }}
+            />
+          ) : (
+            threads.data?.map((t) => {
+              const active = t.id === threadId;
+              return (
+                <div
+                  key={t.id}
+                  className={`flex items-center gap-1 rounded-md pr-1 text-sm ${
+                    active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
+                  }`}
                 >
-                  {cleanThreadTitle(t.title)}
-                </Link>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    delMut.mutate(t.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            );
-          })}
+                  <Link
+                    to="/chat/$threadId"
+                    params={{ threadId: t.id }}
+                    className="flex-1 truncate px-2 py-1.5"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    {cleanThreadTitle(t.title)}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const name = cleanThreadTitle(t.title);
+                      if (confirm(`Delete "${name}"? This cannot be undone.`)) {
+                        delMut.mutate(t.id);
+                      }
+                    }}
+                    aria-label="Delete chat"
+                    className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              );
+            })
+          )}
         </div>
 
         <Link
