@@ -115,6 +115,23 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const messages = messagesQ.data ?? [];
 
+  const voiceQuotaFn = useServerFn(getVoiceQuota);
+  const voiceQuotaQ = useQuery({
+    queryKey: ["voiceQuota"],
+    queryFn: () => voiceQuotaFn(),
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+  const quota = voiceQuotaQ.data;
+  const quotaTone =
+    quota && quota.available
+      ? quota.percentUsed >= 95
+        ? "danger"
+        : quota.percentUsed >= 80
+        ? "warn"
+        : "ok"
+      : "unknown";
+
   function scrollToLatest() {
     const el = scrollRef.current;
     if (!el) return;
