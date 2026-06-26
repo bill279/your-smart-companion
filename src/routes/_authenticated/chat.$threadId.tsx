@@ -576,19 +576,19 @@ function ThreadView({ threadId }: { threadId: string }) {
           })}
         </div>
 
+        <Link
+          to="/contacts"
+          onClick={() => setSidebarOpen(false)}
+          className="mx-4 mt-3 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          <Users size={12} /> Saved contacts
+        </Link>
         <button
           onClick={signOut}
           className="m-4 flex items-center gap-2 justify-center py-2 text-xs text-muted-foreground hover:text-foreground"
         >
           <LogOut size={12} /> Sign out
         </button>
-        <Link
-          to="/contacts"
-          onClick={() => setSidebarOpen(false)}
-          className="mx-4 mb-3 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
-        >
-          <Users size={12} /> Saved contacts
-        </Link>
       </aside>
 
       {/* Main HUD */}
