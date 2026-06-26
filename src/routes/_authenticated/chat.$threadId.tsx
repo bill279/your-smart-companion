@@ -912,6 +912,20 @@ function ThreadView({ threadId }: { threadId: string }) {
 
       {/* Main HUD */}
       <main className="flex-1 flex flex-col relative overflow-hidden">
+        {/* Desktop export menu */}
+        <div className="hidden md:block absolute top-3 right-4 z-30 print:hidden">
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
+              className="p-2 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground border border-border bg-card"
+              aria-label="Export chat"
+              title="Export chat"
+            >
+              <MoreVertical size={16} />
+            </button>
+            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+          </div>
+        </div>
         {/* Mobile header */}
         <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 py-2 border-b border-border bg-card/95 backdrop-blur">
           <button
