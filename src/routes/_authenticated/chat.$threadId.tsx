@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
@@ -184,6 +184,14 @@ function ThreadView({ threadId }: { threadId: string }) {
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const liveAssistantRef = useRef<string>("");
+  const abortRef = useRef<AbortController | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDoc = () => setExportOpen(false);
+    window.addEventListener("click", onDoc);
+    return () => window.removeEventListener("click", onDoc);
+  }, [exportOpen]);
 
   const messages = messagesQ.data ?? [];
 
@@ -522,12 +530,12 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const addMut = useMutation({
-    mutationFn: async ({ content, files }: { content: string; files: Attachment[] }) => {
-      setPendingUser(content);
+    mutationFn: async ({ content, files, regenerate }: { content: string; files: Attachment[]; regenerate?: boolean }) => {
+      if (!regenerate) setPendingUser(content);
       setPendingAssistant("");
 
       // If voice is connected, route through ElevenLabs instead.
-      if (isConnected) {
+      if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
@@ -545,14 +553,28 @@ function ThreadView({ threadId }: { threadId: string }) {
         return;
       }
 
-      const res = await fetch("/api/chat", {
+      const controller = new AbortController();
+      abortRef.current = controller;
+      let res: Response;
+      try {
+        res = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ threadId, content, attachments: files }),
+        body: JSON.stringify({ threadId, content, attachments: files, regenerate }),
+        signal: controller.signal,
       });
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          setPendingUser(null);
+          setPendingAssistant("");
+          qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          return;
+        }
+        throw err;
+      }
 
       if (!res.ok || !res.body) {
         const msg = await res.text().catch(() => "Request failed");
@@ -568,22 +590,101 @@ function ThreadView({ threadId }: { threadId: string }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-        setPendingAssistant(cleanAssistantText(acc));
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+          setPendingAssistant(cleanAssistantText(acc));
+        }
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") throw err;
       }
       setPendingAssistant("");
+      abortRef.current = null;
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
     },
     onError: (e) => {
+      if ((e as Error).name === "AbortError") return;
       toast.error(e instanceof Error ? e.message : "Failed");
       setPendingUser(null);
       setPendingAssistant("");
     },
   });
+
+  function stopGenerating() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }
+
+  function regenerate() {
+    if (addMut.isPending) return;
+    if (isConnected) {
+      toast.error("Regenerate is for text chat. Stop voice first.");
+      return;
+    }
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+    addMut.mutate({ content: "", files: [], regenerate: true });
+  }
+
+  function buildChatMarkdown() {
+    const lines = [`# ${cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "BPA Bot chat")}`, ""];
+    for (const m of messages) {
+      lines.push(`## ${m.role === "user" ? "You" : "BPA Bot"} — ${new Date(m.created_at).toLocaleString()}`);
+      lines.push("");
+      lines.push(m.role === "assistant" ? cleanAssistantText(m.content) : m.content);
+      lines.push("");
+    }
+    return lines.join("\n");
+  }
+
+  function exportMarkdown() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    const md = buildChatMarkdown();
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bpa-bot-chat-${threadId.slice(0, 8)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportPrint() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    window.print();
+  }
+
+  async function exportEmailToMe() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    const { data: u } = await supabase.auth.getUser();
+    const to = u.user?.email;
+    if (!to) return toast.error("Could not find your email on file.");
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    if (!token) return toast.error("Sign in again");
+    const subject = `BPA Bot — ${cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "Conversation")}`;
+    const body = buildChatMarkdown();
+    const promise = fetch("/api/public/jarvis/tools/send_email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to, subject, body }),
+    }).then(async (r) => {
+      if (!r.ok) throw new Error(await r.text().catch(() => "Send failed"));
+    });
+    toast.promise(promise, {
+      loading: `Emailing chat to ${to}…`,
+      success: `Sent to ${to}`,
+      error: (e) => (e instanceof Error ? e.message : "Send failed"),
+    });
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -811,6 +912,20 @@ function ThreadView({ threadId }: { threadId: string }) {
 
       {/* Main HUD */}
       <main className="flex-1 flex flex-col relative overflow-hidden">
+        {/* Desktop export menu */}
+        <div className="hidden md:block absolute top-3 right-4 z-30 print:hidden">
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
+              className="p-2 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground border border-border bg-card"
+              aria-label="Export chat"
+              title="Export chat"
+            >
+              <MoreVertical size={16} />
+            </button>
+            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+          </div>
+        </div>
         {/* Mobile header */}
         <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 py-2 border-b border-border bg-card/95 backdrop-blur">
           <button
@@ -836,6 +951,17 @@ function ThreadView({ threadId }: { threadId: string }) {
               🎙 {quota.percentUsed}%
             </span>
           )}
+          <div className={`relative ${quota && quota.available && quota.limit > 0 ? "ml-1" : "ml-auto"}`}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
+              className="p-2 rounded-md hover:bg-secondary text-foreground"
+              aria-label="Export chat"
+              title="Export chat"
+            >
+              <MoreVertical size={18} />
+            </button>
+            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+          </div>
         </div>
         {/* Messages */}
         <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
@@ -967,16 +1093,59 @@ function ThreadView({ threadId }: { threadId: string }) {
             }
             className="flex-1 bg-transparent outline-none px-3 text-sm"
           />
-          <button
-            type="submit"
-            disabled={(!input.trim() && attachments.length === 0) || addMut.isPending || uploading}
-            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-2"
-          >
-            <Send size={14} /> Send
-          </button>
+          {addMut.isPending && !isConnected ? (
+            <button
+              type="button"
+              onClick={stopGenerating}
+              className="px-4 py-2 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 flex items-center gap-2"
+              title="Stop generating"
+            >
+              <Square size={14} /> Stop
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={(!input.trim() && attachments.length === 0) || uploading}
+              className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-2"
+            >
+              <Send size={14} /> Send
+            </button>
+          )}
           </div>
         </form>
+        {/* Regenerate action below composer when there's an assistant message and we're idle */}
+        {!addMut.isPending && !isConnected && messages.some((m) => m.role === "assistant") && (
+          <div className="relative z-10 -mt-4 mb-4 flex justify-center">
+            <button
+              type="button"
+              onClick={regenerate}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 px-3 py-1 rounded-full border border-border bg-card"
+              title="Regenerate last response"
+            >
+              <RotateCcw size={12} /> Regenerate
+            </button>
+          </div>
+        )}
       </main>
+    </div>
+  );
+}
+
+function ExportMenu({ onPrint, onMarkdown, onEmail }: { onPrint: () => void; onMarkdown: () => void; onEmail: () => void }) {
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="absolute right-0 top-full mt-1 w-56 rounded-md border border-border bg-card shadow-lg z-50 overflow-hidden"
+    >
+      <button onClick={onPrint} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <Printer size={14} /> Print / Save as PDF
+      </button>
+      <button onClick={onMarkdown} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <Download size={14} /> Download Markdown
+      </button>
+      <button onClick={onEmail} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <Mail size={14} /> Email chat to me
+      </button>
     </div>
   );
 }
