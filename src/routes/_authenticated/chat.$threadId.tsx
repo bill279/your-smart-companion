@@ -58,6 +58,65 @@ function cleanThreadTitle(title: string) {
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
 }
 
+type SearchData = {
+  threads: Array<{ id: string; title: string; updated_at: string }>;
+  messages: Array<{ id: string; thread_id: string; role: string; snippet: string; created_at: string }>;
+};
+
+function SearchResults({
+  data,
+  activeId,
+  onPick,
+}: {
+  data: SearchData;
+  activeId: string;
+  onPick: () => void;
+}) {
+  const hasAny = data.threads.length > 0 || data.messages.length > 0;
+  if (!hasAny) {
+    return <div className="text-xs text-muted-foreground px-2 py-3">No matches</div>;
+  }
+  return (
+    <div className="space-y-3">
+      {data.threads.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 mb-1">Chats</div>
+          {data.threads.map((t) => (
+            <Link
+              key={t.id}
+              to="/chat/$threadId"
+              params={{ threadId: t.id }}
+              onClick={onPick}
+              className={`block truncate px-2 py-1.5 rounded-md text-sm ${
+                t.id === activeId ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
+              }`}
+            >
+              {cleanThreadTitle(t.title)}
+            </Link>
+          ))}
+        </div>
+      )}
+      {data.messages.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 mb-1">Messages</div>
+          {data.messages.map((m) => (
+            <Link
+              key={m.id}
+              to="/chat/$threadId"
+              params={{ threadId: m.thread_id }}
+              onClick={onPick}
+              className="block px-2 py-1.5 rounded-md text-xs hover:bg-secondary/60 text-muted-foreground"
+            >
+              <div className="text-[10px] uppercase tracking-wide opacity-70">{m.role}</div>
+              <div className="line-clamp-2">{m.snippet}</div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const Route = createFileRoute("/_authenticated/chat/$threadId")({
   ssr: false,
   head: () => ({ meta: [{ title: "BPA Bot" }] }),
