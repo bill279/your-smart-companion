@@ -18,6 +18,7 @@ import {
   renameThread,
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
+import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
@@ -113,6 +114,38 @@ function ThreadView({ threadId }: { threadId: string }) {
   const liveAssistantRef = useRef<string>("");
 
   const messages = messagesQ.data ?? [];
+
+  const voiceQuotaFn = useServerFn(getVoiceQuota);
+  const voiceQuotaQ = useQuery({
+    queryKey: ["voiceQuota"],
+    queryFn: () => voiceQuotaFn(),
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+  const quota = voiceQuotaQ.data;
+  const quotaTone =
+    quota && quota.available
+      ? quota.percentUsed >= 95
+        ? "danger"
+        : quota.percentUsed >= 80
+        ? "warn"
+        : "ok"
+      : "unknown";
+  const warnedQuotaRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!quota || !quota.available || quota.limit <= 0) return;
+    const key = quotaTone;
+    if (warnedQuotaRef.current === key) return;
+    if (quotaTone === "danger") {
+      toast.error(`Voice quota ${quota.percentUsed}% used — ${quota.remaining.toLocaleString()} chars left.`);
+      warnedQuotaRef.current = key;
+    } else if (quotaTone === "warn") {
+      toast.warning(`Voice quota ${quota.percentUsed}% used.`);
+      warnedQuotaRef.current = key;
+    } else {
+      warnedQuotaRef.current = key;
+    }
+  }, [quota, quotaTone]);
 
   function scrollToLatest() {
     const el = scrollRef.current;
@@ -353,6 +386,11 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function startVoice() {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
+      toast.error("Voice quota exhausted — text chat still works.");
+      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+      return;
+    }
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
     hasConnectedVoiceRef.current = false;
@@ -628,6 +666,42 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <Users size={12} /> Saved contacts
         </Link>
+        {quota && quota.available && quota.limit > 0 && (
+          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
+            <div className="flex items-center justify-between text-[11px] mb-1.5">
+              <span className="font-medium text-foreground">Voice quota</span>
+              <span
+                className={
+                  quotaTone === "danger"
+                    ? "text-destructive font-semibold"
+                    : quotaTone === "warn"
+                    ? "text-amber-500 font-semibold"
+                    : "text-muted-foreground"
+                }
+              >
+                {quota.percentUsed}% used
+              </span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+              <div
+                className={
+                  quotaTone === "danger"
+                    ? "h-full bg-destructive"
+                    : quotaTone === "warn"
+                    ? "h-full bg-amber-500"
+                    : "h-full bg-primary"
+                }
+                style={{ width: `${Math.min(100, quota.percentUsed)}%` }}
+              />
+            </div>
+            <div className="mt-1.5 text-[10px] text-muted-foreground">
+              {quota.remaining.toLocaleString()} chars left
+              {quota.resetAt
+                ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
+                : ""}
+            </div>
+          </div>
+        )}
         <button
           onClick={signOut}
           className="m-4 flex items-center gap-2 justify-center py-2 text-xs text-muted-foreground hover:text-foreground"
@@ -648,6 +722,21 @@ function ThreadView({ threadId }: { threadId: string }) {
             <Menu size={20} />
           </button>
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
+          {quota && quota.available && quota.limit > 0 && (
+            <span
+              title={`Voice quota: ${quota.percentUsed}% used`}
+              className={
+                "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
+                (quotaTone === "danger"
+                  ? "bg-destructive/15 text-destructive"
+                  : quotaTone === "warn"
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  : "bg-secondary text-muted-foreground")
+              }
+            >
+              🎙 {quota.percentUsed}%
+            </span>
+          )}
         </div>
         {/* Messages */}
         <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
