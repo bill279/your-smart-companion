@@ -84,6 +84,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const rename = useServerFn(renameThread);
   const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
+  const searchFn = useServerFn(searchChats);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -98,6 +99,17 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [chatSearch, setChatSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(chatSearch.trim()), 250);
+    return () => clearTimeout(t);
+  }, [chatSearch]);
+  const searchResults = useQuery({
+    queryKey: ["chat-search", debouncedSearch],
+    queryFn: () => searchFn({ data: { query: debouncedSearch } }),
+    enabled: debouncedSearch.length > 0,
+  });
   const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
