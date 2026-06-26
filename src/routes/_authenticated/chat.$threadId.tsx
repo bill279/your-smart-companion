@@ -937,6 +937,17 @@ function ThreadView({ threadId }: { threadId: string }) {
               🎙 {quota.percentUsed}%
             </span>
           )}
+          <div className={`relative ${quota && quota.available && quota.limit > 0 ? "ml-1" : "ml-auto"}`}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
+              className="p-2 rounded-md hover:bg-secondary text-foreground"
+              aria-label="Export chat"
+              title="Export chat"
+            >
+              <MoreVertical size={18} />
+            </button>
+            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+          </div>
         </div>
         {/* Messages */}
         <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
