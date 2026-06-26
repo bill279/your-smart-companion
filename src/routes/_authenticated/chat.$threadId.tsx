@@ -184,6 +184,14 @@ function ThreadView({ threadId }: { threadId: string }) {
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const liveAssistantRef = useRef<string>("");
+  const abortRef = useRef<AbortController | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDoc = () => setExportOpen(false);
+    window.addEventListener("click", onDoc);
+    return () => window.removeEventListener("click", onDoc);
+  }, [exportOpen]);
 
   const messages = messagesQ.data ?? [];
 
