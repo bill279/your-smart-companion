@@ -165,8 +165,13 @@ export const Route = createFileRoute("/api/chat")({
           return new Response("Unauthorized", { status: 401 });
         }
         const userId = claims.claims.sub;
-        const userEmail =
+        let userEmail =
           (claims.claims as { email?: string }).email ?? null;
+        if (!userEmail) {
+          // Fallback: claims may not include email — fetch from auth.users
+          const { data: userData } = await supabase.auth.getUser(token);
+          userEmail = userData?.user?.email ?? null;
+        }
 
         // Helper: log an agent action (best-effort, never throws)
         const logAction = async (
