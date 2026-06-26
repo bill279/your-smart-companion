@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { toast } from "sonner";
+import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -69,6 +70,11 @@ function AuthPage() {
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="hud-panel hud-corner w-full max-w-md p-8 rounded-lg">
         <div className="text-center mb-8">
+          <img
+            src={bpaLogo.url}
+            alt="BP Automation logo"
+            className="mx-auto mb-4 h-16 w-auto"
+          />
           <div className="text-3xl font-bold text-primary font-bold">BPA Bot</div>
           <div className="text-xs text-muted-foreground mt-2 tracking-widest">
             JUST A RATHER VERY INTELLIGENT SYSTEM
