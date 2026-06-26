@@ -793,7 +793,15 @@ function ThreadView({ threadId }: { threadId: string }) {
   );
 }
 
-function Bubble({ role, content }: { role: string; content: string }) {
+function Bubble({
+  role,
+  content,
+  attachments = [],
+}: {
+  role: string;
+  content: string;
+  attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
+}) {
   const isUser = role === "user";
   const displayContent = isUser ? content : cleanAssistantText(content);
   return (
@@ -810,6 +818,23 @@ function Bubble({ role, content }: { role: string; content: string }) {
             : "bg-card border border-border text-foreground"
         }`}
       >
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {attachments.map((a) => (
+              <div
+                key={a.path}
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${
+                  isUser
+                    ? "bg-primary-foreground/15 text-primary-foreground"
+                    : "bg-secondary text-foreground border border-border"
+                }`}
+              >
+                {a.mimeType.startsWith("image/") ? "🖼️" : "📎"}
+                <span className="max-w-[180px] truncate">{a.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div
           className={`prose prose-sm max-w-none ${
             isUser ? "prose-invert" : ""
