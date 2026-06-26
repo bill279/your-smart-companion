@@ -114,19 +114,54 @@ export const Route = createFileRoute("/api/chat")({
         const userEmail =
           (claims.claims as { email?: string }).email ?? null;
 
-        const body = (await request.json()) as { threadId?: string; content?: string };
-        if (!body.threadId || !body.content?.trim()) {
+        const body = (await request.json()) as {
+          threadId?: string;
+          content?: string;
+          attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
+        };
+        const attachments = body.attachments ?? [];
+        if (!body.threadId || (!body.content?.trim() && attachments.length === 0)) {
           return new Response("Bad request", { status: 400 });
         }
+        const userText = body.content?.trim() ?? "";
 
-        // Save user message
+        // Save user message (with attachments metadata)
         const { error: insErr } = await supabase.from("messages").insert({
           thread_id: body.threadId,
           user_id: userId,
           role: "user",
-          content: body.content,
+          content:
+            userText ||
+            (attachments.length === 1
+              ? `Sent file: ${attachments[0].name}`
+              : `Sent ${attachments.length} files`),
+          attachments,
         });
         if (insErr) return new Response(insErr.message, { status: 400 });
+
+        // Generate signed URLs for any attachments on the just-sent message
+        // (used as multimodal blocks for the model on this turn).
+        const turnAttachmentBlocks: Array<
+          | { type: "image"; image: URL; mediaType: string }
+          | { type: "file"; data: URL; mediaType: string; filename: string }
+        > = [];
+        for (const a of attachments) {
+          const { data: signed } = await supabase.storage
+            .from("chat-uploads")
+            .createSignedUrl(a.path, 60 * 60);
+          if (!signed?.signedUrl) continue;
+          const url = new URL(signed.signedUrl);
+          if (a.mimeType.startsWith("image/")) {
+            turnAttachmentBlocks.push({ type: "image", image: url, mediaType: a.mimeType });
+          } else {
+            turnAttachmentBlocks.push({
+              type: "file",
+              data: url,
+              mediaType: a.mimeType,
+              filename: a.name,
+            });
+          }
+        }
 
         // Load full history
         const { data: rows, error: histErr } = await supabase
@@ -140,13 +175,29 @@ export const Route = createFileRoute("/api/chat")({
         const systemWithUser = userEmail
           ? `${SYSTEM_PROMPT}\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `${SYSTEM_PROMPT}\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
+        // Build messages: history as text, but replace the final user turn
+        // with a multimodal payload if this request includes attachments.
+        const history = rows ?? [];
+        const baseMessages = history.map((r, idx) => {
+          const isLastUser = idx === history.length - 1 && r.role === "user";
+          if (isLastUser && turnAttachmentBlocks.length > 0) {
+            return {
+              role: "user" as const,
+              content: [
+                ...(r.content ? [{ type: "text" as const, text: r.content }] : []),
+                ...turnAttachmentBlocks,
+              ],
+            };
+          }
+          return {
+            role: r.role as "user" | "assistant" | "system",
+            content: r.content,
+          };
+        });
         const result = streamText({
           model: gateway("google/gemini-3-flash-preview"),
           system: systemWithUser,
-          messages: (rows ?? []).map((r) => ({
-            role: r.role as "user" | "assistant" | "system",
-            content: r.content,
-          })),
+          messages: baseMessages,
           stopWhen: stepCountIs(50),
           tools: {
             web_search: tool({
