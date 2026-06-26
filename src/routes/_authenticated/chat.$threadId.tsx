@@ -131,6 +131,21 @@ function ThreadView({ threadId }: { threadId: string }) {
         ? "warn"
         : "ok"
       : "unknown";
+  const warnedQuotaRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!quota || !quota.available || quota.limit <= 0) return;
+    const key = quotaTone;
+    if (warnedQuotaRef.current === key) return;
+    if (quotaTone === "danger") {
+      toast.error(`Voice quota ${quota.percentUsed}% used — ${quota.remaining.toLocaleString()} chars left.`);
+      warnedQuotaRef.current = key;
+    } else if (quotaTone === "warn") {
+      toast.warning(`Voice quota ${quota.percentUsed}% used.`);
+      warnedQuotaRef.current = key;
+    } else {
+      warnedQuotaRef.current = key;
+    }
+  }, [quota, quotaTone]);
 
   function scrollToLatest() {
     const el = scrollRef.current;
