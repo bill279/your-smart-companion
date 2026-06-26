@@ -656,9 +656,17 @@ function ThreadView({ threadId }: { threadId: string }) {
               How can I help you today?
             </div>
           )}
-          {messages.map((m) => (
-            <Bubble key={m.id} role={m.role} content={m.content} attachments={(m as { attachments?: Attachment[] }).attachments ?? []} />
-          ))}
+          {messages.map((m) => {
+            const att = (m as unknown as { attachments?: Attachment[] | null }).attachments;
+            return (
+              <Bubble
+                key={m.id}
+                role={m.role}
+                content={m.content}
+                attachments={Array.isArray(att) ? att : []}
+              />
+            );
+          })}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
           {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
           <div ref={latestMessageRef} aria-hidden="true" />
