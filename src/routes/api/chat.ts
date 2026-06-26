@@ -32,6 +32,9 @@ You have tools:
 - save_contact — add or update a contact in the user's address book. Use when the user says things like "save this as a contact", "remember john@x.com as John", or after they confirm a brand-new recipient you should remember.
 - list_calendar_events — list upcoming events from the user's connected calendar (Outlook preferred, Google fallback). Use for "what's on my calendar", "am I free Thursday", "next meeting".
 - create_calendar_event — create a new event on the user's connected calendar (Outlook preferred, Google fallback). Confirm title, start, end, and attendees with the user before calling.
+- recall_facts — load durable facts the user has asked you to remember (boss, company, preferences, tools). Call this at the start of any conversation where personal context might help.
+- remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
+- forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
 
@@ -115,6 +118,27 @@ export const Route = createFileRoute("/api/chat")({
         const userEmail =
           (claims.claims as { email?: string }).email ?? null;
 
+        // Helper: log an agent action (best-effort, never throws)
+        const logAction = async (
+          action: string,
+          summary: string,
+          payload: Record<string, unknown>,
+          status: "ok" | "error" = "ok",
+        ) => {
+          try {
+            await supabase.from("agent_actions").insert({
+              user_id: userId,
+              thread_id: body.threadId ?? null,
+              action,
+              summary,
+              payload,
+              status,
+            });
+          } catch {
+            /* ignore */
+          }
+        };
+
         const body = (await request.json()) as {
           threadId?: string;
           content?: string;
@@ -191,9 +215,24 @@ export const Route = createFileRoute("/api/chat")({
         if (histErr) return new Response(histErr.message, { status: 400 });
 
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
-        const systemWithUser = userEmail
-          ? `${SYSTEM_PROMPT}\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
-          : `${SYSTEM_PROMPT}\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
+
+        // Load durable user facts to inject into the system prompt
+        const { data: factRows } = await supabase
+          .from("user_facts")
+          .select("key,value")
+          .order("updated_at", { ascending: false })
+          .limit(50);
+        const factsBlock =
+          factRows && factRows.length > 0
+            ? `\n\n# Remembered facts about this user\n${factRows
+                .map((f) => `- ${f.key}: ${f.value}`)
+                .join("\n")}\nUse these naturally. If a fact is wrong, offer to update or forget it.`
+            : "";
+
+        const userBlock = userEmail
+          ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
+          : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
+        const systemWithUser = `${SYSTEM_PROMPT}${userBlock}${factsBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
@@ -329,8 +368,10 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                    );
                    if (!r.ok) {
                      const t = await r.text();
+                     await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
                      return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
                    }
+                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook" });
                    return { ok: true, provider: "outlook", to, subject };
                  }
                  if (process.env.GOOGLE_MAIL_API_KEY) {
@@ -370,8 +411,10 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   );
                   if (!r.ok) {
                     const t = await r.text();
+                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status }, "error");
                     return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
                   }
+                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail" });
                   return { ok: true, provider: "gmail", to, subject };
                 }
                 return { error: "No email provider connected." };
@@ -413,6 +456,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   .select()
                   .single();
                 if (error) return { error: error.message };
+                await logAction("save_contact", `Saved contact ${name} <${email}>`, { name, email });
                 return { ok: true, contact: data };
               },
             }),
@@ -557,6 +601,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     return { error: `Outlook calendar create failed (${r.status})`, detail: t.slice(0, 200) };
                   }
                   const j = (await r.json()) as { id?: string; webLink?: string };
+                  await logAction("create_calendar_event", `Created event "${title}" on Outlook`, { title, start, end, attendees, location, provider: "outlook" });
                   return { ok: true, provider: "outlook", id: j.id, link: j.webLink };
                 }
                 if (!process.env.GOOGLE_CALENDAR_API_KEY) {
@@ -584,7 +629,55 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   return { error: `Calendar create failed (${r.status})`, detail: t.slice(0, 200) };
                 }
                 const j = (await r.json()) as { id?: string; htmlLink?: string };
+                await logAction("create_calendar_event", `Created event "${title}" on Google`, { title, start, end, attendees, location, provider: "google" });
                 return { ok: true, provider: "google", id: j.id, link: j.htmlLink };
+              },
+            }),
+            recall_facts: tool({
+              description:
+                "Load durable facts the user has asked you to remember (boss, company, tools, preferences). Returns key/value pairs.",
+              inputSchema: z.object({}),
+              execute: async () => {
+                const { data, error } = await supabase
+                  .from("user_facts")
+                  .select("key,value,source,updated_at")
+                  .order("updated_at", { ascending: false });
+                if (error) return { error: error.message };
+                return { facts: data ?? [] };
+              },
+            }),
+            remember_fact: tool({
+              description:
+                "Save a durable fact about the user so you remember it across every future conversation. Key is a short snake_case slug (e.g. 'boss', 'company', 'crm', 'preferred_signoff'). Value is the natural-language fact.",
+              inputSchema: z.object({
+                key: z.string().min(1).max(120),
+                value: z.string().min(1).max(2000),
+              }),
+              execute: async ({ key, value }) => {
+                const normKey = key.trim().toLowerCase().replace(/\s+/g, "_");
+                const { error } = await supabase
+                  .from("user_facts")
+                  .upsert(
+                    { user_id: userId, key: normKey, value: value.trim(), source: "chat" },
+                    { onConflict: "user_id,key" },
+                  );
+                if (error) return { error: error.message };
+                await logAction("remember_fact", `Remembered ${normKey}: ${value.slice(0, 80)}`, { key: normKey, value });
+                return { ok: true, key: normKey };
+              },
+            }),
+            forget_fact: tool({
+              description: "Forget a stored fact by its key (e.g. 'boss').",
+              inputSchema: z.object({ key: z.string().min(1).max(120) }),
+              execute: async ({ key }) => {
+                const normKey = key.trim().toLowerCase().replace(/\s+/g, "_");
+                const { error } = await supabase
+                  .from("user_facts")
+                  .delete()
+                  .eq("key", normKey);
+                if (error) return { error: error.message };
+                await logAction("forget_fact", `Forgot ${normKey}`, { key: normKey });
+                return { ok: true, key: normKey };
               },
             }),
           },
