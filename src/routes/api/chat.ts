@@ -28,8 +28,14 @@ You have tools:
 - web_search — search the live web. Use it for anything time-sensitive: companies, people, news, prices, products, current facts.
 - web_scrape — fetch the readable markdown of a specific URL.
 - send_email — send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone (including themselves).
+- list_contacts — load the user's saved address book (name, email, notes). Call this BEFORE asking the user for an email address whenever they refer to a recipient by name (e.g. "email Mike", "send this to Sarah at BP"). Match by name (case-insensitive, partial OK).
+- save_contact — add or update a contact in the user's address book. Use when the user says things like "save this as a contact", "remember john@x.com as John", or after they confirm a brand-new recipient you should remember.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
+
+# Saved contacts flow
+- When the user names a person (not an email), call \`list_contacts\` first. If exactly one match, confirm "Send to Mike Johnson at mike@example.com?" before drafting. If multiple matches, list them and ask which. If no match, ask for the address and offer to save it.
+- Never invent an email. Never call \`send_email\` with an address you didn't get from the user, the # Current user block, or \`list_contacts\`.
 
 # Email approval flow (mandatory)
 Never call \`send_email\` on the first request. Always confirm the recipient first, then draft, then wait for explicit approval.
@@ -292,6 +298,45 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   return { ok: true, provider: "gmail", to, subject };
                 }
                 return { error: "No email provider connected." };
+              },
+            }),
+            list_contacts: tool({
+              description:
+                "List the signed-in user's saved contacts (name, email, notes). Call this whenever the user refers to a recipient by name instead of email.",
+              inputSchema: z.object({}),
+              execute: async () => {
+                const { data, error } = await supabase
+                  .from("contacts")
+                  .select("id,name,email,notes")
+                  .order("name", { ascending: true });
+                if (error) return { error: error.message };
+                return { contacts: data ?? [] };
+              },
+            }),
+            save_contact: tool({
+              description:
+                "Save or update a contact in the user's address book. Use when the user asks to remember someone, or after they confirm a brand-new recipient.",
+              inputSchema: z.object({
+                name: z.string().min(1).max(120),
+                email: z.string().email(),
+                notes: z.string().max(2000).optional(),
+              }),
+              execute: async ({ name, email, notes }) => {
+                const { data, error } = await supabase
+                  .from("contacts")
+                  .upsert(
+                    {
+                      user_id: userId,
+                      name: name.trim(),
+                      email: email.trim().toLowerCase(),
+                      notes: notes ?? null,
+                    },
+                    { onConflict: "user_id,email" },
+                  )
+                  .select()
+                  .single();
+                if (error) return { error: error.message };
+                return { ok: true, contact: data };
               },
             }),
           },
