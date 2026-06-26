@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search } from "lucide-react";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
@@ -16,6 +16,7 @@ import {
   getThreadMessages,
   listThreads,
   renameThread,
+  searchChats,
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { getVoiceQuota } from "@/lib/voice-quota.functions";
@@ -57,6 +58,65 @@ function cleanThreadTitle(title: string) {
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
 }
 
+type SearchData = {
+  threads: Array<{ id: string; title: string; updated_at: string }>;
+  messages: Array<{ id: string; thread_id: string; role: string; snippet: string; created_at: string }>;
+};
+
+function SearchResults({
+  data,
+  activeId,
+  onPick,
+}: {
+  data: SearchData;
+  activeId: string;
+  onPick: () => void;
+}) {
+  const hasAny = data.threads.length > 0 || data.messages.length > 0;
+  if (!hasAny) {
+    return <div className="text-xs text-muted-foreground px-2 py-3">No matches</div>;
+  }
+  return (
+    <div className="space-y-3">
+      {data.threads.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 mb-1">Chats</div>
+          {data.threads.map((t) => (
+            <Link
+              key={t.id}
+              to="/chat/$threadId"
+              params={{ threadId: t.id }}
+              onClick={onPick}
+              className={`block truncate px-2 py-1.5 rounded-md text-sm ${
+                t.id === activeId ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
+              }`}
+            >
+              {cleanThreadTitle(t.title)}
+            </Link>
+          ))}
+        </div>
+      )}
+      {data.messages.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 mb-1">Messages</div>
+          {data.messages.map((m) => (
+            <Link
+              key={m.id}
+              to="/chat/$threadId"
+              params={{ threadId: m.thread_id }}
+              onClick={onPick}
+              className="block px-2 py-1.5 rounded-md text-xs hover:bg-secondary/60 text-muted-foreground"
+            >
+              <div className="text-[10px] uppercase tracking-wide opacity-70">{m.role}</div>
+              <div className="line-clamp-2">{m.snippet}</div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const Route = createFileRoute("/_authenticated/chat/$threadId")({
   ssr: false,
   head: () => ({ meta: [{ title: "BPA Bot" }] }),
@@ -83,6 +143,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const rename = useServerFn(renameThread);
   const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
+  const searchFn = useServerFn(searchChats);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -97,6 +158,17 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [chatSearch, setChatSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(chatSearch.trim()), 250);
+    return () => clearTimeout(t);
+  }, [chatSearch]);
+  const searchResults = useQuery({
+    queryKey: ["chat-search", debouncedSearch],
+    queryFn: () => searchFn({ data: { query: debouncedSearch } }),
+    enabled: debouncedSearch.length > 0,
+  });
   const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -627,36 +699,63 @@ function ThreadView({ threadId }: { threadId: string }) {
           <Plus size={14} /> New chat
         </button>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-1 mt-3">
-          {threads.data?.map((t) => {
-            const active = t.id === threadId;
-            return (
-              <div
-                key={t.id}
-                className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer ${
-                  active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
-                }`}
-              >
-                <Link
-                  to="/chat/$threadId"
-                  params={{ threadId: t.id }}
-                  className="flex-1 truncate"
-                  onClick={() => setSidebarOpen(false)}
+        <div className="mx-4 mt-3 relative">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={chatSearch}
+            onChange={(e) => setChatSearch(e.target.value)}
+            placeholder="Search chats…"
+            className="w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-1 mt-2">
+          {chatSearch.trim() && searchResults.data ? (
+            <SearchResults
+              data={searchResults.data}
+              activeId={threadId}
+              onPick={() => {
+                setSidebarOpen(false);
+                setChatSearch("");
+              }}
+            />
+          ) : (
+            threads.data?.map((t) => {
+              const active = t.id === threadId;
+              return (
+                <div
+                  key={t.id}
+                  className={`flex items-center gap-1 rounded-md pr-1 text-sm ${
+                    active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
+                  }`}
                 >
-                  {cleanThreadTitle(t.title)}
-                </Link>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    delMut.mutate(t.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            );
-          })}
+                  <Link
+                    to="/chat/$threadId"
+                    params={{ threadId: t.id }}
+                    className="flex-1 truncate px-2 py-1.5"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    {cleanThreadTitle(t.title)}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const name = cleanThreadTitle(t.title);
+                      if (confirm(`Delete "${name}"? This cannot be undone.`)) {
+                        delMut.mutate(t.id);
+                      }
+                    }}
+                    aria-label="Delete chat"
+                    className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              );
+            })
+          )}
         </div>
 
         <Link

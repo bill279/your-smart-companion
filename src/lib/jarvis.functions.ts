@@ -48,6 +48,45 @@ export const getThreadMessages = createServerFn({ method: "GET" })
     return rows ?? [];
   });
 
+export const searchChats = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ query: z.string().min(1).max(200) }).parse(d))
+  .handler(async ({ context, data }) => {
+    const q = data.query.trim();
+    const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    const [titles, msgs] = await Promise.all([
+      context.supabase
+        .from("threads")
+        .select("id,title,updated_at")
+        .ilike("title", like)
+        .order("updated_at", { ascending: false })
+        .limit(30),
+      context.supabase
+        .from("messages")
+        .select("id,thread_id,role,content,created_at")
+        .ilike("content", like)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+    if (titles.error) throw new Error(titles.error.message);
+    if (msgs.error) throw new Error(msgs.error.message);
+    return {
+      threads: titles.data ?? [],
+      messages: (msgs.data ?? []).map((m) => ({
+        ...m,
+        snippet: makeSnippet(m.content, q),
+      })),
+    };
+  });
+
+function makeSnippet(content: string, q: string) {
+  const idx = content.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return content.slice(0, 140);
+  const start = Math.max(0, idx - 50);
+  const end = Math.min(content.length, idx + q.length + 90);
+  return (start > 0 ? "…" : "") + content.slice(start, end) + (end < content.length ? "…" : "");
+}
+
 export const addMessage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
