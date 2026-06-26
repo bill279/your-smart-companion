@@ -320,7 +320,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
       // Stream agent text to the chat in real time as ElevenLabs generates it.
-      if (!voiceUserHasSpokenRef.current) return;
       const kind = part?.type;
       const chunk = part?.text ?? "";
       if (kind === "start") {
@@ -400,7 +399,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           await add({ data: { threadId, role: "user", content: text } });
           setPendingUser(null);
         } else if (message.source === "ai") {
-          if (!voiceUserHasSpokenRef.current) return;
           const cleaned = cleanAssistantText(text);
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
