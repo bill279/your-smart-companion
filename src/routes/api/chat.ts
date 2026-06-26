@@ -348,27 +348,70 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             list_calendar_events: tool({
               description:
-                "List upcoming events from the user's connected Google Calendar within a date range.",
+                "List upcoming events from the user's connected calendar (Outlook preferred, Google fallback) within a date range.",
               inputSchema: z.object({
                 days: z.number().int().min(1).max(60).optional().describe("How many days ahead to look. Default 7."),
                 max_results: z.number().int().min(1).max(50).optional(),
               }),
               execute: async ({ days, max_results }) => {
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
-                if (!process.env.GOOGLE_CALENDAR_API_KEY) {
-                  return { error: "Google Calendar is not connected." };
-                }
                 const now = new Date();
                 const end = new Date(now.getTime() + (days ?? 7) * 86400000);
-                const params = new URLSearchParams({
+                const top = String(max_results ?? 10);
+                if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                  const params = new URLSearchParams({
+                    startDateTime: now.toISOString(),
+                    endDateTime: end.toISOString(),
+                    $orderby: "start/dateTime",
+                    $top: top,
+                  });
+                  const r = await fetch(
+                    `https://connector-gateway.lovable.dev/microsoft_outlook/me/calendarView?${params}`,
+                    { headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY") },
+                  );
+                  if (!r.ok) {
+                    const t = await r.text();
+                    return { error: `Outlook calendar read failed (${r.status})`, detail: t.slice(0, 200) };
+                  }
+                  const j = (await r.json()) as {
+                    value?: Array<{
+                      id: string;
+                      subject?: string;
+                      start?: { dateTime?: string; timeZone?: string };
+                      end?: { dateTime?: string; timeZone?: string };
+                      location?: { displayName?: string };
+                      webLink?: string;
+                      attendees?: Array<{ emailAddress?: { address?: string } }>;
+                    }>;
+                  };
+                  return {
+                    provider: "outlook",
+                    events: (j.value ?? []).map((e) => ({
+                      id: e.id,
+                      title: e.subject ?? "(no title)",
+                      start: e.start?.dateTime,
+                      end: e.end?.dateTime,
+                      timezone: e.start?.timeZone,
+                      location: e.location?.displayName,
+                      link: e.webLink,
+                      attendees: (e.attendees ?? [])
+                        .map((a) => a.emailAddress?.address)
+                        .filter(Boolean),
+                    })),
+                  };
+                }
+                if (!process.env.GOOGLE_CALENDAR_API_KEY) {
+                  return { error: "No calendar provider connected." };
+                }
+                const gparams = new URLSearchParams({
                   timeMin: now.toISOString(),
                   timeMax: end.toISOString(),
                   singleEvents: "true",
                   orderBy: "startTime",
-                  maxResults: String(max_results ?? 10),
+                  maxResults: top,
                 });
                 const r = await fetch(
-                  `https://connector-gateway.lovable.dev/google_calendar/calendar/v3/calendars/primary/events?${params}`,
+                  `https://connector-gateway.lovable.dev/google_calendar/calendar/v3/calendars/primary/events?${gparams}`,
                   { headers: gatewayHeaders("GOOGLE_CALENDAR_API_KEY") },
                 );
                 if (!r.ok) {
@@ -387,6 +430,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   }>;
                 };
                 return {
+                  provider: "google",
                   events: (j.items ?? []).map((e) => ({
                     id: e.id,
                     title: e.summary ?? "(no title)",
@@ -401,7 +445,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             create_calendar_event: tool({
               description:
-                "Create a new event on the user's primary Google Calendar. Only call after the user has approved the draft.",
+                "Create a new event on the user's connected calendar (Outlook preferred, Google fallback). Only call after the user has approved the draft.",
               inputSchema: z.object({
                 title: z.string().min(1).max(200),
                 start: z.string().describe("ISO 8601 start datetime, e.g. 2026-07-01T15:00:00-04:00"),
@@ -413,8 +457,40 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone }) => {
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
+                if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                  const r = await fetch(
+                    "https://connector-gateway.lovable.dev/microsoft_outlook/me/events",
+                    {
+                      method: "POST",
+                      headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
+                      body: JSON.stringify({
+                        subject: title,
+                        body: description
+                          ? { contentType: "HTML", content: description }
+                          : undefined,
+                        start: { dateTime: start, timeZone: timezone ?? "UTC" },
+                        end: { dateTime: end, timeZone: timezone ?? "UTC" },
+                        ...(location ? { location: { displayName: location } } : {}),
+                        ...(attendees && attendees.length
+                          ? {
+                              attendees: attendees.map((email) => ({
+                                emailAddress: { address: email },
+                                type: "required",
+                              })),
+                            }
+                          : {}),
+                      }),
+                    },
+                  );
+                  if (!r.ok) {
+                    const t = await r.text();
+                    return { error: `Outlook calendar create failed (${r.status})`, detail: t.slice(0, 200) };
+                  }
+                  const j = (await r.json()) as { id?: string; webLink?: string };
+                  return { ok: true, provider: "outlook", id: j.id, link: j.webLink };
+                }
                 if (!process.env.GOOGLE_CALENDAR_API_KEY) {
-                  return { error: "Google Calendar is not connected." };
+                  return { error: "No calendar provider connected." };
                 }
                 const r = await fetch(
                   "https://connector-gateway.lovable.dev/google_calendar/calendar/v3/calendars/primary/events",
@@ -438,7 +514,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   return { error: `Calendar create failed (${r.status})`, detail: t.slice(0, 200) };
                 }
                 const j = (await r.json()) as { id?: string; htmlLink?: string };
-                return { ok: true, id: j.id, link: j.htmlLink };
+                return { ok: true, provider: "google", id: j.id, link: j.htmlLink };
               },
             }),
           },
