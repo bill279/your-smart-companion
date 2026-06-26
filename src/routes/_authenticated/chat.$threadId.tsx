@@ -687,8 +687,35 @@ function ThreadView({ threadId }: { threadId: string }) {
         )}
         <form
           onSubmit={onSubmit}
-          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex items-center gap-2"
+          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex flex-col gap-2"
         >
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-1 pt-1">
+              {attachments.map((a) => (
+                <div
+                  key={a.path}
+                  className="flex items-center gap-1.5 rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs text-foreground"
+                >
+                  {a.mimeType.startsWith("image/") ? <ImageIcon size={12} /> : <FileText size={12} />}
+                  <span className="max-w-[160px] truncate">{a.name}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAttachments((cur) => cur.filter((x) => x.path !== a.path))
+                    }
+                    className="text-muted-foreground hover:text-destructive ml-1"
+                    aria-label={`Remove ${a.name}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              {uploading && (
+                <span className="text-xs text-muted-foreground self-center">Uploading…</span>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => {
@@ -713,6 +740,23 @@ function ThreadView({ threadId }: { threadId: string }) {
             {voiceActive ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
           <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/csv,text/markdown"
+            className="hidden"
+            onChange={(e) => handleFilesSelected(e.target.files)}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title="Attach file"
+            className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center border border-border bg-secondary hover:bg-secondary/80 text-primary disabled:opacity-40"
+          >
+            <Paperclip size={16} />
+          </button>
+          <input
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -729,11 +773,12 @@ function ThreadView({ threadId }: { threadId: string }) {
           />
           <button
             type="submit"
-            disabled={!input.trim() || addMut.isPending}
+            disabled={(!input.trim() && attachments.length === 0) || addMut.isPending || uploading}
             className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-2"
           >
             <Send size={14} /> Send
           </button>
+          </div>
         </form>
       </main>
     </div>
