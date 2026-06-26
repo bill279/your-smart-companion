@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_actions: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          payload: Json
+          status: string
+          summary: string
+          thread_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          payload?: Json
+          status?: string
+          summary: string
+          thread_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          payload?: Json
+          status?: string
+          summary?: string
+          thread_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       contacts: {
         Row: {
           created_at: string
@@ -103,6 +136,36 @@ export type Database = {
           title?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      user_facts: {
+        Row: {
+          created_at: string
+          id: string
+          key: string
+          source: string | null
+          updated_at: string
+          user_id: string
+          value: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key: string
+          source?: string | null
+          updated_at?: string
+          user_id: string
+          value: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key?: string
+          source?: string | null
+          updated_at?: string
+          user_id?: string
+          value?: string
         }
         Relationships: []
       }
