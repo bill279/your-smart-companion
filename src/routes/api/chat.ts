@@ -35,6 +35,7 @@ You have tools:
 - recall_facts — load durable facts the user has asked you to remember (boss, company, preferences, tools). Call this at the start of any conversation where personal context might help.
 - remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
+- search_knowledge_base — semantic search over the user's uploaded company documents/SOPs (PDFs, docs, notes). Use this FIRST whenever the user asks about internal/company-specific info, processes, products, pricing sheets, policies, or anything that sounds like it would live in their files. Cite the document name in the answer.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
 
@@ -733,6 +734,56 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 if (error) return { error: error.message };
                 await logAction("forget_fact", `Forgot ${normKey}`, { key: normKey });
                 return { ok: true, key: normKey };
+              },
+            }),
+            search_knowledge_base: tool({
+              description:
+                "Semantic search over the signed-in user's uploaded knowledge base (company docs, SOPs, PDFs). Returns the most relevant chunks with the source document name. Use first for any company/internal question.",
+              inputSchema: z.object({
+                query: z.string().min(1).max(500),
+                limit: z.number().int().min(1).max(10).optional(),
+              }),
+              execute: async ({ query, limit }) => {
+                try {
+                  const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Lovable-API-Key": LOVABLE_API_KEY!,
+                      Authorization: `Bearer ${LOVABLE_API_KEY!}`,
+                    },
+                    body: JSON.stringify({
+                      model: "openai/text-embedding-3-small",
+                      input: query,
+                    }),
+                  });
+                  if (!r.ok) {
+                    return { error: `Embedding failed (${r.status})` };
+                  }
+                  const j = (await r.json()) as { data: Array<{ embedding: number[] }> };
+                  const qvec = j.data[0]?.embedding;
+                  if (!qvec) return { error: "No embedding returned" };
+                  const { data: matches, error } = await supabase.rpc("match_kb_chunks", {
+                    query_embedding: qvec as unknown as string,
+                    match_user_id: userId,
+                    match_count: limit ?? 6,
+                  });
+                  if (error) return { error: error.message };
+                  await logAction(
+                    "search_knowledge_base",
+                    `KB search: ${query.slice(0, 60)}`,
+                    { query, hits: matches?.length ?? 0 },
+                  );
+                  return {
+                    results: (matches ?? []).map((m) => ({
+                      document: m.document_name,
+                      similarity: Number(m.similarity?.toFixed(3) ?? 0),
+                      content: m.content,
+                    })),
+                  };
+                } catch (e) {
+                  return { error: e instanceof Error ? e.message : String(e) };
+                }
               },
             }),
           },
