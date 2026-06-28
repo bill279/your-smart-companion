@@ -412,6 +412,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
