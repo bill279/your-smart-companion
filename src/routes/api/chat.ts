@@ -736,6 +736,56 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 return { ok: true, key: normKey };
               },
             }),
+            search_knowledge_base: tool({
+              description:
+                "Semantic search over the signed-in user's uploaded knowledge base (company docs, SOPs, PDFs). Returns the most relevant chunks with the source document name. Use first for any company/internal question.",
+              inputSchema: z.object({
+                query: z.string().min(1).max(500),
+                limit: z.number().int().min(1).max(10).optional(),
+              }),
+              execute: async ({ query, limit }) => {
+                try {
+                  const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Lovable-API-Key": LOVABLE_API_KEY!,
+                      Authorization: `Bearer ${LOVABLE_API_KEY!}`,
+                    },
+                    body: JSON.stringify({
+                      model: "openai/text-embedding-3-small",
+                      input: query,
+                    }),
+                  });
+                  if (!r.ok) {
+                    return { error: `Embedding failed (${r.status})` };
+                  }
+                  const j = (await r.json()) as { data: Array<{ embedding: number[] }> };
+                  const qvec = j.data[0]?.embedding;
+                  if (!qvec) return { error: "No embedding returned" };
+                  const { data: matches, error } = await supabase.rpc("match_kb_chunks", {
+                    query_embedding: qvec as unknown as string,
+                    match_user_id: userId,
+                    match_count: limit ?? 6,
+                  });
+                  if (error) return { error: error.message };
+                  await logAction(
+                    "search_knowledge_base",
+                    `KB search: ${query.slice(0, 60)}`,
+                    { query, hits: matches?.length ?? 0 },
+                  );
+                  return {
+                    results: (matches ?? []).map((m) => ({
+                      document: m.document_name,
+                      similarity: Number(m.similarity?.toFixed(3) ?? 0),
+                      content: m.content,
+                    })),
+                  };
+                } catch (e) {
+                  return { error: e instanceof Error ? e.message : String(e) };
+                }
+              },
+            }),
           },
           onFinish: async ({ text }) => {
             await supabase.from("messages").insert({
