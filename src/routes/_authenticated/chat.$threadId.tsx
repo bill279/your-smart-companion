@@ -331,6 +331,21 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
+    onAudioAlignment: (props: { chars?: string[] }) => {
+      // Fallback live transcript: reveal each character as the audio chunk
+      // for it is generated. This guarantees the chat updates while the bot
+      // is speaking even when the agent does not stream text response parts.
+      const chars = props?.chars;
+      if (!chars || chars.length === 0) return;
+      liveAssistantRef.current += chars.join("");
+      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
+    },
+    onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
+      const corrected = props?.corrected_agent_response;
+      if (!corrected) return;
+      liveAssistantRef.current = corrected;
+      setPendingAssistant(cleanAssistantText(corrected));
+    },
     onConnect: () => {
       clearVoiceConnectTimeout();
       hasConnectedVoiceRef.current = true;
@@ -397,12 +412,15 @@ function ThreadView({ threadId }: { threadId: string }) {
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
+          liveAssistantRef.current = cleaned;
           await add({ data: { threadId, role: "assistant", content: cleaned } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingAssistant("");
           liveAssistantRef.current = "";
           const t = threads.data?.find((x) => x.id === threadId);
@@ -411,7 +429,6 @@ function ThreadView({ threadId }: { threadId: string }) {
             await rename({ data: { id: threadId, title } });
           }
         }
-        qc.invalidateQueries({ queryKey: ["messages", threadId] });
         qc.invalidateQueries({ queryKey: ["threads"] });
       } catch (err) {
         console.warn("Failed to persist voice message", err);
