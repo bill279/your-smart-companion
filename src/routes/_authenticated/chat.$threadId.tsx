@@ -65,24 +65,34 @@ function cleanThreadTitle(title: string) {
 function hidePartialTables(text: string): string {
   if (!text.includes("|")) return text;
   const lines = text.split("\n");
-  // Find the start of a trailing table block (a run of lines starting with `|`).
-  let start = lines.length;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^\s*\|.*\|\s*$/.test(lines[i])) start = i;
-    else break;
+  // Walk the buffer and hide ANY incomplete table block — not just trailing ones.
+  // During streaming, the bot may emit header rows for several tables before the
+  // separator/body arrives. Showing raw pipes mid-stream looks like garbled text.
+  const out: string[] = [];
+  let i = 0;
+  const isPipeLine = (l: string) => /^\s*\|.*\|\s*$/.test(l);
+  const isSeparator = (l: string) => /^\s*\|?\s*:?-{3,}/.test(l);
+  while (i < lines.length) {
+    if (isPipeLine(lines[i])) {
+      let j = i;
+      while (j < lines.length && isPipeLine(lines[j])) j++;
+      const block = lines.slice(i, j);
+      const hasSep = block.some(isSeparator);
+      const isTrailing = j === lines.length;
+      // Treat as incomplete if: no separator yet, or it's the trailing block
+      // and only has 1–2 rows (still being written).
+      if (!hasSep || (isTrailing && block.length < 3)) {
+        out.push("_Building table…_");
+      } else {
+        out.push(...block);
+      }
+      i = j;
+    } else {
+      out.push(lines[i]);
+      i++;
+    }
   }
-  if (start >= lines.length) return text;
-  const tableLines = lines.slice(start);
-  // A valid GFM table needs a header row + a separator row like |---|---|
-  const hasSeparator = tableLines.some((l) => /^\s*\|?\s*:?-{3,}/.test(l));
-  // If the table is still being written (no separator yet, or fewer than 2 rows),
-  // hide it behind a placeholder so it doesn't render as a wall of pipes.
-  if (!hasSeparator || tableLines.length < 2) {
-    const head = lines.slice(0, start).join("\n").trimEnd();
-    const placeholder = "\n\n_Building table…_";
-    return head + placeholder;
-  }
-  return text;
+  return out.join("\n");
 }
 
 type SearchData = {
@@ -420,7 +430,18 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      setVoiceError(/quota/i.test(msg) ? "ElevenLabs voice quota is exhausted. Text chat still works." : msg || "Voice failed to connect. Tap the mic once to try again.");
+      if (/quota/i.test(msg)) {
+        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+        return;
+      }
+      // Silent auto-reconnect if we were mid-session (transient socket glitch).
+      if (hasConnectedVoiceRef.current) {
+        setTimeout(() => {
+          if (voiceStateRef.current === "idle") void startVoice();
+        }, 500);
+        return;
+      }
+      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -479,9 +500,25 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   function buildVoiceContext() {
-    const MAX_CHARS = 12000;
-    const recent = (messages ?? []).slice(-100).map(
-      (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
+    // Keep ElevenLabs context healthy on long threads: strip markdown noise
+    // (tables, bullets, headings) so the LLM doesn't try to read it aloud, and
+    // cap to ~6k chars + 60 turns. Overflow is the #1 cause of voice "gibberish".
+    const MAX_CHARS = 6000;
+    const MAX_TURNS = 60;
+    const stripMd = (s: string) =>
+      s
+        .replace(/```[\s\S]*?```/g, "[code]")
+        .replace(/^\s*\|.*\|\s*$/gm, "")
+        .replace(/^\s*#{1,6}\s+/gm, "")
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/[*_`>]/g, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    const recent = (messages ?? []).slice(-MAX_TURNS).map(
+      (m) =>
+        `${m.role === "user" ? "User" : "BPA Bot"}: ${
+          m.role === "assistant" ? stripMd(cleanAssistantText(m.content)) : m.content
+        }`,
     );
     let total = 0;
     const kept: string[] = [];
@@ -542,6 +579,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       conversation.startSession({
         signedUrl,
         connectionType: "websocket",
+        overrides: {
+          tts: {
+            stability: 0.55,
+            similarityBoost: 0.8,
+            speed: 1,
+          },
+        },
       });
     } catch (e) {
       clearVoiceConnectTimeout();
