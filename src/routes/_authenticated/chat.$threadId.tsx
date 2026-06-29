@@ -58,6 +58,33 @@ function cleanThreadTitle(title: string) {
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
 }
 
+// While the assistant is streaming, a markdown table is incomplete until the
+// second row (the |---|---| separator) arrives. Showing the raw pipes mid-stream
+// looks like garbled text, especially during voice. Detect an unfinished table
+// at the end of the buffer and replace it with a tidy placeholder until done.
+function hidePartialTables(text: string): string {
+  if (!text.includes("|")) return text;
+  const lines = text.split("\n");
+  // Find the start of a trailing table block (a run of lines starting with `|`).
+  let start = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^\s*\|.*\|\s*$/.test(lines[i])) start = i;
+    else break;
+  }
+  if (start >= lines.length) return text;
+  const tableLines = lines.slice(start);
+  // A valid GFM table needs a header row + a separator row like |---|---|
+  const hasSeparator = tableLines.some((l) => /^\s*\|?\s*:?-{3,}/.test(l));
+  // If the table is still being written (no separator yet, or fewer than 2 rows),
+  // hide it behind a placeholder so it doesn't render as a wall of pipes.
+  if (!hasSeparator || tableLines.length < 2) {
+    const head = lines.slice(0, start).join("\n").trimEnd();
+    const placeholder = "\n\n_Building table…_";
+    return head + placeholder;
+  }
+  return text;
+}
+
 type SearchData = {
   threads: Array<{ id: string; title: string; updated_at: string }>;
   messages: Array<{ id: string; thread_id: string; role: string; snippet: string; created_at: string }>;
@@ -468,13 +495,14 @@ function ThreadView({ threadId }: { threadId: string }) {
     const rules = [
       "Behavioral rules for this session:",
       "- Do not greet or introduce yourself again.",
-      "- If asked for a table, output a GitHub-Flavored Markdown table directly.",
+      "- VOICE BREVITY: keep spoken replies under 60 words and conversational. Never read out long lists, tables, or markdown syntax — summarize them out loud and say \"I've put the details in the chat.\" The full structured answer (tables, bullets) goes silently to the chat via the visual transcript.",
+      "- NO MARKDOWN OUT LOUD: do NOT speak characters like \"asterisk\", \"pipe\", \"hash\", or read tables row by row. If you need to show structured data, mention it briefly and let the chat render it.",
+      "- If asked for a table, output a GitHub-Flavored Markdown table directly in the chat, and say one short sentence summarizing it out loud.",
       "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
       "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
       "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
       "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
       "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
-      "- BE CONCISE: keep spoken replies short and conversational. Avoid long monologues so the user can interject naturally.",
       "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
       "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
@@ -1194,7 +1222,9 @@ function Bubble({
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
 }) {
   const isUser = role === "user";
-  const displayContent = isUser ? content : cleanAssistantText(content);
+  const displayContent = isUser
+    ? content
+    : hidePartialTables(cleanAssistantText(content));
   return (
     <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
