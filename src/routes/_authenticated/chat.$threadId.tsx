@@ -489,9 +489,25 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   function buildVoiceContext() {
-    const MAX_CHARS = 12000;
-    const recent = (messages ?? []).slice(-100).map(
-      (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
+    // Keep ElevenLabs context healthy on long threads: strip markdown noise
+    // (tables, bullets, headings) so the LLM doesn't try to read it aloud, and
+    // cap to ~6k chars + 60 turns. Overflow is the #1 cause of voice "gibberish".
+    const MAX_CHARS = 6000;
+    const MAX_TURNS = 60;
+    const stripMd = (s: string) =>
+      s
+        .replace(/```[\s\S]*?```/g, "[code]")
+        .replace(/^\s*\|.*\|\s*$/gm, "")
+        .replace(/^\s*#{1,6}\s+/gm, "")
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/[*_`>]/g, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    const recent = (messages ?? []).slice(-MAX_TURNS).map(
+      (m) =>
+        `${m.role === "user" ? "User" : "BPA Bot"}: ${
+          m.role === "assistant" ? stripMd(cleanAssistantText(m.content)) : m.content
+        }`,
     );
     let total = 0;
     const kept: string[] = [];
@@ -552,6 +568,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       conversation.startSession({
         signedUrl,
         connectionType: "websocket",
+        overrides: {
+          tts: {
+            stability: 0.55,
+            similarityBoost: 0.8,
+            speed: 1,
+          },
+        },
       });
     } catch (e) {
       clearVoiceConnectTimeout();
