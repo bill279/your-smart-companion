@@ -754,6 +754,48 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.print();
   }
 
+  function getChatTitle() {
+    return cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "BPA Bot chat");
+  }
+
+  function getExportMessages(): ChatMsg[] {
+    return messages.map((m) => ({
+      role: m.role,
+      content: m.role === "assistant" ? cleanAssistantText(m.content) : m.content,
+      created_at: m.created_at,
+    }));
+  }
+
+  function exportPdf() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try {
+      exportChatToPdf(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.pdf`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "PDF export failed");
+    }
+  }
+
+  async function exportDocx() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try {
+      await exportChatToDocx(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.docx`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Word export failed");
+    }
+  }
+
+  function exportXlsx() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try {
+      exportChatToXlsx(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.xlsx`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Excel export failed");
+    }
+  }
+
   async function exportEmailToMe() {
     setExportOpen(false);
     if (messages.length === 0) return toast.error("Nothing to export yet");
