@@ -430,7 +430,18 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      setVoiceError(/quota/i.test(msg) ? "ElevenLabs voice quota is exhausted. Text chat still works." : msg || "Voice failed to connect. Tap the mic once to try again.");
+      if (/quota/i.test(msg)) {
+        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+        return;
+      }
+      // Silent auto-reconnect if we were mid-session (transient socket glitch).
+      if (hasConnectedVoiceRef.current) {
+        setTimeout(() => {
+          if (voiceStateRef.current === "idle") void startVoice();
+        }, 500);
+        return;
+      }
+      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
