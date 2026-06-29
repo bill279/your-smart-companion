@@ -364,7 +364,12 @@ function ThreadView({ threadId }: { threadId: string }) {
       const chunk = part?.text ?? "";
       if (kind === "start") {
         liveAssistantRef.current = chunk;
+        liveStreamSourceRef.current = "part";
       } else if (kind === "delta") {
+        if (liveStreamSourceRef.current === "alignment") {
+          liveAssistantRef.current = chunk;
+          liveStreamSourceRef.current = "part";
+        }
         liveAssistantRef.current += chunk;
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
@@ -372,11 +377,16 @@ function ThreadView({ threadId }: { threadId: string }) {
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
-      // Fallback live transcript: reveal each character as the audio chunk
-      // for it is generated. This guarantees the chat updates while the bot
-      // is speaking even when the agent does not stream text response parts.
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
+      // Only use audio alignment as a fallback when the agent is NOT already
+      // streaming text via onAgentChatResponsePart — otherwise we'd append
+      // the same content twice and the chat would show duplicated text.
+      if (liveStreamSourceRef.current === "part") return;
+      if (liveStreamSourceRef.current === "none") {
+        liveAssistantRef.current = "";
+        liveStreamSourceRef.current = "alignment";
+      }
       liveAssistantRef.current += chars.join("");
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
@@ -489,6 +499,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingAssistant("");
           liveAssistantRef.current = "";
+          liveStreamSourceRef.current = "none";
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
