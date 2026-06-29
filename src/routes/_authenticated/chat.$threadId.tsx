@@ -222,6 +222,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const liveAssistantRef = useRef<string>("");
+  const liveStreamSourceRef = useRef<"none" | "part" | "alignment">("none");
+  const lastAssistantTextRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
@@ -362,7 +364,12 @@ function ThreadView({ threadId }: { threadId: string }) {
       const chunk = part?.text ?? "";
       if (kind === "start") {
         liveAssistantRef.current = chunk;
+        liveStreamSourceRef.current = "part";
       } else if (kind === "delta") {
+        if (liveStreamSourceRef.current === "alignment") {
+          liveAssistantRef.current = chunk;
+          liveStreamSourceRef.current = "part";
+        }
         liveAssistantRef.current += chunk;
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
@@ -370,11 +377,16 @@ function ThreadView({ threadId }: { threadId: string }) {
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
-      // Fallback live transcript: reveal each character as the audio chunk
-      // for it is generated. This guarantees the chat updates while the bot
-      // is speaking even when the agent does not stream text response parts.
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
+      // Only use audio alignment as a fallback when the agent is NOT already
+      // streaming text via onAgentChatResponsePart — otherwise we'd append
+      // the same content twice and the chat would show duplicated text.
+      if (liveStreamSourceRef.current === "part") return;
+      if (liveStreamSourceRef.current === "none") {
+        liveAssistantRef.current = "";
+        liveStreamSourceRef.current = "alignment";
+      }
       liveAssistantRef.current += chars.join("");
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
@@ -456,6 +468,20 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
       try {
         if (message.source === "user") {
+          // Drop echo: if the mic picks up the bot's own audio, ElevenLabs will
+          // emit it as a "user" transcript. If this text closely matches what
+          // the assistant just said, ignore it instead of saving a duplicate
+          // user-side bubble that mirrors the assistant message.
+          const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
+          const u = norm(text);
+          const a = norm(lastAssistantTextRef.current);
+          if (u && a) {
+            const short = u.length < a.length ? u : a;
+            const long = u.length < a.length ? a : u;
+            if (short.length >= 12 && long.includes(short)) {
+              return;
+            }
+          }
           voiceUserHasSpokenRef.current = true;
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
@@ -465,6 +491,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          lastAssistantTextRef.current = cleaned;
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
@@ -472,6 +499,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingAssistant("");
           liveAssistantRef.current = "";
+          liveStreamSourceRef.current = "none";
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
