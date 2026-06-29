@@ -21,6 +21,7 @@ import {
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { exportChatToPdf, exportChatToDocx, exportChatToXlsx, type ChatMsg } from "@/lib/export-chat";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
