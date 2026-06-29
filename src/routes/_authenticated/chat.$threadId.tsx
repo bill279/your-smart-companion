@@ -1280,12 +1280,21 @@ function ThreadView({ threadId }: { threadId: string }) {
   );
 }
 
-function ExportMenu({ onPrint, onMarkdown, onEmail }: { onPrint: () => void; onMarkdown: () => void; onEmail: () => void }) {
+function ExportMenu({ onPdf, onDocx, onXlsx, onPrint, onMarkdown, onEmail }: { onPdf: () => void; onDocx: () => void; onXlsx: () => void; onPrint: () => void; onMarkdown: () => void; onEmail: () => void }) {
   return (
     <div
       onClick={(e) => e.stopPropagation()}
       className="absolute right-0 top-full mt-1 w-56 rounded-md border border-border bg-card shadow-lg z-50 overflow-hidden"
     >
+      <button onClick={onPdf} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <FileText size={14} /> Download PDF
+      </button>
+      <button onClick={onDocx} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <FileText size={14} /> Download Word (.docx)
+      </button>
+      <button onClick={onXlsx} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <FileText size={14} /> Download Excel (.xlsx)
+      </button>
       <button onClick={onPrint} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
         <Printer size={14} /> Print / Save as PDF
       </button>
