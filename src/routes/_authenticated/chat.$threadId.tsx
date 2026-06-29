@@ -222,6 +222,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const liveAssistantRef = useRef<string>("");
+  const liveStreamSourceRef = useRef<"none" | "part" | "alignment">("none");
   const lastAssistantTextRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
