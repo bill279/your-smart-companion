@@ -1072,7 +1072,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             >
               <MoreVertical size={16} />
             </button>
-            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+            {exportOpen && <ExportMenu onPdf={exportPdf} onDocx={exportDocx} onXlsx={exportXlsx} onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
           </div>
         </div>
         {/* Mobile header */}
@@ -1109,7 +1109,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             >
               <MoreVertical size={18} />
             </button>
-            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+            {exportOpen && <ExportMenu onPdf={exportPdf} onDocx={exportDocx} onXlsx={exportXlsx} onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
           </div>
         </div>
         {/* Messages */}
