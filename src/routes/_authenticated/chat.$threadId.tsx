@@ -21,6 +21,7 @@ import {
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { exportChatToPdf, exportChatToDocx, exportChatToXlsx, type ChatMsg } from "@/lib/export-chat";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
@@ -753,6 +754,48 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.print();
   }
 
+  function getChatTitle() {
+    return cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "BPA Bot chat");
+  }
+
+  function getExportMessages(): ChatMsg[] {
+    return messages.map((m) => ({
+      role: m.role,
+      content: m.role === "assistant" ? cleanAssistantText(m.content) : m.content,
+      created_at: m.created_at,
+    }));
+  }
+
+  function exportPdf() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try {
+      exportChatToPdf(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.pdf`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "PDF export failed");
+    }
+  }
+
+  async function exportDocx() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try {
+      await exportChatToDocx(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.docx`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Word export failed");
+    }
+  }
+
+  function exportXlsx() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try {
+      exportChatToXlsx(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.xlsx`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Excel export failed");
+    }
+  }
+
   async function exportEmailToMe() {
     setExportOpen(false);
     if (messages.length === 0) return toast.error("Nothing to export yet");
@@ -1029,7 +1072,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             >
               <MoreVertical size={16} />
             </button>
-            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+            {exportOpen && <ExportMenu onPdf={exportPdf} onDocx={exportDocx} onXlsx={exportXlsx} onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
           </div>
         </div>
         {/* Mobile header */}
@@ -1066,7 +1109,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             >
               <MoreVertical size={18} />
             </button>
-            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+            {exportOpen && <ExportMenu onPdf={exportPdf} onDocx={exportDocx} onXlsx={exportXlsx} onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
           </div>
         </div>
         {/* Messages */}
@@ -1237,12 +1280,21 @@ function ThreadView({ threadId }: { threadId: string }) {
   );
 }
 
-function ExportMenu({ onPrint, onMarkdown, onEmail }: { onPrint: () => void; onMarkdown: () => void; onEmail: () => void }) {
+function ExportMenu({ onPdf, onDocx, onXlsx, onPrint, onMarkdown, onEmail }: { onPdf: () => void; onDocx: () => void; onXlsx: () => void; onPrint: () => void; onMarkdown: () => void; onEmail: () => void }) {
   return (
     <div
       onClick={(e) => e.stopPropagation()}
       className="absolute right-0 top-full mt-1 w-56 rounded-md border border-border bg-card shadow-lg z-50 overflow-hidden"
     >
+      <button onClick={onPdf} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <FileText size={14} /> Download PDF
+      </button>
+      <button onClick={onDocx} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <FileText size={14} /> Download Word (.docx)
+      </button>
+      <button onClick={onXlsx} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
+        <FileText size={14} /> Download Excel (.xlsx)
+      </button>
       <button onClick={onPrint} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
         <Printer size={14} /> Print / Save as PDF
       </button>
