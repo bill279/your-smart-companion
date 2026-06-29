@@ -580,13 +580,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       conversation.startSession({
         signedUrl,
         connectionType: "websocket",
-        overrides: {
-          tts: {
-            stability: 0.55,
-            similarityBoost: 0.8,
-            speed: 1,
-          },
-        },
       });
     } catch (e) {
       clearVoiceConnectTimeout();
