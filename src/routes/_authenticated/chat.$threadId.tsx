@@ -58,6 +58,33 @@ function cleanThreadTitle(title: string) {
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
 }
 
+// While the assistant is streaming, a markdown table is incomplete until the
+// second row (the |---|---| separator) arrives. Showing the raw pipes mid-stream
+// looks like garbled text, especially during voice. Detect an unfinished table
+// at the end of the buffer and replace it with a tidy placeholder until done.
+function hidePartialTables(text: string): string {
+  if (!text.includes("|")) return text;
+  const lines = text.split("\n");
+  // Find the start of a trailing table block (a run of lines starting with `|`).
+  let start = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^\s*\|.*\|\s*$/.test(lines[i])) start = i;
+    else break;
+  }
+  if (start >= lines.length) return text;
+  const tableLines = lines.slice(start);
+  // A valid GFM table needs a header row + a separator row like |---|---|
+  const hasSeparator = tableLines.some((l) => /^\s*\|?\s*:?-{3,}/.test(l));
+  // If the table is still being written (no separator yet, or fewer than 2 rows),
+  // hide it behind a placeholder so it doesn't render as a wall of pipes.
+  if (!hasSeparator || tableLines.length < 2) {
+    const head = lines.slice(0, start).join("\n").trimEnd();
+    const placeholder = "\n\n_Building table…_";
+    return head + placeholder;
+  }
+  return text;
+}
+
 type SearchData = {
   threads: Array<{ id: string; title: string; updated_at: string }>;
   messages: Array<{ id: string; thread_id: string; role: string; snippet: string; created_at: string }>;
