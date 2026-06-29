@@ -1195,7 +1195,9 @@ function Bubble({
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
 }) {
   const isUser = role === "user";
-  const displayContent = isUser ? content : cleanAssistantText(content);
+  const displayContent = isUser
+    ? content
+    : hidePartialTables(cleanAssistantText(content));
   return (
     <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
