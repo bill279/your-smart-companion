@@ -65,24 +65,34 @@ function cleanThreadTitle(title: string) {
 function hidePartialTables(text: string): string {
   if (!text.includes("|")) return text;
   const lines = text.split("\n");
-  // Find the start of a trailing table block (a run of lines starting with `|`).
-  let start = lines.length;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^\s*\|.*\|\s*$/.test(lines[i])) start = i;
-    else break;
+  // Walk the buffer and hide ANY incomplete table block — not just trailing ones.
+  // During streaming, the bot may emit header rows for several tables before the
+  // separator/body arrives. Showing raw pipes mid-stream looks like garbled text.
+  const out: string[] = [];
+  let i = 0;
+  const isPipeLine = (l: string) => /^\s*\|.*\|\s*$/.test(l);
+  const isSeparator = (l: string) => /^\s*\|?\s*:?-{3,}/.test(l);
+  while (i < lines.length) {
+    if (isPipeLine(lines[i])) {
+      let j = i;
+      while (j < lines.length && isPipeLine(lines[j])) j++;
+      const block = lines.slice(i, j);
+      const hasSep = block.some(isSeparator);
+      const isTrailing = j === lines.length;
+      // Treat as incomplete if: no separator yet, or it's the trailing block
+      // and only has 1–2 rows (still being written).
+      if (!hasSep || (isTrailing && block.length < 3)) {
+        out.push("_Building table…_");
+      } else {
+        out.push(...block);
+      }
+      i = j;
+    } else {
+      out.push(lines[i]);
+      i++;
+    }
   }
-  if (start >= lines.length) return text;
-  const tableLines = lines.slice(start);
-  // A valid GFM table needs a header row + a separator row like |---|---|
-  const hasSeparator = tableLines.some((l) => /^\s*\|?\s*:?-{3,}/.test(l));
-  // If the table is still being written (no separator yet, or fewer than 2 rows),
-  // hide it behind a placeholder so it doesn't render as a wall of pipes.
-  if (!hasSeparator || tableLines.length < 2) {
-    const head = lines.slice(0, start).join("\n").trimEnd();
-    const placeholder = "\n\n_Building table…_";
-    return head + placeholder;
-  }
-  return text;
+  return out.join("\n");
 }
 
 type SearchData = {
