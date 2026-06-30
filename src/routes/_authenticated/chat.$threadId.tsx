@@ -867,6 +867,14 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   return (
     <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
+      <VoiceOverlay
+        open={voiceActive}
+        conversation={conversation}
+        connecting={voiceConnecting}
+        onStop={() => void stopVoice()}
+        lastUserText={pendingUser ?? undefined}
+        lastAssistantText={pendingAssistant || undefined}
+      />
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
