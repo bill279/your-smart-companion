@@ -379,14 +379,24 @@ export const Route = createFileRoute("/api/chat")({
               execute: async ({ query, limit }) => {
                 const key = process.env.FIRECRAWL_API_KEY;
                 if (!key) return { error: "Web search not configured" };
-                const r = await fetch("https://api.firecrawl.dev/v2/search", {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${key}`,
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({ query, limit: limit ?? 5 }),
-                });
+                const ac = new AbortController();
+                const t = setTimeout(() => ac.abort(), 10000);
+                let r: Response;
+                try {
+                  r = await fetch("https://api.firecrawl.dev/v2/search", {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${key}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ query, limit: Math.min(limit ?? 4, 5) }),
+                    signal: ac.signal,
+                  });
+                } catch {
+                  return { error: "Search timed out — try a more specific query." };
+                } finally {
+                  clearTimeout(t);
+                }
                 if (!r.ok) return { error: `Search failed (${r.status})` };
                 const j = (await r.json()) as {
                   data?: { web?: Array<{ title?: string; url?: string; description?: string }> } | Array<{ title?: string; url?: string; description?: string }>;
