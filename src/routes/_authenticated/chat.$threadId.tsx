@@ -593,6 +593,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       // be replaced by the persisted message or the reconnected stream.
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
+      if (/override.*first[_\s-]?message|first[_\s-]?message.*override/i.test(closeText)) {
+        allowFirstMessageOverrideRef.current = false;
+      }
       if (/quota/i.test(closeText)) {
         voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
