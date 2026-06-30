@@ -59,6 +59,48 @@ function cleanThreadTitle(title: string) {
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
 }
 
+function groupThreadsByDate<T extends { updated_at: string }>(items: T[]): Array<{ label: string; items: T[] }> {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+  const startOf7 = startOfToday - 7 * 24 * 60 * 60 * 1000;
+  const startOf30 = startOfToday - 30 * 24 * 60 * 60 * 1000;
+  const buckets: Record<string, T[]> = { Today: [], Yesterday: [], "Previous 7 days": [], "Previous 30 days": [], Older: [] };
+  for (const it of items) {
+    const t = new Date(it.updated_at).getTime();
+    if (t >= startOfToday) buckets.Today.push(it);
+    else if (t >= startOfYesterday) buckets.Yesterday.push(it);
+    else if (t >= startOf7) buckets["Previous 7 days"].push(it);
+    else if (t >= startOf30) buckets["Previous 30 days"].push(it);
+    else buckets.Older.push(it);
+  }
+  return Object.entries(buckets)
+    .filter(([, arr]) => arr.length > 0)
+    .map(([label, arr]) => ({ label, items: arr }));
+}
+
+function CopyButton({ text, className = "" }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {}
+      }}
+      title={copied ? "Copied" : "Copy"}
+      className={`inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition ${className}`}
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+      <span>{copied ? "Copied" : "Copy"}</span>
+    </button>
+  );
+}
+
 type SearchData = {
   threads: Array<{ id: string; title: string; updated_at: string }>;
   messages: Array<{ id: string; thread_id: string; role: string; snippet: string; created_at: string }>;
