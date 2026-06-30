@@ -458,6 +458,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       },
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
+      if (!mountedRef.current) return;
       // Prefer the canonical text-response stream over audio-alignment chars.
       // The ElevenLabs SDK can emit overlapping deltas/corrections; append only
       // non-duplicate suffixes so the UI doesn't repeat or shimmer.
@@ -478,6 +479,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       schedulePendingAssistant(liveAssistantRef.current);
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
+      if (!mountedRef.current) return;
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       // Alignment is a fallback only. If response parts are active, using both
@@ -487,12 +489,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       schedulePendingAssistant(liveAssistantRef.current);
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
+      if (!mountedRef.current) return;
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
       liveAssistantRef.current = corrected;
       schedulePendingAssistant(corrected);
     },
     onConnect: () => {
+      if (!mountedRef.current) return;
       clearVoiceConnectTimeout();
       clearVoiceReconnectTimeout();
       hasConnectedVoiceRef.current = true;
@@ -509,6 +513,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
+      if (!mountedRef.current) return;
       clearVoiceConnectTimeout();
       const wasStopping = voiceStateRef.current === "stopping";
       voiceStateRef.current = "idle";
@@ -534,6 +539,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onError: (e) => {
+      if (!mountedRef.current) return;
       const msg = String(e || "");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
@@ -555,6 +561,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
     },
     onMessage: async (message: { source?: string; message?: string }) => {
+      if (!mountedRef.current) return;
       const text = message?.message;
       if (!text) return;
       const voiceMessage = message as { source?: string; message?: string; event_id?: number };
@@ -578,6 +585,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          if (!mountedRef.current) return;
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
@@ -595,6 +603,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           liveAssistantRef.current = cleaned;
           await add({ data: { threadId, role: "assistant", content: cleaned } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          if (!mountedRef.current) return;
           setPendingAssistant("");
           resetLiveVoiceAssistant();
           const t = threads.data?.find((x) => x.id === threadId);
