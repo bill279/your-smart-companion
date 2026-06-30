@@ -769,6 +769,23 @@ function ThreadView({ threadId }: { threadId: string }) {
     addMut.mutate({ content: "", files: [], regenerate: true });
   }
 
+  function editUserMessage(content: string) {
+    if (addMut.isPending) {
+      abortRef.current?.abort();
+    }
+    setInput(content);
+    // focus the composer
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLInputElement>("input[placeholder^='Message']");
+      el?.focus();
+    });
+  }
+
+  function sendQuickAction(prompt: string) {
+    if (addMut.isPending || isConnected) return;
+    addMut.mutate({ content: prompt, files: [] });
+  }
+
   function buildChatMarkdown() {
     const lines = [`# ${cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "BPA Bot chat")}`, ""];
     for (const m of messages) {
