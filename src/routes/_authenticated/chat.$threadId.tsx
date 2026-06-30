@@ -261,6 +261,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastVoiceUserAtRef = useRef(0);
   const lastAssistantTextRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -373,9 +374,12 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
     window.addEventListener("unhandledrejection", handler);
     return () => {
+      mountedRef.current = false;
       window.removeEventListener("unhandledrejection", handler);
       voiceStateRef.current = "idle";
       clearVoiceConnectTimeout();
+      clearVoiceReconnectTimeout();
+      resetLiveVoiceAssistant();
       try {
         conversationRef.current?.endSession();
       } catch (err) {
@@ -396,6 +400,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     clearVoiceReconnectTimeout();
     reconnectTimeoutRef.current = window.setTimeout(() => {
       reconnectTimeoutRef.current = null;
+      if (!mountedRef.current) return;
       if (voiceDesiredRef.current && voiceStateRef.current === "idle") void startVoice({ reconnect: true });
     }, delay);
   }
@@ -415,6 +420,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (pendingAssistantRafRef.current !== null) cancelAnimationFrame(pendingAssistantRafRef.current);
     pendingAssistantRafRef.current = requestAnimationFrame(() => {
       pendingAssistantRafRef.current = null;
+      if (!mountedRef.current) return;
       setPendingAssistant(cleaned);
     });
   }
