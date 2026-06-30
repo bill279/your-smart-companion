@@ -14,7 +14,6 @@ import {
   createThread,
   deleteThread,
   getElevenLabsAgentToken,
-  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -267,7 +266,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const getAgentToken = useServerFn(getElevenLabsAgentToken);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
