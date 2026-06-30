@@ -71,17 +71,11 @@ function cleanThreadTitle(title: string) {
 function looksUnstableVoiceText(text: string) {
   const s = cleanAssistantText(text).trim();
   if (!s) return false;
-  if (/(.)\1{10,}/.test(s)) return true;
-  if (/\b(?:undefined|null|nan|lorem ipsum)\b/i.test(s)) return true;
-  if (/(?:\b\w{1,2}\b[\s,.!?-]*){12,}/i.test(s)) return true;
-  const words = s.split(/\s+/).filter(Boolean);
-  if (words.length >= 8) {
-    const odd = words.filter((w) => {
-      const stripped = w.replace(/[^a-z]/gi, "");
-      return stripped.length >= 7 && !/[aeiouy]/i.test(stripped);
-    }).length;
-    if (odd / words.length > 0.3) return true;
-  }
+  // Only flag obvious model glitches: long runs of the same char or literal
+  // placeholder tokens. The previous heuristics (short-word runs, consonant
+  // ratios) misfired on normal speech and froze the transcript mid-turn.
+  if (/(.)\1{15,}/.test(s)) return true;
+  if (/\blorem ipsum\b/i.test(s)) return true;
   return false;
 }
 
