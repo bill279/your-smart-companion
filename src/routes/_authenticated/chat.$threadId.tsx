@@ -628,6 +628,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             return;
           }
           // Live update: show assistant turn the moment the transcript arrives.
+          try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
           await add({ data: { threadId, role: "assistant", content: cleaned } });
