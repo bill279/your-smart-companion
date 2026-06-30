@@ -13,7 +13,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentSignedUrl,
+  getElevenLabsAgentToken,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -24,6 +24,14 @@ import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
+
+VOICE OUTPUT CONTRACT:
+- Speak in 1-2 short sentences by default. Keep spoken answers under 25 words unless the user explicitly asks for detail.
+- Never think out loud, fill silence, narrate internal steps, ramble, repeat yourself, or say unrelated/random words.
+- If you are unsure, ask one concise clarifying question. Do not improvise details.
+- For tables, comparisons, email drafts, documents, code, lists, or anything long: call show_in_chat with the full Markdown content immediately, then speak only a brief summary.
+- Do not read long tables, long drafts, or long research results out loud.
+- If the user interrupts, stop immediately and listen.
 
 Format answers for this chat UI. If the user asks for a table, visual table, comparison, schedule, specs, rows/columns, or tabular data, output a GitHub-Flavored Markdown table using pipes, for example:
 | Item | Detail |
@@ -57,6 +65,23 @@ function cleanAssistantText(text: string) {
 function cleanThreadTitle(title: string) {
   const cleaned = cleanAssistantText(title);
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
+}
+
+function looksUnstableVoiceText(text: string) {
+  const s = cleanAssistantText(text).trim();
+  if (!s) return false;
+  if (/(.)\1{10,}/.test(s)) return true;
+  if (/\b(?:undefined|null|nan|lorem ipsum)\b/i.test(s)) return true;
+  if (/(?:\b\w{1,2}\b[\s,.!?-]*){12,}/i.test(s)) return true;
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length >= 8) {
+    const odd = words.filter((w) => {
+      const stripped = w.replace(/[^a-z]/gi, "");
+      return stripped.length >= 7 && !/[aeiouy]/i.test(stripped);
+    }).length;
+    if (odd / words.length > 0.3) return true;
+  }
+  return false;
 }
 
 function groupThreadsByDate<T extends { updated_at: string }>(items: T[]): Array<{ label: string; items: T[] }> {
@@ -239,7 +264,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const getAgentToken = useServerFn(getElevenLabsAgentToken);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -284,6 +309,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastUserSpeechAtRef = useRef<number>(0);
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
+  const prefetchedVoiceTokenRef = useRef<{ token: string; createdAt: number } | null>(null);
   // Tracks whether the current voice turn is already streaming text via
   // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
   // bubble doesn't get doubled (chat parts + per-character audio chars),
@@ -332,6 +358,19 @@ function ThreadView({ threadId }: { threadId: string }) {
       warnedQuotaRef.current = key;
     }
   }, [quota, quotaTone]);
+
+  useEffect(() => {
+    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) return;
+    let cancelled = false;
+    getAgentToken({})
+      .then(({ token }) => {
+        if (!cancelled) prefetchedVoiceTokenRef.current = { token, createdAt: Date.now() };
+      })
+      .catch((err) => console.warn("voice token prefetch failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [quota?.available, quota?.available ? quota.limit : 0, quota?.available ? quota.remaining : 0]);
 
   function scrollToLatest() {
     const el = scrollRef.current;
@@ -458,6 +497,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
       }
+      if (looksUnstableVoiceText(liveAssistantRef.current)) {
+        try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
+        return;
+      }
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
@@ -468,13 +512,27 @@ function ThreadView({ threadId }: { threadId: string }) {
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       liveAssistantRef.current += chars.join("");
+      if (looksUnstableVoiceText(liveAssistantRef.current)) {
+        try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
+        return;
+      }
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
+      if (looksUnstableVoiceText(corrected)) return;
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       liveAssistantRef.current = corrected;
       setPendingAssistant(cleanAssistantText(corrected));
+    },
+    onDebug: (event: unknown) => {
+      const e = event as { type?: string; tentative_user_transcription_event?: { user_transcript?: string } };
+      if (e?.type === "tentative_user_transcript") {
+        const text = e.tentative_user_transcription_event?.user_transcript?.trim();
+        if (text) setPendingUser(text);
+      }
     },
     onConnect: () => {
       clearVoiceConnectTimeout();
@@ -482,7 +540,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
-      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
+      // Keep output muted until the first stable assistant text/audio chunk for
+      // the turn arrives; this prevents transient/gibberish audio from leaking.
+      try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
       if (ctx) {
@@ -558,7 +618,9 @@ function ThreadView({ threadId }: { threadId: string }) {
               try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
             }
           }, 90_000);
-          try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+          // Mute assistant output at the start of each turn; stable response
+          // streaming callbacks below unmute it immediately when content looks sane.
+          try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
@@ -566,7 +628,15 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          if (looksUnstableVoiceText(cleaned)) {
+            try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
+            setPendingAssistant("");
+            liveAssistantRef.current = "";
+            chatPartsThisTurnRef.current = false;
+            return;
+          }
           // Live update: show assistant turn the moment the transcript arrives.
+          try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
           await add({ data: { threadId, role: "assistant", content: cleaned } });
@@ -603,8 +673,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   function buildVoiceContext() {
-    const MAX_CHARS = 12000;
-    const recent = (messages ?? []).slice(-100).map(
+    const MAX_CHARS = 5000;
+    const recent = (messages ?? []).slice(-30).map(
       (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
     );
     let total = 0;
@@ -625,7 +695,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
       "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
       "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
-      "- BE CONCISE: keep spoken replies short and conversational. Avoid long monologues so the user can interject naturally.",
+      "- BE CONCISE: keep spoken replies to 1-2 short sentences and under 25 words by default. Avoid long monologues so the user can interject naturally.",
+      "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content. If uncertain, ask one concise question.",
+      "- VISUAL CONTENT: for tables, comparisons, email drafts, documents, code, or long lists, call show_in_chat with the full Markdown immediately and speak only a brief summary. Do not read long content out loud.",
       "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
       "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
@@ -649,9 +721,11 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState("starting");
     setVoiceError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-      const { signedUrl } = await getAgentSignedUrl({});
+      const cached = prefetchedVoiceTokenRef.current;
+      const token = cached && Date.now() - cached.createdAt < 45_000
+        ? cached.token
+        : (await getAgentToken({})).token;
+      prefetchedVoiceTokenRef.current = null;
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
@@ -661,10 +735,25 @@ function ThreadView({ threadId }: { threadId: string }) {
         pendingContextRef.current = "";
         setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
-      }, 20000);
+      }, 10000);
       conversation.startSession({
-        signedUrl,
-        connectionType: "websocket",
+        conversationToken: token,
+        connectionType: "webrtc",
+        overrides: {
+          agent: {
+            firstMessage: " ",
+            prompt: { prompt: VOICE_SESSION_PROMPT },
+          },
+          tts: {
+            stability: 0.72,
+            speed: 1.08,
+          },
+          asr: {
+            keywords: ["BPA Bot", "BP Automation", "Claude", "Codex", "ChatGPT", "Gemini", "Outlook", "Gmail"],
+          },
+        },
+        inputChunkDurationMs: 15,
+        connectionDelay: { default: 0, android: 0, ios: 0 },
       });
     } catch (e) {
       clearVoiceConnectTimeout();
@@ -708,7 +797,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       // If voice is connected, route through ElevenLabs instead.
       if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
-        try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+        try { conversation.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
         conversation.sendUserMessage(content);
         setPendingUser(null);
