@@ -658,23 +658,35 @@ function ThreadView({ threadId }: { threadId: string }) {
       : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
-  async function startVoice() {
+  async function startVoice(opts: { reconnect?: boolean } = {}) {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
       toast.error("Voice quota exhausted — text chat still works.");
       setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       return;
     }
+    voiceDesiredRef.current = true;
+    clearVoiceReconnectTimeout();
+    resetLiveVoiceAssistant();
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
-    hasConnectedVoiceRef.current = false;
-    voiceUserHasSpokenRef.current = false;
+    if (!opts.reconnect) {
+      hasConnectedVoiceRef.current = false;
+      voiceUserHasSpokenRef.current = false;
+    }
     setVoiceState("starting");
     setVoiceError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: { ideal: 1 },
+        },
+      });
       stream.getTracks().forEach((t) => t.stop());
-      const { signedUrl } = await getAgentSignedUrl({});
+      const { token } = await getAgentToken({});
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
@@ -682,12 +694,22 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
         setVoiceState("idle");
         pendingContextRef.current = "";
-        setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
+        if (voiceDesiredRef.current) scheduleVoiceReconnect(1200);
+        else setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
       conversation.startSession({
-        signedUrl,
-        connectionType: "websocket",
+        conversationToken: token,
+        connectionType: "webrtc",
+        useWakeLock: true,
+        overrides: {
+          agent: {
+            firstMessage: " ",
+          },
+          asr: {
+            keywords: ["BPA", "BP Automation", "PDF", "Outlook", "Gmail"],
+          },
+        },
       });
     } catch (e) {
       clearVoiceConnectTimeout();
@@ -695,20 +717,25 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceState("idle");
       pendingContextRef.current = "";
       if (/permission|notallowed/i.test(raw)) {
+        voiceDesiredRef.current = false;
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
         toast.error("Microphone blocked");
       } else if (/quota/i.test(raw)) {
+        voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       } else {
         console.warn("startVoice failed", raw);
-        setVoiceError("Voice failed to connect. Tap the mic once to try again.");
+        if (voiceDesiredRef.current && opts.reconnect) scheduleVoiceReconnect(1500);
+        else setVoiceError("Voice failed to connect. Tap the mic once to try again.");
       }
     }
   }
 
   async function stopVoice() {
+    voiceDesiredRef.current = false;
     startAttemptRef.current += 1;
     clearVoiceConnectTimeout();
+    clearVoiceReconnectTimeout();
     setVoiceState("stopping");
     pendingContextRef.current = "";
     setVoiceError(null);
@@ -719,6 +746,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     } finally {
       hasConnectedVoiceRef.current = false;
       voiceUserHasSpokenRef.current = false;
+      resetLiveVoiceAssistant();
       setVoiceState("idle");
     }
   }
