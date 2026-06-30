@@ -962,7 +962,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                           }
                         }}
                         aria-label="Delete chat"
-                        className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                        className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition"
                       >
                         <Trash2 size={14} />
                       </button>
