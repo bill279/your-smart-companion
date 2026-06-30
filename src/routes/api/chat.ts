@@ -141,12 +141,13 @@ Everything else — searching, scraping, reading contacts, recalling/saving fact
 const SEARCH_DISCIPLINE = `
 
 # Search & research discipline (mandatory)
-When the user asks for "top X", "best X", "list of X", recommendations, comparisons, or product/vendor research:
-- Do NOT report back with vague academic findings ("an article discusses…", "results are more about the application of…"). That is a failure, not an answer.
-- Do NOT ask "would you like me to refine / broaden / delve deeper?" — just do it. Run multiple searches autonomously (synonyms, brand-led queries like "Stereolabs ZED mining", "Intel RealSense industrial", category pages, vendor sites, review roundups), then scrape the most promising 1–3 URLs for actual product names, specs, and use cases.
-- Deliver a concrete answer: a ranked or grouped list of named products/vendors with a one-line "why it fits" and a source link each. Prefer a compact markdown table when comparing ≥3 items.
-- Only after you have genuinely exhausted 3+ reformulated searches AND scraping should you tell the user what's missing — and even then, lead with what you DID find, then state the specific gap and your recommended next step (don't ask permission, recommend).
-- Never end a research answer with "Would you like me to…". End with the result and, if useful, a single proactive next action you'll take if they say "go".`;
+Efficiency first — minimize tool calls and latency.
+- If you already know the answer from training (well-known products, frameworks, public companies, comparisons of mainstream tools like Claude Code vs Codex), answer directly WITHOUT searching. Only search for time-sensitive, niche, or local info you genuinely don't know.
+- When you do search: ONE precise query first. Only run a second search if the first returned nothing useful. Hard cap: 2 searches + at most 1 scrape per turn unless the user explicitly asks for "deep research".
+- Never scrape more than one URL per turn unless the user asked for an in-depth report.
+- Do NOT ask "would you like me to refine / broaden / delve deeper?" — just deliver the best answer you have.
+- For "top X" / "best X" / comparisons: give a ranked list or compact markdown table with a one-line "why it fits" each. Cite sources only when you actually searched.
+- Never end a research answer with "Would you like me to…". End with the result.`;
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
@@ -367,7 +368,7 @@ export const Route = createFileRoute("/api/chat")({
           model: gateway("google/gemini-3.5-flash"),
           system: systemWithUser,
           messages: baseMessages,
-          stopWhen: stepCountIs(50),
+          stopWhen: stepCountIs(12),
           tools: {
             web_search: tool({
               description:
@@ -379,14 +380,24 @@ export const Route = createFileRoute("/api/chat")({
               execute: async ({ query, limit }) => {
                 const key = process.env.FIRECRAWL_API_KEY;
                 if (!key) return { error: "Web search not configured" };
-                const r = await fetch("https://api.firecrawl.dev/v2/search", {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${key}`,
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({ query, limit: limit ?? 5 }),
-                });
+                const ac = new AbortController();
+                const t = setTimeout(() => ac.abort(), 10000);
+                let r: Response;
+                try {
+                  r = await fetch("https://api.firecrawl.dev/v2/search", {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${key}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ query, limit: Math.min(limit ?? 4, 5) }),
+                    signal: ac.signal,
+                  });
+                } catch {
+                  return { error: "Search timed out — try a more specific query." };
+                } finally {
+                  clearTimeout(t);
+                }
                 if (!r.ok) return { error: `Search failed (${r.status})` };
                 const j = (await r.json()) as {
                   data?: { web?: Array<{ title?: string; url?: string; description?: string }> } | Array<{ title?: string; url?: string; description?: string }>;
@@ -407,18 +418,28 @@ export const Route = createFileRoute("/api/chat")({
               execute: async ({ url }) => {
                 const key = process.env.FIRECRAWL_API_KEY;
                 if (!key) return { error: "Web scrape not configured" };
-                const r = await fetch("https://api.firecrawl.dev/v2/scrape", {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${key}`,
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    url,
-                    formats: ["markdown"],
-                    onlyMainContent: true,
-                  }),
-                });
+                const ac = new AbortController();
+                const t = setTimeout(() => ac.abort(), 12000);
+                let r: Response;
+                try {
+                  r = await fetch("https://api.firecrawl.dev/v2/scrape", {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${key}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      url,
+                      formats: ["markdown"],
+                      onlyMainContent: true,
+                    }),
+                    signal: ac.signal,
+                  });
+                } catch {
+                  return { error: "Scrape timed out — skip this URL and try another." };
+                } finally {
+                  clearTimeout(t);
+                }
                 if (!r.ok) return { error: `Scrape failed (${r.status})` };
                 const j = (await r.json()) as {
                   data?: { markdown?: string; metadata?: { title?: string } };
@@ -426,7 +447,7 @@ export const Route = createFileRoute("/api/chat")({
                 const md = j.data?.markdown ?? "";
                 return {
                   title: j.data?.metadata?.title,
-                  markdown: md.length > 8000 ? md.slice(0, 8000) + "\n\n…[truncated]" : md,
+                  markdown: md.length > 4000 ? md.slice(0, 4000) + "\n\n…[truncated]" : md,
                 };
               },
             }),
