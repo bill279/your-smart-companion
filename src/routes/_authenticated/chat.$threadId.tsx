@@ -929,41 +929,48 @@ function ThreadView({ threadId }: { threadId: string }) {
               }}
             />
           ) : (
-            threads.data?.map((t) => {
-              const active = t.id === threadId;
-              return (
-                <div
-                  key={t.id}
-                  className={`flex items-center gap-1 rounded-md pr-1 text-sm ${
-                    active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
-                  }`}
-                >
-                  <Link
-                    to="/chat/$threadId"
-                    params={{ threadId: t.id }}
-                    className="flex-1 truncate px-2 py-1.5"
-                    onClick={() => setSidebarOpen(false)}
-                  >
-                    {cleanThreadTitle(t.title)}
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const name = cleanThreadTitle(t.title);
-                      if (confirm(`Delete "${name}"? This cannot be undone.`)) {
-                        delMut.mutate(t.id);
-                      }
-                    }}
-                    aria-label="Delete chat"
-                    className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+            groupThreadsByDate(threads.data ?? []).map((group) => (
+              <div key={group.label} className="mb-3">
+                <div className="px-2 pb-1 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
+                  {group.label}
                 </div>
-              );
-            })
+                {group.items.map((t) => {
+                  const active = t.id === threadId;
+                  return (
+                    <div
+                      key={t.id}
+                      className={`group flex items-center gap-1 rounded-md pr-1 text-sm ${
+                        active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
+                      }`}
+                    >
+                      <Link
+                        to="/chat/$threadId"
+                        params={{ threadId: t.id }}
+                        className="flex-1 truncate px-2 py-1.5"
+                        onClick={() => setSidebarOpen(false)}
+                      >
+                        {cleanThreadTitle(t.title)}
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const name = cleanThreadTitle(t.title);
+                          if (confirm(`Delete "${name}"? This cannot be undone.`)) {
+                            delMut.mutate(t.id);
+                          }
+                        }}
+                        aria-label="Delete chat"
+                        className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
 
