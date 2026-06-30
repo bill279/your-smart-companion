@@ -497,7 +497,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
       }
-      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
+      if (looksUnstableVoiceText(liveAssistantRef.current)) {
+        try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
+        return;
+      }
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
@@ -515,6 +519,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
       if (looksUnstableVoiceText(corrected)) return;
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       liveAssistantRef.current = corrected;
       setPendingAssistant(cleanAssistantText(corrected));
     },
@@ -616,6 +621,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
           if (looksUnstableVoiceText(cleaned)) {
+            try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
             setPendingAssistant("");
             liveAssistantRef.current = "";
             chatPartsThisTurnRef.current = false;
