@@ -2,6 +2,7 @@
 @source "../src";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
+@import "highlight.js/styles/github-dark.css";
 
 @media print {
   aside, form, [aria-label="Open menu"], [aria-label="Export chat"], .print\:hidden { display: none !important; }
