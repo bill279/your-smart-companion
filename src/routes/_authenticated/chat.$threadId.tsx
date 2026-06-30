@@ -281,6 +281,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const connectTimeoutRef = useRef<number | null>(null);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
+  const lastUserSpeechAtRef = useRef<number>(0);
+  const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -480,6 +482,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
       clearVoiceConnectTimeout();
+      if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
       const wasStopping = voiceStateRef.current === "stopping";
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
@@ -494,10 +497,15 @@ function ThreadView({ threadId }: { threadId: string }) {
       // reason (typically ElevenLabs idle timeout), silently reconnect so the
       // user stays in voice mode until they explicitly tap to stop.
       if (hasConnectedVoiceRef.current && details?.reason !== "error") {
-        setTimeout(() => {
-          if (voiceStateRef.current === "idle") void startVoice();
-        }, 300);
-        return;
+        // Only auto-reconnect if the user actually spoke in the last 60s.
+        // Otherwise the session was idle and we'd just burn ElevenLabs credits.
+        const recentlyActive = Date.now() - lastUserSpeechAtRef.current < 60_000;
+        if (recentlyActive) {
+          setTimeout(() => {
+            if (voiceStateRef.current === "idle") void startVoice();
+          }, 300);
+          return;
+        }
       }
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
@@ -527,6 +535,15 @@ function ThreadView({ threadId }: { threadId: string }) {
       try {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
+          lastUserSpeechAtRef.current = Date.now();
+          // Reset 90s idle auto-stop on every user utterance.
+          if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+          idleTimerRef.current = window.setTimeout(() => {
+            if (voiceStateRef.current === "connected") {
+              setVoiceError("Voice paused after 90s of silence. Tap the mic to resume.");
+              try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
+            }
+          }, 90_000);
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
@@ -1458,7 +1475,16 @@ function Bubble({
         <div
           className="prose prose-sm max-w-none text-foreground prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-pre:rounded-md prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.9em] prose-a:text-accent prose-a:underline-offset-2 prose-blockquote:border-l-primary prose-blockquote:text-muted-foreground"
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              table: ({ node: _n, ...props }) => (
+                <div className="my-3 -mx-1 overflow-x-auto rounded-md border border-border">
+                  <table {...props} className="w-full min-w-max border-collapse text-sm" />
+                </div>
+              ),
+            }}
+          >{displayContent}</ReactMarkdown>
           {streaming && (
             <span className="inline-block w-1.5 h-4 align-[-2px] ml-0.5 bg-foreground/70 animate-pulse rounded-sm" />
           )}
