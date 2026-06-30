@@ -185,7 +185,6 @@ const OUTPUT_HYGIENE = `
 - For longer responses, break into coherent small paragraphs of ≤120 words each and stream them incrementally.
 - Before returning, self-check for encoding or rendering errors. If the output looks corrupted or gibberish, regenerate it cleanly (up to 2 internal retries). If it still looks corrupted, reply exactly: "Output corrupted — please try again" and offer to retry.
 - Tone: professional, precise, no filler. Ensure replies read naturally when spoken aloud.`;
-`;
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
