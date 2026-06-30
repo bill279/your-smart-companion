@@ -544,7 +544,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       clearVoiceReconnectTimer();
       if (!wantsVoiceModeRef.current) {
         setVoiceState("stopping");
-        void conversationRef.current?.endSession().finally(() => setVoiceState("idle"));
+        void Promise.resolve(conversationRef.current?.endSession()).finally(() => setVoiceState("idle"));
         return;
       }
       reconnectAttemptsRef.current = 0;
