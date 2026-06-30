@@ -277,6 +277,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastAssistantTextRef = useRef<string>("");
   const stopRequestedRef = useRef(false);
   const sessionStartingRef = useRef(false);
+  const firstMessageOverrideRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const [exportOpen, setExportOpen] = useState(false);
