@@ -1640,8 +1640,6 @@ function ThinkingShimmer() {
 }
 
 const STARTER_PROMPTS: Array<{ icon: React.ReactNode; title: string; prompt: string }> = [
-  // placeholder anchor (moved component above)
-] as Array<{ icon: React.ReactNode; title: string; prompt: string }> & never[];
   { icon: <Mail size={16} />, title: "Draft an email", prompt: "Help me draft a professional email. Ask me who it's to and what about." },
   { icon: <Search size={16} />, title: "Research a company", prompt: "Research a company for me and give me an executive brief. Ask which company." },
   { icon: <Table2 size={16} />, title: "Compare options", prompt: "Build a comparison table. Ask me what to compare." },
