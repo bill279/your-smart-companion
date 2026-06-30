@@ -48,6 +48,7 @@ function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
     .replace(/^\s*Hello there!\s*I'm Alex[\s\S]*?today\??\s*/i, "")
+    .replace(/^\s*(?:I(?:'m| am)\s+listening|Listening|Go ahead)\.?\s*/i, "")
     .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BPA_INTRO, "")
