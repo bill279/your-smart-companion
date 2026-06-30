@@ -1138,6 +1138,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                   key={m.id}
                   role={m.role}
                   content={m.content}
+                  messageId={m.id}
                   attachments={Array.isArray(att) ? att : []}
                 />
               );
