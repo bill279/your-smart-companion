@@ -1395,9 +1395,27 @@ function ThreadView({ threadId }: { threadId: string }) {
               );
             })}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
-            {pendingAssistant && messages[messages.length - 1]?.content?.trim() !== pendingAssistant.trim() && (
-              <Bubble role="assistant" content={pendingAssistant} streaming />
-            )}
+            {(() => {
+              const p = pendingAssistant.trim();
+              if (!p) return null;
+              // Hide the streaming bubble if any recent assistant message
+              // already contains (or matches the start of) this text — that
+              // means the saved message has caught up and the pending bubble
+              // is just a stale ghost from a prior partial stream.
+              const recent = messages.slice(-3);
+              const norm = (s: string) => s.trim().replace(/\s+/g, " ");
+              const pn = norm(p);
+              const head = pn.slice(0, 60);
+              for (const m of recent) {
+                if (m.role !== "assistant") continue;
+                const mn = norm(m.content || "");
+                if (!mn) continue;
+                if (mn === pn || mn.startsWith(pn) || pn.startsWith(mn) || mn.includes(head)) {
+                  return null;
+                }
+              }
+              return <Bubble role="assistant" content={pendingAssistant} streaming />;
+            })()}
             {addMut.isPending && !pendingAssistant && !isConnected && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
