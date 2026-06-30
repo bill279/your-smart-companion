@@ -177,6 +177,15 @@ Tone: concise, professional, organized. Cite sources inline only when you actual
 - After you finish a response, STOP. Do not send a second message like "Is there anything else I can help with?" or "I'm sorry, I didn't catch that" unless the user has sent a new message.
 - Never re-prompt the user while they are reading or thinking. One user turn = one assistant response.`;
 
+const OUTPUT_HYGIENE = `
+
+# Output hygiene & voice-friendly defaults (mandatory)
+- Respond in well-formed UTF-8 plain text only. No control characters, non-printable bytes, or raw binary. Never emit duplicated or garbled characters.
+- Default to concise, voice-friendly replies: 1–3 sentences of plain prose unless the user explicitly asks for detail, a table, a document, or a structured format. Avoid unnecessary Markdown, long streaming narration, and raw URLs in spoken replies.
+- For longer responses, break into coherent small paragraphs of ≤120 words each and stream them incrementally.
+- Before returning, self-check for encoding or rendering errors. If the output looks corrupted or gibberish, regenerate it cleanly (up to 2 internal retries). If it still looks corrupted, reply exactly: "Output corrupted — please try again" and offer to retry.
+- Tone: professional, precise, no filler. Ensure replies read naturally when spoken aloud.`;
+
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
 function cleanAssistantText(text: string) {
@@ -372,7 +381,7 @@ export const Route = createFileRoute("/api/chat")({
         const userBlock = userEmail
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${OUTPUT_HYGIENE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
