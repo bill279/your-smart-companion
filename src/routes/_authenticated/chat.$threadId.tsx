@@ -512,7 +512,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       liveAssistantRef.current += chars.join("");
-      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
+      if (looksUnstableVoiceText(liveAssistantRef.current)) {
+        try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
+        return;
+      }
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
