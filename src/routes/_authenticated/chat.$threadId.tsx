@@ -1390,22 +1390,38 @@ function Bubble({
   role,
   content,
   attachments = [],
+  onEdit,
+  onRegenerate,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
+  onEdit?: () => void;
+  onRegenerate?: () => void;
 }) {
   const isUser = role === "user";
   const displayContent = isUser
     ? content
     : hidePartialTables(cleanAssistantText(content));
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+  async function copyText() {
+    try {
+      await navigator.clipboard.writeText(displayContent);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Copy failed");
+    }
+  }
   return (
-    <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`group flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
         <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">
           BP
         </div>
       )}
+      <div className="flex flex-col gap-1 max-w-[78%] min-w-0">
       <div
         className={`max-w-[78%] min-w-0 overflow-x-auto rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
           isUser
@@ -1435,9 +1451,196 @@ function Bubble({
             isUser ? "prose-invert" : ""
           } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+            components={{
+              pre: ({ children, ...props }) => <CodeBlock {...props}>{children}</CodeBlock>,
+            }}
+          >
+            {displayContent}
+          </ReactMarkdown>
         </div>
       </div>
+        {/* Hover actions */}
+        <div
+          className={`flex items-center gap-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity ${
+            isUser ? "justify-end" : "justify-start"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={copyText}
+            className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+            title="Copy"
+            aria-label="Copy message"
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+          {isUser && onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+              title="Edit & resend"
+              aria-label="Edit message"
+            >
+              <Pencil size={13} />
+            </button>
+          )}
+          {!isUser && onRegenerate && (
+            <button
+              type="button"
+              onClick={onRegenerate}
+              className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+              title="Regenerate"
+              aria-label="Regenerate response"
+            >
+              <RotateCcw size={13} />
+            </button>
+          )}
+          {!isUser && (
+            <>
+              <button
+                type="button"
+                onClick={() => setFeedback((f) => (f === "up" ? null : "up"))}
+                className={`p-1 rounded hover:bg-secondary ${
+                  feedback === "up" ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                }`}
+                title="Good response"
+                aria-label="Thumbs up"
+              >
+                <ThumbsUp size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedback((f) => (f === "down" ? null : "down"))}
+                className={`p-1 rounded hover:bg-secondary ${
+                  feedback === "down" ? "text-destructive" : "text-muted-foreground hover:text-foreground"
+                }`}
+                title="Bad response"
+                aria-label="Thumbs down"
+              >
+                <ThumbsDown size={13} />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CodeBlock({ children }: { children?: React.ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    const text = ref.current?.innerText ?? "";
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Copy failed");
+    }
+  }
+  // Detect language from child <code> className (e.g. "language-ts hljs")
+  let lang = "";
+  if (children && typeof children === "object" && "props" in (children as object)) {
+    const cls = ((children as { props?: { className?: string } }).props?.className) ?? "";
+    const m = cls.match(/language-([\w-]+)/);
+    if (m) lang = m[1];
+  }
+  return (
+    <div className="relative my-3 rounded-lg overflow-hidden border border-border bg-[#0d1117]">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[#161b22] border-b border-border text-[11px] text-muted-foreground">
+        <span className="font-mono uppercase tracking-wide">{lang || "code"}</span>
+        <button
+          type="button"
+          onClick={copy}
+          className="flex items-center gap-1 hover:text-foreground transition"
+          aria-label="Copy code"
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre ref={ref} className="!m-0 !bg-transparent overflow-x-auto p-3 text-[13px] leading-relaxed">
+        {children}
+      </pre>
+    </div>
+  );
+}
+
+function ThinkingShimmer() {
+  return (
+    <div className="flex gap-3 justify-start">
+      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">
+        BP
+      </div>
+      <div className="rounded-2xl px-4 py-3 bg-card border border-border">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "0ms" }} />
+          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "150ms" }} />
+          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "300ms" }} />
+          <span className="ml-2 text-xs text-muted-foreground">Thinking…</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const STARTER_PROMPTS: Array<{ icon: React.ReactNode; title: string; prompt: string }> = [
+  { icon: <Mail size={16} />, title: "Draft an email", prompt: "Help me draft a professional email. Ask me who it's to and what about." },
+  { icon: <Search size={16} />, title: "Research a company", prompt: "Research a company for me and give me an executive brief. Ask which company." },
+  { icon: <Table2 size={16} />, title: "Compare options", prompt: "Build a comparison table. Ask me what to compare." },
+  { icon: <Lightbulb size={16} />, title: "Summarize my day", prompt: "Pull my upcoming calendar events and give me a one-line brief for today." },
+];
+
+function StarterPrompts({ onPick }: { onPick: (prompt: string) => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center pt-8 md:pt-16 gap-6">
+      <div className="text-center">
+        <h1 className="text-2xl md:text-3xl font-semibold text-foreground">How can I help today?</h1>
+        <p className="text-sm text-muted-foreground mt-1">Pick a starter or ask anything.</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-2xl px-2">
+        {STARTER_PROMPTS.map((s) => (
+          <button
+            key={s.title}
+            type="button"
+            onClick={() => onPick(s.prompt)}
+            className="text-left p-3 rounded-xl border border-border bg-card hover:bg-secondary/60 transition flex items-start gap-3"
+          >
+            <span className="mt-0.5 text-primary">{s.icon}</span>
+            <span className="text-sm text-foreground">{s.title}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const FOLLOW_UPS: Array<{ icon: React.ReactNode; label: string; prompt: string }> = [
+  { icon: <Scissors size={12} />, label: "Shorter", prompt: "Make that shorter — bottom line only." },
+  { icon: <Table2 size={12} />, label: "As a table", prompt: "Reformat that as a markdown table." },
+  { icon: <Lightbulb size={12} />, label: "Go deeper", prompt: "Go deeper — give me the full brief with sources." },
+];
+
+function FollowUpActions({ onPick }: { onPick: (prompt: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2 pl-11">
+      {FOLLOW_UPS.map((f) => (
+        <button
+          key={f.label}
+          type="button"
+          onClick={() => onPick(f.prompt)}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition"
+        >
+          {f.icon}
+          {f.label}
+        </button>
+      ))}
     </div>
   );
 }
