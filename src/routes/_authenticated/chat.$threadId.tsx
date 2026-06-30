@@ -703,6 +703,30 @@ function ThreadView({ threadId }: { threadId: string }) {
     window.print();
   }
 
+  function currentTitle() {
+    return cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "BPA Bot conversation");
+  }
+  function exportPdf() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try { exportToPdf(currentTitle(), messages); } catch (e) { toast.error(e instanceof Error ? e.message : "PDF export failed"); }
+  }
+  async function exportDocx() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try { await exportToDocx(currentTitle(), messages); } catch (e) { toast.error(e instanceof Error ? e.message : "Word export failed"); }
+  }
+  function exportXlsx() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try { exportToXlsx(currentTitle(), messages); } catch (e) { toast.error(e instanceof Error ? e.message : "Excel export failed"); }
+  }
+  function exportCsv() {
+    setExportOpen(false);
+    if (messages.length === 0) return toast.error("Nothing to export yet");
+    try { exportToCsv(currentTitle(), messages); } catch (e) { toast.error(e instanceof Error ? e.message : "CSV export failed"); }
+  }
+
   async function exportEmailToMe() {
     setExportOpen(false);
     if (messages.length === 0) return toast.error("Nothing to export yet");
