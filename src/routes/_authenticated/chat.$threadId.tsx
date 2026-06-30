@@ -534,6 +534,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
+      } else if (chunk) {
+        liveTextFromPartsRef.current = true;
+        if (eventId !== null) liveTextEventIdRef.current = eventId;
+        liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       }
       schedulePendingAssistant(liveAssistantRef.current);
     },
