@@ -43,7 +43,7 @@ const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automatio
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
-type VoiceUiState = "idle" | "starting" | "connected" | "stopping";
+type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
 
 function cleanAssistantText(text: string) {
   return text
@@ -123,6 +123,18 @@ function isNearDuplicateVoiceText(a: string, b: string) {
   const short = x.length < y.length ? x : y;
   const long = x.length < y.length ? y : x;
   return short.length >= 24 && long.includes(short);
+}
+
+function isFillerVoicePrompt(text: string) {
+  const normalized = normalizeVoiceText(text);
+  return (
+    normalized === "im listening" ||
+    normalized === "i am listening" ||
+    normalized === "listening" ||
+    normalized === "go ahead" ||
+    normalized === "im here" ||
+    normalized === "i am here"
+  );
 }
 
 type SearchData = {
