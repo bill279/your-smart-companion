@@ -43,6 +43,7 @@ You have tools:
 - remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
 - search_knowledge_base — semantic search over the user's uploaded company documents/SOPs (PDFs, docs, notes). Use this FIRST whenever the user asks about internal/company-specific info, processes, products, pricing sheets, policies, or anything that sounds like it would live in their files. Cite the document name in the answer.
+- generate_document — create a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown content and return a download link. Use this whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc. Never say you cannot generate or attach a file — call this tool, then present the returned URL as a Markdown link like [Download report.pdf](url).
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
 
@@ -794,6 +795,53 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                       similarity: Number(m.similarity?.toFixed(3) ?? 0),
                       content: m.content,
                     })),
+                  };
+                } catch (e) {
+                  return { error: e instanceof Error ? e.message : String(e) };
+                }
+              },
+            }),
+            generate_document: tool({
+              description:
+                "Generate a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown and return a signed download URL. Use whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc.",
+              inputSchema: z.object({
+                format: z.enum(["pdf", "docx", "xlsx", "csv", "txt"]),
+                filename: z.string().min(1).max(120).describe("Base filename without extension"),
+                title: z.string().min(1).max(200),
+                markdown: z
+                  .string()
+                  .min(1)
+                  .max(200000)
+                  .describe("Full document body as Markdown. For xlsx/csv, include GitHub-flavored Markdown tables."),
+              }),
+              execute: async ({ format, filename, title, markdown }) => {
+                try {
+                  const { generateDocument } = await import("@/lib/document-generator.server");
+                  const { bytes, mimeType, extension } = await generateDocument({
+                    format,
+                    title,
+                    markdown,
+                  });
+                  const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
+                  const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
+                  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+                  const up = await supabaseAdmin.storage
+                    .from("chat-uploads")
+                    .upload(path, bytes, { contentType: mimeType, upsert: false });
+                  if (up.error) return { error: up.error.message };
+                  const signed = await supabaseAdmin.storage
+                    .from("chat-uploads")
+                    .createSignedUrl(path, 60 * 60 * 24 * 7);
+                  if (signed.error) return { error: signed.error.message };
+                  await logAction("generate_document", `Generated ${extension.toUpperCase()} "${safeName}"`, {
+                    format,
+                    filename: `${safeName}.${extension}`,
+                  });
+                  return {
+                    ok: true,
+                    url: signed.data.signedUrl,
+                    filename: `${safeName}.${extension}`,
+                    mimeType,
                   };
                 } catch (e) {
                   return { error: e instanceof Error ? e.message : String(e) };
