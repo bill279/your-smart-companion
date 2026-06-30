@@ -5,8 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, Copy, Check, Pencil, ThumbsUp, ThumbsDown, Table2, Scissors, Lightbulb } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
@@ -22,11 +21,8 @@ import {
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
-import { exportChatToPdf, exportChatToDocx, exportChatToXlsx, type ChatMsg } from "@/lib/export-chat";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
-
-Treat the user like a Fortune 500 CEO: concise, decisive, and highly scannable. Default to a Bottom line plus 2–4 bullets. No long paragraphs, no "based on the search", no generic "deeper insights" dump.
 
 Format answers for this chat UI. If the user asks for a table, visual table, comparison, schedule, specs, rows/columns, or tabular data, output a GitHub-Flavored Markdown table using pipes, for example:
 | Item | Detail |
@@ -42,13 +38,12 @@ const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automatio
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
-type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
+type VoiceUiState = "idle" | "starting" | "connected" | "stopping";
 
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
     .replace(/^\s*Hello there!\s*I'm Alex[\s\S]*?today\??\s*/i, "")
-    .replace(/^\s*(?:I(?:'m| am)\s+listening|Listening|Go ahead)\.?\s*/i, "")
     .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BPA_INTRO, "")
@@ -61,80 +56,6 @@ function cleanAssistantText(text: string) {
 function cleanThreadTitle(title: string) {
   const cleaned = cleanAssistantText(title);
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
-}
-
-// While the assistant is streaming, a markdown table is incomplete until the
-// second row (the |---|---| separator) arrives. Showing the raw pipes mid-stream
-// looks like garbled text, especially during voice. Detect an unfinished table
-// at the end of the buffer and replace it with a tidy placeholder until done.
-function hidePartialTables(text: string): string {
-  if (!text.includes("|")) return text;
-  const lines = text.split("\n");
-  // Walk the buffer and hide ANY incomplete table block — not just trailing ones.
-  // During streaming, the bot may emit header rows for several tables before the
-  // separator/body arrives. Showing raw pipes mid-stream looks like garbled text.
-  const out: string[] = [];
-  let i = 0;
-  const isPipeLine = (l: string) => /^\s*\|.*\|\s*$/.test(l);
-  const isSeparator = (l: string) => /^\s*\|?\s*:?-{3,}/.test(l);
-  while (i < lines.length) {
-    if (isPipeLine(lines[i])) {
-      let j = i;
-      while (j < lines.length && isPipeLine(lines[j])) j++;
-      const block = lines.slice(i, j);
-      const hasSep = block.some(isSeparator);
-      const isTrailing = j === lines.length;
-      // Treat as incomplete if: no separator yet, or it's the trailing block
-      // and only has 1–2 rows (still being written).
-      if (!hasSep || (isTrailing && block.length < 3)) {
-        out.push("_Building table…_");
-      } else {
-        out.push(...block);
-      }
-      i = j;
-    } else {
-      out.push(lines[i]);
-      i++;
-    }
-  }
-  return out.join("\n");
-}
-
-function appendNonDuplicate(base: string, chunk: string) {
-  if (!chunk) return base;
-  if (!base) return chunk;
-  if (base.endsWith(chunk)) return base;
-  const max = Math.min(base.length, chunk.length);
-  for (let i = max; i > 0; i--) {
-    if (base.endsWith(chunk.slice(0, i))) return base + chunk.slice(i);
-  }
-  return base + chunk;
-}
-
-function normalizeVoiceText(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
-}
-
-function isNearDuplicateVoiceText(a: string, b: string) {
-  const x = normalizeVoiceText(a);
-  const y = normalizeVoiceText(b);
-  if (!x || !y) return false;
-  if (x === y) return true;
-  const short = x.length < y.length ? x : y;
-  const long = x.length < y.length ? y : x;
-  return short.length >= 24 && long.includes(short);
-}
-
-function isFillerVoicePrompt(text: string) {
-  const normalized = normalizeVoiceText(text);
-  return (
-    normalized === "im listening" ||
-    normalized === "i am listening" ||
-    normalized === "listening" ||
-    normalized === "go ahead" ||
-    normalized === "im here" ||
-    normalized === "i am here"
-  );
 }
 
 type SearchData = {
@@ -233,8 +154,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
-  type ToolActivity = { id: string; name: string; label: string; status: "running" | "done" };
-  const [toolActivity, setToolActivity] = useState<ToolActivity[]>([]);
   type Attachment = { path: string; name: string; mimeType: string; size: number };
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -259,28 +178,13 @@ function ThreadView({ threadId }: { threadId: string }) {
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
-  const persistedVoiceAiEventsRef = useRef<Set<string>>(new Set());
   const voiceStateRef = useRef<VoiceUiState>("idle");
-  const voiceDesiredRef = useRef(false);
   const startAttemptRef = useRef(0);
   const connectTimeoutRef = useRef<number | null>(null);
-  const reconnectTimeoutRef = useRef<number | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const keepAliveIntervalRef = useRef<number | null>(null);
-  const pendingAssistantRafRef = useRef<number | null>(null);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const liveAssistantRef = useRef<string>("");
-  const liveTextEventIdRef = useRef<number | null>(null);
-  const liveTextFromPartsRef = useRef(false);
-  const lastTextPartAtRef = useRef(0);
-  const lastVoiceUserAtRef = useRef(0);
-  const lastVoiceActivityAtRef = useRef(0);
-  const lastAssistantTextRef = useRef<string>("");
-  const stopRequestedRef = useRef(false);
-  const sessionStartingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(true);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -290,28 +194,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   }, [exportOpen]);
 
   const messages = messagesQ.data ?? [];
-
-  // Auto-title: when a thread is still "New conversation" and the user has
-  // sent at least one message, derive a short title from the first user
-  // message so the sidebar reads like ChatGPT.
-  const renameMut = useMutation({
-    mutationFn: async (vars: { id: string; title: string }) =>
-      rename({ data: vars }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["threads"] }),
-  });
-  useEffect(() => {
-    if (!threads.data || messages.length === 0) return;
-    const t = threads.data.find((x) => x.id === threadId);
-    if (!t) return;
-    const current = cleanThreadTitle(t.title);
-    if (current !== "New conversation") return;
-    const firstUser = messages.find((m) => m.role === "user");
-    if (!firstUser?.content?.trim()) return;
-    const short = firstUser.content.trim().split(/\s+/).slice(0, 7).join(" ");
-    const title = short.length > 60 ? short.slice(0, 57) + "…" : short;
-    if (title && title !== current) renameMut.mutate({ id: threadId, title });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, messages.length, threads.data]);
 
   const voiceQuotaFn = useServerFn(getVoiceQuota);
   const voiceQuotaQ = useQuery({
@@ -393,13 +275,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
     window.addEventListener("unhandledrejection", handler);
     return () => {
-      mountedRef.current = false;
       window.removeEventListener("unhandledrejection", handler);
       voiceStateRef.current = "idle";
       clearVoiceConnectTimeout();
-      clearVoiceReconnectTimeout();
-      stopVoiceKeepAlive();
-      resetLiveVoiceAssistant();
       try {
         conversationRef.current?.endSession();
       } catch (err) {
@@ -407,81 +285,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     };
   }, []);
-
-  function clearVoiceReconnectTimeout() {
-    if (reconnectTimeoutRef.current !== null) {
-      window.clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-  }
-
-  function stopVoiceKeepAlive() {
-    if (keepAliveIntervalRef.current !== null) {
-      window.clearInterval(keepAliveIntervalRef.current);
-      keepAliveIntervalRef.current = null;
-    }
-  }
-
-  function startVoiceKeepAlive() {
-    stopVoiceKeepAlive();
-    lastVoiceActivityAtRef.current = Date.now();
-    keepAliveIntervalRef.current = window.setInterval(() => {
-      if (!voiceDesiredRef.current || voiceStateRef.current !== "connected") return;
-      try {
-        // ElevenLabs sockets can close during silence. This lightweight activity
-        // ping keeps the session alive without prompting the agent to speak.
-        conversationRef.current?.sendUserActivity();
-      } catch (err) {
-        console.warn("voice keepalive failed", err);
-      }
-    }, 15_000);
-  }
-
-  function scheduleVoiceReconnect(delay = 700) {
-    if (!voiceDesiredRef.current) return;
-    clearVoiceReconnectTimeout();
-    if (voiceStateRef.current === "idle") {
-      setVoiceState("reconnecting");
-    }
-    const sdkStatus = conversationRef.current?.status;
-    const shouldWaitForSdk = sdkStatus === "connecting" || sdkStatus === "connected";
-    const attempts = reconnectAttemptsRef.current;
-    const backoff = Math.min(8000, delay + attempts * 1200);
-    reconnectTimeoutRef.current = window.setTimeout(() => {
-      reconnectTimeoutRef.current = null;
-      if (!mountedRef.current) return;
-      const currentStatus = conversationRef.current?.status;
-      if (currentStatus === "connecting" || currentStatus === "connected") {
-        scheduleVoiceReconnect(1200);
-        return;
-      }
-      if (voiceDesiredRef.current && (voiceStateRef.current === "idle" || voiceStateRef.current === "reconnecting")) {
-        reconnectAttemptsRef.current += 1;
-        void startVoice({ reconnect: true });
-      }
-    }, shouldWaitForSdk ? Math.max(backoff, 1500) : backoff);
-  }
-
-  function resetLiveVoiceAssistant() {
-    liveAssistantRef.current = "";
-    liveTextEventIdRef.current = null;
-    liveTextFromPartsRef.current = false;
-    lastTextPartAtRef.current = 0;
-    if (pendingAssistantRafRef.current !== null) {
-      cancelAnimationFrame(pendingAssistantRafRef.current);
-      pendingAssistantRafRef.current = null;
-    }
-  }
-
-  function schedulePendingAssistant(text: string) {
-    const cleaned = cleanAssistantText(text);
-    if (pendingAssistantRafRef.current !== null) cancelAnimationFrame(pendingAssistantRafRef.current);
-    pendingAssistantRafRef.current = requestAnimationFrame(() => {
-      pendingAssistantRafRef.current = null;
-      if (!mountedRef.current) return;
-      setPendingAssistant(cleaned);
-    });
-  }
 
   const conversation = useConversation({
     clientTools: {
@@ -516,75 +319,40 @@ function ThreadView({ threadId }: { threadId: string }) {
       },
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
-      if (!mountedRef.current) return;
-      const now = Date.now();
-      lastVoiceActivityAtRef.current = now;
-      lastTextPartAtRef.current = now;
-      // Prefer the canonical text-response stream over audio-alignment chars.
-      // The ElevenLabs SDK can emit overlapping deltas/corrections; append only
-      // non-duplicate suffixes so the UI doesn't repeat or shimmer.
+      // Stream agent text to the chat in real time as ElevenLabs generates it.
       const kind = part?.type;
-      const eventId = typeof part?.event_id === "number" ? part.event_id : null;
       const chunk = part?.text ?? "";
-      if (isFillerVoicePrompt(chunk)) return;
-      if (kind === "start" || (eventId !== null && liveTextEventIdRef.current !== null && eventId !== liveTextEventIdRef.current)) {
+      if (kind === "start") {
         liveAssistantRef.current = chunk;
-        liveTextEventIdRef.current = eventId;
-        liveTextFromPartsRef.current = true;
       } else if (kind === "delta") {
-        liveTextFromPartsRef.current = true;
-        if (eventId !== null) liveTextEventIdRef.current = eventId;
-        liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
+        liveAssistantRef.current += chunk;
       } else if (kind === "stop") {
-        if (chunk) liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
-      } else if (chunk) {
-        liveTextFromPartsRef.current = true;
-        if (eventId !== null) liveTextEventIdRef.current = eventId;
-        liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
+        if (chunk) liveAssistantRef.current += chunk;
       }
-      schedulePendingAssistant(liveAssistantRef.current);
+      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
-      if (!mountedRef.current) return;
-      lastVoiceActivityAtRef.current = Date.now();
+      // Fallback live transcript: reveal each character as the audio chunk
+      // for it is generated. This guarantees the chat updates while the bot
+      // is speaking even when the agent does not stream text response parts.
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
-      // Alignment is a fallback. Prefer text-response parts, but do not ignore
-      // alignment forever: some ElevenLabs sessions emit audio chars without
-      // reliable response-part deltas, which made the chat look frozen.
-      const partStreamIsHealthy =
-        liveTextFromPartsRef.current &&
-        liveAssistantRef.current.trim().length > 0 &&
-        Date.now() - lastTextPartAtRef.current < 900;
-      if (partStreamIsHealthy) return;
-      const chunk = chars.join("");
-      if (isFillerVoicePrompt(chunk)) return;
-      liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
-      schedulePendingAssistant(liveAssistantRef.current);
+      liveAssistantRef.current += chars.join("");
+      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
-      if (!mountedRef.current) return;
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
-      if (isFillerVoicePrompt(corrected)) return;
       liveAssistantRef.current = corrected;
-      schedulePendingAssistant(corrected);
+      setPendingAssistant(cleanAssistantText(corrected));
     },
     onConnect: () => {
-      if (!mountedRef.current) return;
       clearVoiceConnectTimeout();
-      clearVoiceReconnectTimeout();
-      reconnectAttemptsRef.current = 0;
       hasConnectedVoiceRef.current = true;
-      voiceDesiredRef.current = true;
-      stopRequestedRef.current = false;
-      sessionStartingRef.current = false;
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
-      resetLiveVoiceAssistant();
-      startVoiceKeepAlive();
-      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
       if (ctx) {
@@ -592,132 +360,69 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
-      if (!mountedRef.current) return;
-      console.warn("voice disconnected", details);
       clearVoiceConnectTimeout();
-      stopVoiceKeepAlive();
-      sessionStartingRef.current = false;
-      const wasStopping = voiceStateRef.current === "stopping" || stopRequestedRef.current;
+      const wasStopping = voiceStateRef.current === "stopping";
+      voiceStateRef.current = "idle";
+      setVoiceUiState("idle");
       pendingContextRef.current = "";
-      // Keep the live caption visible if the socket drops mid-answer; it will
-      // be replaced by the persisted message or the reconnected stream.
-      if (wasStopping) {
-        setVoiceState("idle");
-        return;
-      }
+      if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
-        voiceDesiredRef.current = false;
-        setVoiceState("idle");
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
-      // Keep voice mode active until the user explicitly stops it. ElevenLabs
-      // may close idle sockets; reconnect silently instead of forcing another tap.
-      if (voiceDesiredRef.current) {
-        setVoiceState("reconnecting");
-        scheduleVoiceReconnect(500);
+      // If the session was previously connected and dropped for any non-error
+      // reason (typically ElevenLabs idle timeout), silently reconnect so the
+      // user stays in voice mode until they explicitly tap to stop.
+      if (hasConnectedVoiceRef.current && details?.reason !== "error") {
+        setTimeout(() => {
+          if (voiceStateRef.current === "idle") void startVoice();
+        }, 300);
         return;
       }
-      setVoiceState("idle");
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
     },
-    onError: (e: unknown, context?: unknown) => {
-      if (!mountedRef.current) return;
-      const msg = typeof e === "string" ? e : e instanceof Error ? e.message : String(e || "");
+    onError: (e) => {
+      const msg = String(e || "");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
-      console.warn("voice error", msg, context);
+      console.warn("voice error", msg);
       clearVoiceConnectTimeout();
-      stopVoiceKeepAlive();
-      sessionStartingRef.current = false;
+      voiceStateRef.current = "idle";
+      setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      // Do not wipe the live caption here; a transient socket error should not
-      // make the answer disappear from the chat.
-      if (/quota/i.test(msg)) {
-        voiceDesiredRef.current = false;
-        setVoiceState("idle");
-        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-        return;
-      }
-      // Silent auto-reconnect if the user still wants voice mode on.
-      if (voiceDesiredRef.current) {
-        setVoiceState("reconnecting");
-        scheduleVoiceReconnect(800);
-        return;
-      }
-      setVoiceState("idle");
-      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
+      setVoiceError(/quota/i.test(msg) ? "ElevenLabs voice quota is exhausted. Text chat still works." : msg || "Voice failed to connect. Tap the mic once to try again.");
     },
-    onInterruption: () => {
-      if (!mountedRef.current) return;
-      resetLiveVoiceAssistant();
-      setPendingAssistant("");
-    },
-    onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => {
-      if (!mountedRef.current) return;
-      lastVoiceActivityAtRef.current = Date.now();
-      // Do not reset the live caption here. ElevenLabs can emit text response
-      // parts before audio playback begins; clearing on `speaking` made the
-      // chat look frozen until the final transcript arrived.
-    },
-    onMessage: async (message: { source?: string; role?: "user" | "agent"; message?: string; event_id?: number }) => {
-      if (!mountedRef.current) return;
+    onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
       if (!text) return;
-      if (isFillerVoicePrompt(text)) return;
-      lastVoiceActivityAtRef.current = Date.now();
-      const role = message.role === "agent" || message.source === "ai" ? "assistant" : message.role === "user" || message.source === "user" ? "user" : "unknown";
-      const eventKey = `${role}:${message.event_id ?? text}`;
+      const voiceMessage = message as { source?: string; message?: string; event_id?: number };
+      const eventKey = `${voiceMessage.source ?? "unknown"}:${voiceMessage.event_id ?? text}`;
       if (seenVoiceEventsRef.current.has(eventKey)) return;
       seenVoiceEventsRef.current.add(eventKey);
       if (seenVoiceEventsRef.current.size > 250) {
         seenVoiceEventsRef.current = new Set(Array.from(seenVoiceEventsRef.current).slice(-120));
       }
       try {
-        if (role === "user") {
-          // Drop echo: if the mic picks up the bot's own audio, ElevenLabs will
-          // emit it as a "user" transcript. If this text closely matches what
-          // the assistant just said, ignore it instead of saving a duplicate
-          // user-side bubble that mirrors the assistant message.
-          if (isNearDuplicateVoiceText(text, lastAssistantTextRef.current)) return;
+        if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
-          lastVoiceUserAtRef.current = Date.now();
-          resetLiveVoiceAssistant();
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          if (!mountedRef.current) return;
           setPendingUser(null);
-        } else if (role === "assistant") {
+        } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
-          if (!cleaned) return;
-          if (isFillerVoicePrompt(cleaned)) return;
-          const persistKey = message.event_id ? `ai:${message.event_id}` : `ai:${normalizeVoiceText(cleaned).slice(0, 120)}`;
-          if (persistedVoiceAiEventsRef.current.has(persistKey)) return;
-          if (isNearDuplicateVoiceText(cleaned, lastAssistantTextRef.current)) return;
-          persistedVoiceAiEventsRef.current.add(persistKey);
-          if (persistedVoiceAiEventsRef.current.size > 120) {
-            persistedVoiceAiEventsRef.current = new Set(Array.from(persistedVoiceAiEventsRef.current).slice(-80));
-          }
-          lastAssistantTextRef.current = cleaned;
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
           await add({ data: { threadId, role: "assistant", content: cleaned } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          if (!mountedRef.current) return;
-          // Clear the live caption only after the persisted message is in
-          // the refetched list — otherwise the screen flashes empty.
-          requestAnimationFrame(() => {
-            if (!mountedRef.current) return;
-            setPendingAssistant("");
-            resetLiveVoiceAssistant();
-          });
+          setPendingAssistant("");
+          liveAssistantRef.current = "";
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
@@ -739,17 +444,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceUiState(next);
   }
 
-  function isVoiceBusy() {
-    const sdkStatus = conversationRef.current?.status;
-    return (
-      sessionStartingRef.current ||
-      voiceStateRef.current === "starting" ||
-      voiceStateRef.current === "connected" ||
-      sdkStatus === "connecting" ||
-      sdkStatus === "connected"
-    );
-  }
-
   function clearVoiceConnectTimeout() {
     if (connectTimeoutRef.current !== null) {
       window.clearTimeout(connectTimeoutRef.current);
@@ -758,24 +452,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   function buildVoiceContext() {
-    // Keep ElevenLabs context lean. Long hidden context makes voice slower,
-    // increases repetition, and can cause the model to read markdown/table noise.
-    const MAX_CHARS = 3000;
-    const MAX_TURNS = 24;
-    const stripMd = (s: string) =>
-      s
-        .replace(/```[\s\S]*?```/g, "[code]")
-        .replace(/^\s*\|.*\|\s*$/gm, "")
-        .replace(/^\s*#{1,6}\s+/gm, "")
-        .replace(/\*\*(.+?)\*\*/g, "$1")
-        .replace(/[*_`>]/g, "")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-    const recent = (messages ?? []).slice(-MAX_TURNS).map(
-      (m) =>
-        `${m.role === "user" ? "User" : "BPA Bot"}: ${
-          m.role === "assistant" ? stripMd(cleanAssistantText(m.content)) : m.content
-        }`,
+    const MAX_CHARS = 12000;
+    const recent = (messages ?? []).slice(-100).map(
+      (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
     );
     let total = 0;
     const kept: string[] = [];
@@ -789,15 +468,13 @@ function ThreadView({ threadId }: { threadId: string }) {
     const rules = [
       "Behavioral rules for this session:",
       "- Do not greet or introduce yourself again.",
-      "- EXECUTIVE OUTPUT: answer like a Fortune 500 chief of staff. Default to 1 direct sentence or 2–3 tight bullets. No long paragraphs. No generic deeper-insights dump.",
-      "- VOICE BREVITY: keep spoken replies under 30 words unless the user explicitly asks for detail. Never read out long lists, tables, or markdown syntax.",
-      "- NO MARKDOWN OUT LOUD: do NOT speak characters like \"asterisk\", \"pipe\", \"hash\", or read tables row by row. If you need to show structured data, mention it briefly and let the chat render it.",
-      "- If asked for a table, output a GitHub-Flavored Markdown table directly in the chat, and say one short sentence summarizing it out loud.",
+      "- If asked for a table, output a GitHub-Flavored Markdown table directly.",
       "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
       "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
       "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
       "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
       "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
+      "- BE CONCISE: keep spoken replies short and conversational. Avoid long monologues so the user can interject naturally.",
       "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
       "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
@@ -807,79 +484,57 @@ function ThreadView({ threadId }: { threadId: string }) {
       : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
-  async function startVoice(opts: { reconnect?: boolean } = {}) {
-    if (isVoiceBusy()) {
-      if (opts.reconnect && voiceDesiredRef.current && voiceStateRef.current !== "connected") scheduleVoiceReconnect(1500);
-      return;
-    }
+  async function startVoice() {
+    if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
       toast.error("Voice quota exhausted — text chat still works.");
       setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       return;
     }
-    voiceDesiredRef.current = true;
-    stopRequestedRef.current = false;
-    sessionStartingRef.current = true;
-    clearVoiceReconnectTimeout();
-    if (!opts.reconnect) resetLiveVoiceAssistant();
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
-    if (!opts.reconnect) {
-      hasConnectedVoiceRef.current = false;
-      voiceUserHasSpokenRef.current = false;
-    }
+    hasConnectedVoiceRef.current = false;
+    voiceUserHasSpokenRef.current = false;
     setVoiceState("starting");
     setVoiceError(null);
     try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
       const { signedUrl } = await getAgentSignedUrl({});
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
       connectTimeoutRef.current = window.setTimeout(() => {
         if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
-        sessionStartingRef.current = false;
         setVoiceState("idle");
         pendingContextRef.current = "";
-        if (voiceDesiredRef.current) scheduleVoiceReconnect(1200);
-        else setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
+        setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
       conversation.startSession({
         signedUrl,
         connectionType: "websocket",
-        useWakeLock: true,
-        preferHeadphonesForIosDevices: true,
-        inputChunkDurationMs: 100,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
-      sessionStartingRef.current = false;
       const raw = e instanceof Error ? e.message : "Could not start voice";
       setVoiceState("idle");
       pendingContextRef.current = "";
       if (/permission|notallowed/i.test(raw)) {
-        voiceDesiredRef.current = false;
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
         toast.error("Microphone blocked");
       } else if (/quota/i.test(raw)) {
-        voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       } else {
         console.warn("startVoice failed", raw);
-        if (voiceDesiredRef.current && opts.reconnect) scheduleVoiceReconnect(1500);
-        else setVoiceError("Voice failed to connect. Tap the mic once to try again.");
+        setVoiceError("Voice failed to connect. Tap the mic once to try again.");
       }
     }
   }
 
   async function stopVoice() {
-    voiceDesiredRef.current = false;
-    stopRequestedRef.current = true;
-    sessionStartingRef.current = false;
     startAttemptRef.current += 1;
     clearVoiceConnectTimeout();
-    clearVoiceReconnectTimeout();
-    stopVoiceKeepAlive();
     setVoiceState("stopping");
     pendingContextRef.current = "";
     setVoiceError(null);
@@ -890,7 +545,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     } finally {
       hasConnectedVoiceRef.current = false;
       voiceUserHasSpokenRef.current = false;
-      resetLiveVoiceAssistant();
       setVoiceState("idle");
     }
   }
@@ -956,53 +610,17 @@ function ThreadView({ threadId }: { threadId: string }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
-      let buf = "";
-      setToolActivity([]);
       try {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          // Parse sentinel-wrapped tool events: \u0000{...}\u0000
-          while (true) {
-            const start = buf.indexOf("\u0000");
-            if (start === -1) {
-              acc += buf;
-              buf = "";
-              break;
-            }
-            // text before the sentinel is plain content
-            if (start > 0) {
-              acc += buf.slice(0, start);
-            }
-            const end = buf.indexOf("\u0000", start + 1);
-            if (end === -1) {
-              // sentinel opened but not yet closed; wait for more bytes
-              buf = buf.slice(start);
-              break;
-            }
-            const json = buf.slice(start + 1, end);
-            buf = buf.slice(end + 1);
-            try {
-              const evt = JSON.parse(json) as { t: string; id?: string; name?: string; label?: string };
-              if (evt.t === "tool-start" && evt.id && evt.name) {
-                const id = evt.id;
-                const name = evt.name;
-                const label = evt.label ?? name;
-                setToolActivity((prev) => [...prev, { id, name, label, status: "running" }]);
-              } else if (evt.t === "tool-end" && evt.id) {
-                const id = evt.id;
-                setToolActivity((prev) => prev.map((a) => (a.id === id ? { ...a, status: "done" } : a)));
-              }
-            } catch { /* ignore malformed event */ }
-          }
+          acc += decoder.decode(value, { stream: true });
           setPendingAssistant(cleanAssistantText(acc));
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") throw err;
       }
       setPendingAssistant("");
-      setToolActivity([]);
       abortRef.current = null;
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
@@ -1029,23 +647,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
     addMut.mutate({ content: "", files: [], regenerate: true });
-  }
-
-  function editUserMessage(content: string) {
-    if (addMut.isPending) {
-      abortRef.current?.abort();
-    }
-    setInput(content);
-    // focus the composer
-    requestAnimationFrame(() => {
-      const el = document.querySelector<HTMLInputElement>("input[placeholder^='Message']");
-      el?.focus();
-    });
-  }
-
-  function sendQuickAction(prompt: string) {
-    if (addMut.isPending || isConnected) return;
-    addMut.mutate({ content: prompt, files: [] });
   }
 
   function buildChatMarkdown() {
@@ -1078,48 +679,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     setExportOpen(false);
     if (messages.length === 0) return toast.error("Nothing to export yet");
     window.print();
-  }
-
-  function getChatTitle() {
-    return cleanThreadTitle(threads.data?.find((t) => t.id === threadId)?.title ?? "BPA Bot chat");
-  }
-
-  function getExportMessages(): ChatMsg[] {
-    return messages.map((m) => ({
-      role: m.role,
-      content: m.role === "assistant" ? cleanAssistantText(m.content) : m.content,
-      created_at: m.created_at,
-    }));
-  }
-
-  function exportPdf() {
-    setExportOpen(false);
-    if (messages.length === 0) return toast.error("Nothing to export yet");
-    try {
-      exportChatToPdf(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.pdf`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "PDF export failed");
-    }
-  }
-
-  async function exportDocx() {
-    setExportOpen(false);
-    if (messages.length === 0) return toast.error("Nothing to export yet");
-    try {
-      await exportChatToDocx(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.docx`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Word export failed");
-    }
-  }
-
-  function exportXlsx() {
-    setExportOpen(false);
-    if (messages.length === 0) return toast.error("Nothing to export yet");
-    try {
-      exportChatToXlsx(getChatTitle(), getExportMessages(), `bpa-bot-chat-${threadId.slice(0, 8)}.xlsx`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Excel export failed");
-    }
   }
 
   async function exportEmailToMe() {
@@ -1214,8 +773,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceActive = voiceUiState === "connected" || voiceUiState === "reconnecting" || (voiceUiState === "starting" && conversation.status !== "error");
-  const voiceConnecting = voiceUiState === "starting" || voiceUiState === "reconnecting";
+  const voiceActive = voiceUiState === "connected" || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceConnecting = voiceUiState === "starting";
 
   return (
     <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
@@ -1398,7 +957,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             >
               <MoreVertical size={16} />
             </button>
-            {exportOpen && <ExportMenu onPdf={exportPdf} onDocx={exportDocx} onXlsx={exportXlsx} onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
           </div>
         </div>
         {/* Mobile header */}
@@ -1435,46 +994,29 @@ function ThreadView({ threadId }: { threadId: string }) {
             >
               <MoreVertical size={18} />
             </button>
-            {exportOpen && <ExportMenu onPdf={exportPdf} onDocx={exportDocx} onXlsx={exportXlsx} onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
+            {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} />}
           </div>
         </div>
         {/* Messages */}
         <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
           {messages.length === 0 && !pendingUser && (
-            <StarterPrompts onPick={(p) => sendQuickAction(p)} />
+            <div className="text-center text-muted-foreground text-sm pt-12">
+              How can I help you today?
+            </div>
           )}
-          {messages.map((m, idx) => {
+          {messages.map((m) => {
             const att = (m as unknown as { attachments?: Attachment[] | null }).attachments;
-            const isLastAssistant =
-              m.role === "assistant" &&
-              idx === messages.length - 1 &&
-              !pendingAssistant &&
-              !addMut.isPending;
             return (
               <Bubble
                 key={m.id}
                 role={m.role}
                 content={m.content}
                 attachments={Array.isArray(att) ? att : []}
-                onEdit={m.role === "user" ? () => editUserMessage(m.content) : undefined}
-                onRegenerate={isLastAssistant ? regenerate : undefined}
               />
             );
           })}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
-          {(toolActivity.length > 0) && (
-            <ToolActivityList items={toolActivity} />
-          )}
-          {pendingAssistant ? (
-            <Bubble role="assistant" content={pendingAssistant} />
-          ) : addMut.isPending && pendingUser === null ? null : addMut.isPending ? (
-            <ThinkingShimmer />
-          ) : null}
-          {/* Follow-up quick actions after the latest assistant reply */}
-          {!addMut.isPending && !isConnected && messages.length > 0 &&
-            messages[messages.length - 1].role === "assistant" && (
-              <FollowUpActions onPick={(p) => sendQuickAction(p)} />
-            )}
+          {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
           <div ref={latestMessageRef} aria-hidden="true" />
         </div>
 
@@ -1623,21 +1165,12 @@ function ThreadView({ threadId }: { threadId: string }) {
   );
 }
 
-function ExportMenu({ onPdf, onDocx, onXlsx, onPrint, onMarkdown, onEmail }: { onPdf: () => void; onDocx: () => void; onXlsx: () => void; onPrint: () => void; onMarkdown: () => void; onEmail: () => void }) {
+function ExportMenu({ onPrint, onMarkdown, onEmail }: { onPrint: () => void; onMarkdown: () => void; onEmail: () => void }) {
   return (
     <div
       onClick={(e) => e.stopPropagation()}
       className="absolute right-0 top-full mt-1 w-56 rounded-md border border-border bg-card shadow-lg z-50 overflow-hidden"
     >
-      <button onClick={onPdf} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
-        <FileText size={14} /> Download PDF
-      </button>
-      <button onClick={onDocx} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
-        <FileText size={14} /> Download Word (.docx)
-      </button>
-      <button onClick={onXlsx} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
-        <FileText size={14} /> Download Excel (.xlsx)
-      </button>
       <button onClick={onPrint} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-secondary">
         <Printer size={14} /> Print / Save as PDF
       </button>
@@ -1655,39 +1188,20 @@ function Bubble({
   role,
   content,
   attachments = [],
-  onEdit,
-  onRegenerate,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
-  onEdit?: () => void;
-  onRegenerate?: () => void;
 }) {
   const isUser = role === "user";
-  const displayContent = isUser
-    ? content
-    : hidePartialTables(cleanAssistantText(content));
-  const segments = isUser ? [{ kind: "md" as const, text: displayContent }] : splitProductBlocks(displayContent);
-  const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
-  async function copyText() {
-    try {
-      await navigator.clipboard.writeText(displayContent);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      toast.error("Copy failed");
-    }
-  }
+  const displayContent = isUser ? content : cleanAssistantText(content);
   return (
-    <div className={`group flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
         <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">
           BP
         </div>
       )}
-      <div className="flex flex-col gap-1 max-w-[78%] min-w-0">
       <div
         className={`max-w-[78%] min-w-0 overflow-x-auto rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
           isUser
@@ -1717,332 +1231,9 @@ function Bubble({
             isUser ? "prose-invert" : ""
           } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
         >
-          {segments.map((seg, i) =>
-            seg.kind === "products" ? (
-              <ProductCards key={i} products={seg.products} />
-            ) : (
-              <ReactMarkdown
-                key={i}
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-                components={{
-                  pre: ({ children, ...props }) => <CodeBlock {...props}>{children}</CodeBlock>,
-                }}
-              >
-                {seg.text}
-              </ReactMarkdown>
-            )
-          )}
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
         </div>
       </div>
-        {/* Hover actions */}
-        <div
-          className={`flex items-center gap-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity ${
-            isUser ? "justify-end" : "justify-start"
-          }`}
-        >
-          <button
-            type="button"
-            onClick={copyText}
-            className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
-            title="Copy"
-            aria-label="Copy message"
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-          </button>
-          {isUser && onEdit && (
-            <button
-              type="button"
-              onClick={onEdit}
-              className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
-              title="Edit & resend"
-              aria-label="Edit message"
-            >
-              <Pencil size={13} />
-            </button>
-          )}
-          {!isUser && onRegenerate && (
-            <button
-              type="button"
-              onClick={onRegenerate}
-              className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
-              title="Regenerate"
-              aria-label="Regenerate response"
-            >
-              <RotateCcw size={13} />
-            </button>
-          )}
-          {!isUser && (
-            <>
-              <button
-                type="button"
-                onClick={() => setFeedback((f) => (f === "up" ? null : "up"))}
-                className={`p-1 rounded hover:bg-secondary ${
-                  feedback === "up" ? "text-primary" : "text-muted-foreground hover:text-foreground"
-                }`}
-                title="Good response"
-                aria-label="Thumbs up"
-              >
-                <ThumbsUp size={13} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setFeedback((f) => (f === "down" ? null : "down"))}
-                className={`p-1 rounded hover:bg-secondary ${
-                  feedback === "down" ? "text-destructive" : "text-muted-foreground hover:text-foreground"
-                }`}
-                title="Bad response"
-                aria-label="Thumbs down"
-              >
-                <ThumbsDown size={13} />
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CodeBlock({ children }: { children?: React.ReactNode }) {
-  const ref = useRef<HTMLPreElement>(null);
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    const text = ref.current?.innerText ?? "";
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      toast.error("Copy failed");
-    }
-  }
-  // Detect language from child <code> className (e.g. "language-ts hljs")
-  let lang = "";
-  if (children && typeof children === "object" && "props" in (children as object)) {
-    const cls = ((children as { props?: { className?: string } }).props?.className) ?? "";
-    const m = cls.match(/language-([\w-]+)/);
-    if (m) lang = m[1];
-  }
-  return (
-    <div className="relative my-3 rounded-lg overflow-hidden border border-border bg-[#0d1117]">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#161b22] border-b border-border text-[11px] text-muted-foreground">
-        <span className="font-mono uppercase tracking-wide">{lang || "code"}</span>
-        <button
-          type="button"
-          onClick={copy}
-          className="flex items-center gap-1 hover:text-foreground transition"
-          aria-label="Copy code"
-        >
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <pre ref={ref} className="!m-0 !bg-transparent overflow-x-auto p-3 text-[13px] leading-relaxed">
-        {children}
-      </pre>
-    </div>
-  );
-}
-
-function ThinkingShimmer() {
-  return (
-    <div className="flex gap-3 justify-start">
-      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">
-        BP
-      </div>
-      <div className="rounded-2xl px-4 py-3 bg-card border border-border">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "150ms" }} />
-          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "300ms" }} />
-          <span className="ml-2 text-xs text-muted-foreground">Thinking…</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ToolActivityList({
-  items,
-}: {
-  items: { id: string; name: string; label: string; status: "running" | "done" }[];
-}) {
-  const iconFor = (name: string) => {
-    switch (name) {
-      case "web_search":
-      case "product_search":
-      case "search_knowledge_base":
-        return <Search size={12} />;
-      case "web_scrape":
-        return <FileText size={12} />;
-      case "send_email":
-        return <Mail size={12} />;
-      case "list_calendar_events":
-      case "create_calendar_event":
-        return <Sparkles size={12} />;
-      case "list_contacts":
-      case "save_contact":
-        return <Users size={12} />;
-      case "recall_facts":
-      case "remember_fact":
-      case "forget_fact":
-        return <BookOpen size={12} />;
-      default:
-        return <Sparkles size={12} />;
-    }
-  };
-  return (
-    <div className="flex gap-3 justify-start">
-      <div className="w-8 h-8 shrink-0" aria-hidden />
-      <div className="flex flex-wrap gap-1.5 max-w-[80%]">
-        {items.map((a) => (
-          <span
-            key={a.id}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
-              a.status === "running"
-                ? "border-primary/40 bg-primary/5 text-foreground"
-                : "border-border bg-muted/40 text-muted-foreground"
-            }`}
-            title={a.label}
-          >
-            <span className={a.status === "running" ? "animate-pulse" : ""}>
-              {a.status === "done" ? <Check size={12} /> : iconFor(a.name)}
-            </span>
-            <span className="max-w-[260px] truncate">{a.label}</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const STARTER_PROMPTS: Array<{ icon: React.ReactNode; title: string; prompt: string }> = [
-  { icon: <Mail size={16} />, title: "Draft an email", prompt: "Help me draft a professional email. Ask me who it's to and what about." },
-  { icon: <Search size={16} />, title: "Research a company", prompt: "Research a company for me and give me an executive brief. Ask which company." },
-  { icon: <Table2 size={16} />, title: "Compare options", prompt: "Build a comparison table. Ask me what to compare." },
-  { icon: <Lightbulb size={16} />, title: "Summarize my day", prompt: "Pull my upcoming calendar events and give me a one-line brief for today." },
-];
-
-function StarterPrompts({ onPick }: { onPick: (prompt: string) => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center pt-8 md:pt-16 gap-6">
-      <div className="text-center">
-        <h1 className="text-2xl md:text-3xl font-semibold text-foreground">How can I help today?</h1>
-        <p className="text-sm text-muted-foreground mt-1">Pick a starter or ask anything.</p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-2xl px-2">
-        {STARTER_PROMPTS.map((s) => (
-          <button
-            key={s.title}
-            type="button"
-            onClick={() => onPick(s.prompt)}
-            className="text-left p-3 rounded-xl border border-border bg-card hover:bg-secondary/60 transition flex items-start gap-3"
-          >
-            <span className="mt-0.5 text-primary">{s.icon}</span>
-            <span className="text-sm text-foreground">{s.title}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const FOLLOW_UPS: Array<{ icon: React.ReactNode; label: string; prompt: string }> = [
-  { icon: <Scissors size={12} />, label: "Shorter", prompt: "Make that shorter — bottom line only." },
-  { icon: <Table2 size={12} />, label: "As a table", prompt: "Reformat that as a markdown table." },
-  { icon: <Lightbulb size={12} />, label: "Go deeper", prompt: "Go deeper — give me the full brief with sources." },
-];
-
-function FollowUpActions({ onPick }: { onPick: (prompt: string) => void }) {
-  return (
-    <div className="flex flex-wrap gap-2 pl-11">
-      {FOLLOW_UPS.map((f) => (
-        <button
-          key={f.label}
-          type="button"
-          onClick={() => onPick(f.prompt)}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition"
-        >
-          {f.icon}
-          {f.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ---------- Product cards ----------
-type Product = {
-  title: string;
-  url: string;
-  image?: string;
-  price?: string;
-  source?: string;
-  snippet?: string;
-};
-
-type Segment =
-  | { kind: "md"; text: string }
-  | { kind: "products"; products: Product[] };
-
-function splitProductBlocks(text: string): Segment[] {
-  if (!text) return [{ kind: "md", text: "" }];
-  const re = /:::products\s*([\s\S]*?):::/g;
-  const out: Segment[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) out.push({ kind: "md", text: text.slice(last, m.index) });
-    let products: Product[] = [];
-    try {
-      const parsed = JSON.parse(m[1].trim());
-      if (Array.isArray(parsed)) products = parsed.filter((p) => p && p.title && p.url);
-    } catch {
-      // partial/streaming — skip until valid
-    }
-    if (products.length) out.push({ kind: "products", products });
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) out.push({ kind: "md", text: text.slice(last) });
-  if (out.length === 0) out.push({ kind: "md", text });
-  return out;
-}
-
-function ProductCards({ products }: { products: Product[] }) {
-  return (
-    <div className="not-prose my-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
-      {products.map((p, i) => (
-        <a
-          key={i}
-          href={p.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group flex flex-col rounded-xl border border-border bg-card overflow-hidden hover:border-accent hover:shadow-md transition"
-        >
-          {p.image ? (
-            <div className="aspect-square w-full bg-secondary overflow-hidden">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={p.image}
-                alt={p.title}
-                loading="lazy"
-                className="w-full h-full object-contain group-hover:scale-[1.02] transition"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-              />
-            </div>
-          ) : (
-            <div className="aspect-square w-full bg-secondary" />
-          )}
-          <div className="p-2.5 flex flex-col gap-1">
-            <div className="text-[13px] font-medium text-foreground line-clamp-2 leading-snug">{p.title}</div>
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              {p.price ? <span className="font-semibold text-foreground">{p.price}</span> : <span />}
-              {p.source && <span className="truncate ml-2">{p.source}</span>}
-            </div>
-          </div>
-        </a>
-      ))}
     </div>
   );
 }

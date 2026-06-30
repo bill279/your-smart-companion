@@ -5,120 +5,18 @@ import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
 
-const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). Write like the best of ChatGPT and Claude: warm, sharp, and effortlessly clear.
+const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
 
-# Tone & Personality (Claude-style house rules — highest priority)
-- Warm but not sycophantic. Never open with "Great question!", "Absolutely!", "Certainly!", "Of course!", "Sure!", "Great!", or hollow affirmations.
-- Confident and direct: lead with the answer, not preamble.
-- Honest even when it's not what the user wants to hear — framed constructively.
-- Conversational for simple exchanges; structured only when complexity actually demands it.
-- Never start a response with the word "I".
-- Don't repeat the user's question back before answering.
-- Don't over-explain refusals — keep them brief and offer the closest useful alternative.
-
-# Helpfulness Style
-- Attempt the task before asking clarifying questions; state your assumption inline and proceed.
-- When something is ambiguous, pick the most reasonable interpretation and go — don't interrogate.
-- If you can't fully help, explain briefly and offer the closest useful alternative.
-- Remember context within the conversation. Don't make the user repeat themselves.
-
-# Reasoning
-- Think before answering, but don't narrate your thinking unless asked.
-- For complex questions, give the answer first, then the reasoning.
-- Acknowledge uncertainty honestly; don't fake confidence.
-
-# Formatting baseline (Claude-style)
-- Match response length to question complexity — short questions get short answers.
-- Default to prose, not bullets. Use lists only when content is genuinely list-shaped.
-- Never use bold headers for simple conversational replies.
-- On mobile, keep responses to roughly one screenful unless depth is asked for.
-
-# Operating principles (ChatGPT-style business assistant)
-Primary goal: save the user time and help them make better decisions.
-- Be proactive. If you can reasonably infer what the user wants, do it instead of asking.
-- Give recommendations — don't just list options. Recommend the best one and say why.
-- Think like a consultant, not a search engine. Optimize every response for action.
-- Break complex questions into logical steps. State assumptions when uncertain.
-- Never invent facts. If live data is needed, say so and use \`web_search\` / \`web_scrape\`.
-- Explain tradeoffs honestly instead of pretending there's one perfect answer.
-- Prefer practical advice over theory. Match the user's tone (professional or casual).
-- When writing emails, proposals, SOPs, or marketing copy, produce content that is immediately usable.
-- Avoid unnecessary disclaimers and filler.
-
-# Decision framework
-When giving a recommendation: (1) identify the goal, (2) name the main constraints, (3) recommend the best option, (4) say why, (5) mention when another option would make more sense. Keep it tight — not a five-paragraph essay unless asked.
-
-# Business mindset
-Think like a CEO, operations consultant, sales strategist, marketing strategist, and technical advisor. Always ask: "What is the fastest path to the user's desired outcome?"
-
-# Coding
-Production-quality code. Brief architecture note when useful. Consider maintainability and edge cases. Explain implementation details only when they matter.
-
-# Marketing
-Focus on outcomes, not features. Write for conversions. Include a clear CTA. Make messaging specific.
-
-# If you don't know
-Say so clearly. Never fabricate. Offer the next best step (search, ask the user for the missing input, or scope a smaller answer).
-
-# Behavior rules
-- If there's a better question the user should be solving, answer that one — and say briefly why you reframed it.
-- Anticipate the next question and address it preemptively when it's obvious.
-- Surface risks before they become problems.
-- Give the user a shortcut instead of a full tutorial whenever one exists.
-- For decisions involving money or time, compare the options side by side (table or tight bullets).
-- If something can be automated, mention it.
-- Be opinionated when evidence supports a recommendation. Distinguish facts from opinions ("Fact:" vs "My take:").
-
-# Audience
-The user is a Fortune-500 CEO. They value clarity, speed, and signal density. Mirror their tone: confident, plain-spoken, never bureaucratic.
-
-# Voice
-- Sound like a senior chief of staff, not a manual. Conversational, direct, never robotic.
-- Open with the answer, decision, or key fact — never with "Great question", "Sure!", "Based on…", "Let me…", "I'd be happy to…".
-- No throat-clearing about sources, methodology, or that you searched. State the fact, cite the link inline.
-- Cut filler hard: "it's worth noting", "additionally", "furthermore", "in conclusion", "I hope this helps", "feel free to".
-- Active voice. Specific nouns. Concrete numbers. No corporate hedging.
-
-# Formatting (match ChatGPT / Claude quality — adaptive, not templated)
-There is **no fixed template**. Choose the shape that fits the question:
-
-- **Simple question** (definition, yes/no, quick fact) → **1–2 plain sentences.** No bullets, no headings, no "Bottom line:" label. Just answer.
-- **List of items** (3+ comparable things, options, steps) → **bulleted list**, one idea per bullet, ≤ 12 words.
-- **Comparison / spec / multi-attribute data** → **GFM table**. Tables render natively here — never refuse one.
-- **Procedure** (3+ ordered steps) → **numbered list**.
-- **Longer answer** (>150 words, multiple subjects) → use **\`##\` headings** to section it. Otherwise skip headings entirely.
-- **Code** → fenced block with language tag.
-- **Caveats / tips** → \`> **Note:**\` blockquote, sparingly.
-
-General style:
-- **Bold** key terms, names, decisions, and numbers — sparingly, so the bolding actually signals importance.
-- Use \`inline code\` for filenames, IDs, commands, values.
-- Links inline: [label](url). Cite sources where it matters.
-- Use blank lines between blocks. Never run bullets, tables, and paragraphs together without breathing room.
-- Never wrap a whole answer in a code block. Never dump raw JSON unless asked.
-- Match length to the question: a one-line question gets a one-line answer. A "deep dive" request gets the full brief.
-
-# Response budget (strict)
-- Default answer: **under 90 words**.
-- Voice-style or casual user input: **under 45 words**.
-- If the user asks for options: max **3 bullets** unless they ask for more.
-- If you need a table: keep it to the smallest useful table, usually **3–6 rows**.
-- Only exceed this when the user explicitly asks for a deep dive, report, draft, table, document, or full analysis.
-- Never include generic recap, preamble, or closing offers. Stop when the answer is useful.
-
-# What NOT to do (these break the Claude/ChatGPT feel)
-- Don't prefix every reply with "**Bottom line:**" or end with "**Next:**" — those are crutches.
-- Don't bullet a single fact. If there's only one point, write the sentence.
-- Don't add a heading to a 60-word answer.
-- Don't pad short answers to look thorough. Brevity is the product.
-- Don't refuse to render tables, code, links, or LaTeX — they render.
-
-# Document & PDF generation (important)
-You can attach generated PDF, Word, or Excel files to emails via the \`send_email\` tool's \`attachments\` parameter. When the user asks for "email me the table as a PDF", "send this as a report", "send the spreadsheet", etc.:
-1. Build the table / content in Markdown (GFM tables work great).
-2. Call \`send_email\` with that Markdown placed in \`attachments[].content\`, the right \`type\` ("pdf" | "xlsx" | "docx"), and a sensible \`filename\` and \`title\`.
-3. Keep the email body short — one sentence intro plus "See attached." The detail belongs in the attachment.
-4. Confirm the recipient first per the email flow below. Never invent attachment data.
+# Formatting (very important)
+Always respond in clean Markdown that renders beautifully:
+- Lead with a short direct answer (1–2 sentences).
+- Use **bold** for key terms and short bullet lists for steps, options, or comparisons.
+- Use ## headings only for longer multi-part answers; skip them for short replies.
+- Use GitHub-Flavored Markdown tables (| col | col |) whenever the user asks for a table, a visual table, a comparison, a schedule, specs, rows/columns, or any tabular data. Tables render natively in this chat — never say you cannot display a table or a visual table directly.
+- Use fenced code blocks with a language tag for code.
+- Cite sources inline as [link text](https://...).
+- Never wrap the whole response in a code block. Never dump raw JSON unless explicitly asked.
+- Keep paragraphs short (2–4 lines).
 
 # Conversation behavior
 - Continue from the existing thread history. Do not introduce yourself or greet again after the first exchange.
@@ -138,23 +36,8 @@ You have tools:
 - remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
 - search_knowledge_base — semantic search over the user's uploaded company documents/SOPs (PDFs, docs, notes). Use this FIRST whenever the user asks about internal/company-specific info, processes, products, pricing sheets, policies, or anything that sounds like it would live in their files. Cite the document name in the answer.
-- product_search — visual product search. Returns a list of products with **images, prices, and links**. Use this whenever the user asks to find, shop for, look up, compare, or recommend physical products (gear, gadgets, hardware, equipment, cameras, parts, tools, supplies, etc.) — anything they would buy. Prefer this over web_search for buying intent.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
-
-# Rich product results (mandatory format)
-When you call \`product_search\` and get results, you MUST render them as a product-card block so the user sees images, not just links. Output the cards block on its own lines using this exact fence:
-
-:::products
-[
-  {"title":"Product name","price":"$820.00","image":"https://...jpg","url":"https://...","source":"robotshop.com","snippet":"one-line why it fits"}
-]
-:::
-
-Rules:
-- The block contents must be valid JSON (an array of product objects). Include only products that have an \`image\` URL.
-- Put a short one-sentence lead-in before the block, and a short comparison/recommendation paragraph after it. Do NOT also repeat the products as a bulleted list or table — the cards already show them.
-- Keep 3–6 products max.
 
 # Auto-memory (silent)
 Proactively call \`remember_fact\` — without being asked, without announcing it — whenever the user shares a stable, reusable fact about themselves, their work, or their preferences. Examples worth remembering:
@@ -426,11 +309,9 @@ export const Route = createFileRoute("/api/chat")({
           };
         });
         const result = streamText({
-          model: gateway("openai/gpt-5.5"),
+          model: gateway("google/gemini-3-flash-preview"),
           system: systemWithUser,
           messages: baseMessages,
-          temperature: 0.3,
-          maxOutputTokens: 900,
           stopWhen: stepCountIs(50),
           tools: {
             web_search: tool({
@@ -494,113 +375,18 @@ export const Route = createFileRoute("/api/chat")({
                 };
               },
             }),
-            product_search: tool({
-              description:
-                "Visual product search. Returns products with title, price, image, url, and source. Use whenever the user asks to find, shop for, compare, look up, or recommend buyable items (gear, hardware, electronics, equipment, supplies, parts, tools, etc.). Always render the results as the :::products card block.",
-              inputSchema: z.object({
-                query: z.string().describe("Natural product query, e.g. 'best stereo vision cameras for industrial robotics'"),
-                limit: z.number().int().min(1).max(8).optional(),
-              }),
-              execute: async ({ query, limit }) => {
-                const key = process.env.FIRECRAWL_API_KEY;
-                if (!key) return { error: "Product search not configured" };
-                const n = limit ?? 5;
-                const r = await fetch("https://api.firecrawl.dev/v2/search", {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${key}`,
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    query: `${query} buy price specs`,
-                    limit: n,
-                    scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
-                  }),
-                });
-                if (!r.ok) return { error: `Product search failed (${r.status})` };
-                const j = (await r.json()) as {
-                  data?:
-                    | Array<{
-                        title?: string;
-                        url?: string;
-                        description?: string;
-                        markdown?: string;
-                        metadata?: Record<string, unknown>;
-                      }>
-                    | { web?: Array<{ title?: string; url?: string; description?: string; markdown?: string; metadata?: Record<string, unknown> }> };
-                };
-                const arr = Array.isArray(j.data) ? j.data : j.data?.web ?? [];
-                const priceRe = /(?:US\$|CA\$|USD\s?|CAD\s?|\$|£|€)\s?\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?/;
-                const pickImage = (meta: Record<string, unknown> | undefined): string | undefined => {
-                  if (!meta) return undefined;
-                  const keys = ["ogImage", "og:image", "twitterImage", "twitter:image", "image"];
-                  for (const k of keys) {
-                    const v = meta[k];
-                    if (typeof v === "string" && /^https?:\/\//.test(v)) return v;
-                    if (Array.isArray(v) && typeof v[0] === "string" && /^https?:\/\//.test(v[0] as string)) return v[0] as string;
-                  }
-                  return undefined;
-                };
-                const products = arr
-                  .map((x) => {
-                    const text = x.markdown ?? x.description ?? "";
-                    const priceMatch = text.match(priceRe);
-                    let source: string | undefined;
-                    try { source = x.url ? new URL(x.url).hostname.replace(/^www\./, "") : undefined; } catch { /* noop */ }
-                    return {
-                      title: x.title || (x.metadata?.title as string | undefined) || source || "Untitled",
-                      url: x.url,
-                      image: pickImage(x.metadata),
-                      price: priceMatch?.[0],
-                      source,
-                      snippet: (x.description || "").slice(0, 160),
-                    };
-                  })
-                  .filter((p) => p.url && p.image);
-                return { products: products.slice(0, n) };
-              },
-            }),
             send_email: tool({
               description:
-                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves. Supports optional file attachments (PDF / Word / Excel) generated from Markdown — use this for 'email me the table as a PDF', 'send this as a report', etc.",
+                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves.",
               inputSchema: z.object({
                 to: z.string().email().describe("Recipient email address"),
                 subject: z.string().min(1).max(200),
                 body: z.string().min(1).max(20000),
                 cc: z.string().email().optional(),
-                attachments: z
-                  .array(
-                    z.object({
-                      filename: z.string().min(1).max(120).describe("File name without extension is fine; the right .pdf/.xlsx/.docx is appended automatically."),
-                      type: z.enum(["pdf", "xlsx", "docx"]),
-                      title: z.string().max(200).optional().describe("Optional document title rendered at the top of the file."),
-                      content: z.string().min(1).max(50000).describe("Markdown source of the attachment. Use GFM tables for spreadsheets/PDF tables, headings, bullet lists, paragraphs."),
-                    }),
-                  )
-                  .max(4)
-                  .optional()
-                  .describe("Optional list of generated attachments. The model produces the markdown; the server renders to PDF/XLSX/DOCX."),
               }),
-              execute: async ({ to, subject, body: emailBody, cc, attachments }) => {
+              execute: async ({ to, subject, body: emailBody, cc }) => {
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const { marked } = await import("marked");
-                const builtAttachments: Array<{ filename: string; mimeType: string; base64: string }> = [];
-                if (attachments && attachments.length > 0) {
-                  const { buildAttachment } = await import("@/lib/email-attachments.server");
-                  for (const a of attachments) {
-                    try {
-                      builtAttachments.push(await buildAttachment(a));
-                    } catch (e) {
-                      await logAction(
-                        "send_email",
-                        `Failed to build attachment ${a.filename}.${a.type}`,
-                        { filename: a.filename, type: a.type, error: String(e).slice(0, 200) },
-                        "error",
-                      );
-                      return { error: `Failed to build attachment "${a.filename}.${a.type}": ${String(e).slice(0, 160)}` };
-                    }
-                  }
-                }
                 const renderHtml = (md: string) => {
                   const inner = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
                   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -632,79 +418,41 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                            ...(cc
                              ? { ccRecipients: [{ emailAddress: { address: cc } }] }
                              : {}),
-                            ...(builtAttachments.length > 0
-                              ? {
-                                  attachments: builtAttachments.map((a) => ({
-                                    "@odata.type": "#microsoft.graph.fileAttachment",
-                                    name: a.filename,
-                                    contentType: a.mimeType,
-                                    contentBytes: a.base64,
-                                  })),
-                                }
-                              : {}),
                          },
                        }),
                      },
                    );
                    if (!r.ok) {
                      const t = await r.text();
-                     await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status, attachments: builtAttachments.map((a) => a.filename) }, "error");
+                     await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
                      return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
                    }
-                    await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attachments: builtAttachments.map((a) => a.filename) });
-                    return { ok: true, provider: "outlook", to, subject, attachments: builtAttachments.map((a) => a.filename) };
+                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook" });
+                   return { ok: true, provider: "outlook", to, subject };
                  }
                  if (process.env.GOOGLE_MAIL_API_KEY) {
-                  const altBoundary = `alt_${Math.random().toString(36).slice(2)}`;
-                  const mixedBoundary = `mix_${Math.random().toString(36).slice(2)}`;
-                  const useMixed = builtAttachments.length > 0;
-                  const headerLines: string[] = [`To: ${to}`];
-                  if (cc) headerLines.push(`Cc: ${cc}`);
-                  headerLines.push(
+                  const boundary = `bpa_${Math.random().toString(36).slice(2)}`;
+                  const lines = [`To: ${to}`];
+                  if (cc) lines.push(`Cc: ${cc}`);
+                  lines.push(
                     `Subject: ${subject}`,
                     "MIME-Version: 1.0",
-                    useMixed
-                      ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`
-                      : `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+                    `Content-Type: multipart/alternative; boundary="${boundary}"`,
                     "",
-                  );
-                  const altPart = [
-                    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
-                    "",
-                    `--${altBoundary}`,
+                    `--${boundary}`,
                     "Content-Type: text/plain; charset=UTF-8",
                     "",
                     emailBody,
                     "",
-                    `--${altBoundary}`,
+                    `--${boundary}`,
                     "Content-Type: text/html; charset=UTF-8",
                     "",
                     renderHtml(emailBody),
                     "",
-                    `--${altBoundary}--`,
+                    `--${boundary}--`,
                     "",
-                  ].join("\r\n");
-                  let bodyMime: string;
-                  if (useMixed) {
-                    const parts: string[] = [`--${mixedBoundary}`, altPart];
-                    for (const a of builtAttachments) {
-                      parts.push(
-                        `--${mixedBoundary}`,
-                        `Content-Type: ${a.mimeType}; name="${a.filename}"`,
-                        "Content-Transfer-Encoding: base64",
-                        `Content-Disposition: attachment; filename="${a.filename}"`,
-                        "",
-                        // 76-char wrap
-                        a.base64.replace(/.{76}/g, "$&\r\n"),
-                        "",
-                      );
-                    }
-                    parts.push(`--${mixedBoundary}--`, "");
-                    bodyMime = parts.join("\r\n");
-                  } else {
-                    bodyMime = altPart;
-                  }
-                  const raw = Buffer.from(headerLines.join("\r\n") + bodyMime)
+                  );
+                  const raw = Buffer.from(lines.join("\r\n"))
                     .toString("base64")
                     .replace(/\+/g, "-")
                     .replace(/\//g, "_")
@@ -719,11 +467,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   );
                   if (!r.ok) {
                     const t = await r.text();
-                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status, attachments: builtAttachments.map((a) => a.filename) }, "error");
+                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status }, "error");
                     return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
                   }
-                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail", attachments: builtAttachments.map((a) => a.filename) });
-                  return { ok: true, provider: "gmail", to, subject, attachments: builtAttachments.map((a) => a.filename) };
+                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail" });
+                  return { ok: true, provider: "gmail", to, subject };
                 }
                 return { error: "No email provider connected." };
               },
@@ -1064,82 +812,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
           },
         });
 
-        // Custom stream: interleave text deltas with tool activity events so the
-        // client can render "what BPA Bot is doing" chips (search/scrape/etc.)
-        // like ChatGPT/Claude. Tool events are sentinel-wrapped JSON:
-        //   \u0000{"t":"tool-start","id":...,"name":...,"label":...}\u0000
-        const labelForTool = (name: string, input: unknown): string => {
-          const a = (input ?? {}) as Record<string, unknown>;
-          switch (name) {
-            case "web_search":
-            case "product_search":
-              return typeof a.query === "string" ? a.query : name;
-            case "web_scrape":
-              return typeof a.url === "string" ? a.url : name;
-            case "send_email":
-              return typeof a.to === "string" ? `Email → ${a.to}` : "Send email";
-            case "save_contact":
-              return typeof a.name === "string" ? `Save contact: ${a.name}` : "Save contact";
-            case "create_calendar_event":
-              return typeof a.title === "string" ? `Calendar: ${a.title}` : "Create event";
-            case "list_calendar_events":
-              return "Check calendar";
-            case "list_contacts":
-              return "Look up contacts";
-            case "search_knowledge_base":
-              return typeof a.query === "string" ? `Knowledge: ${a.query}` : "Search knowledge";
-            case "recall_facts":
-              return "Recall memory";
-            case "remember_fact":
-              return typeof a.key === "string" ? `Remember: ${a.key}` : "Remember fact";
-            case "forget_fact":
-              return typeof a.key === "string" ? `Forget: ${a.key}` : "Forget fact";
-            default:
-              return name;
-          }
-        };
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream<Uint8Array>({
-          async start(controller) {
-            try {
-              for await (const part of result.fullStream) {
-                if (part.type === "text-delta") {
-                  const delta = (part as unknown as { text?: string; textDelta?: string }).text
-                    ?? (part as unknown as { textDelta?: string }).textDelta
-                    ?? "";
-                  if (delta) controller.enqueue(encoder.encode(delta));
-                } else if (part.type === "tool-call") {
-                  const p = part as unknown as { toolCallId: string; toolName: string; input?: unknown; args?: unknown };
-                  const evt = {
-                    t: "tool-start",
-                    id: p.toolCallId,
-                    name: p.toolName,
-                    label: labelForTool(p.toolName, p.input ?? p.args),
-                  };
-                  controller.enqueue(encoder.encode(`\u0000${JSON.stringify(evt)}\u0000`));
-                } else if (part.type === "tool-result") {
-                  const p = part as unknown as { toolCallId: string; toolName: string };
-                  const evt = { t: "tool-end", id: p.toolCallId, name: p.toolName };
-                  controller.enqueue(encoder.encode(`\u0000${JSON.stringify(evt)}\u0000`));
-                } else if (part.type === "error") {
-                  // surface as a tool-end so chips don't spin forever
-                  const evt = { t: "error" };
-                  controller.enqueue(encoder.encode(`\u0000${JSON.stringify(evt)}\u0000`));
-                }
-              }
-              controller.close();
-            } catch (err) {
-              controller.error(err);
-            }
-          },
-        });
-        return new Response(stream, {
-          headers: {
-            "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",
-          },
-        });
+        return result.toTextStreamResponse();
       },
     },
   },

@@ -18,10 +18,9 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -30,77 +29,25 @@ function AuthPage() {
     });
   }, [navigate]);
 
-  function friendlyError(msg: string): string {
-    const m = msg.toLowerCase();
-    if (m.includes("invalid login")) return "Wrong email or password.";
-    if (m.includes("email not confirmed")) return "Please confirm your email first. Check your inbox.";
-    if (m.includes("already registered") || m.includes("user already")) return "An account with this email already exists. Try signing in.";
-    if (m.includes("password should be")) return "Password must be at least 6 characters.";
-    if (m.includes("rate limit")) return "Too many attempts. Please wait a moment and try again.";
-    return msg;
-  }
-
-  async function resendConfirmation() {
-    if (!email) {
-      toast.error("Enter your email first");
-      return;
-    }
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/chat` },
-    });
-    if (error) toast.error(friendlyError(error.message));
-    else toast.success("Confirmation email re-sent.");
-  }
-
   async function handleEmail(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim()) {
-      toast.error("Enter your email");
-      return;
-    }
     setLoading(true);
     try {
-      if (mode === "forgot") {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: `${window.location.origin}/reset-password`,
-        });
-        if (error) throw error;
-        toast.success("Password reset link sent. Check your email.");
-        setMode("signin");
-        return;
-      }
       if (mode === "signup") {
-        if (password.length < 6) {
-          toast.error("Password must be at least 6 characters.");
-          return;
-        }
         const { error } = await supabase.auth.signUp({
-          email: email.trim(),
+          email,
           password,
           options: { emailRedirectTo: `${window.location.origin}/chat` },
         });
         if (error) throw error;
-        const { data: sess } = await supabase.auth.getSession();
-        if (!sess.session) {
-          toast.success("Account created. Check your email to confirm, then sign in.");
-          setMode("signin");
-          return;
-        }
         toast.success("Account created. You're in.");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       }
       navigate({ to: "/chat" });
     } catch (err) {
-      const raw = err instanceof Error ? err.message : "Auth failed";
-      const msg = friendlyError(raw);
-      toast.error(msg);
-      if (msg.includes("confirm your email")) {
-        toast("Tap 'Resend confirmation' below to get a new link.", { duration: 4000 });
-      }
+      toast.error(err instanceof Error ? err.message : "Auth failed");
     } finally {
       setLoading(false);
     }
@@ -155,65 +102,32 @@ function AuthPage() {
             placeholder="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
             className="w-full bg-input/50 border border-primary/30 rounded px-3 py-2 text-sm focus:outline-none focus:border-primary"
           />
-          {mode !== "forgot" && (
-            <div className="relative">
-              <input
-                type={showPassword ? "text" : "password"}
-                required
-                minLength={6}
-                placeholder="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                className="w-full bg-input/50 border border-primary/30 rounded px-3 py-2 pr-16 text-sm focus:outline-none focus:border-primary"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((s) => !s)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-primary px-2 py-1"
-                tabIndex={-1}
-              >
-                {showPassword ? "hide" : "show"}
-              </button>
-            </div>
-          )}
+          <input
+            type="password"
+            required
+            minLength={6}
+            placeholder="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full bg-input/50 border border-primary/30 rounded px-3 py-2 text-sm focus:outline-none focus:border-primary"
+          />
           <button
             type="submit"
             disabled={loading}
             className="w-full py-2.5 rounded bg-primary text-primary-foreground font-semibold tracking-wider hover:opacity-90 disabled:opacity-50"
           >
-            {loading ? "..." : mode === "signin" ? "ENGAGE" : mode === "signup" ? "INITIALIZE" : "SEND RESET LINK"}
+            {loading ? "..." : mode === "signin" ? "ENGAGE" : "INITIALIZE"}
           </button>
         </form>
 
-        <div className="mt-4 flex flex-col items-center gap-2 text-xs text-muted-foreground">
-          {mode === "signin" && (
-            <>
-              <button onClick={() => setMode("forgot")} className="hover:text-primary">
-                Forgot password?
-              </button>
-              <button onClick={() => setMode("signup")} className="hover:text-primary">
-                Need an account? Create one
-              </button>
-              <button onClick={resendConfirmation} className="hover:text-primary">
-                Resend confirmation email
-              </button>
-            </>
-          )}
-          {mode === "signup" && (
-            <button onClick={() => setMode("signin")} className="hover:text-primary">
-              Have an account? Sign in
-            </button>
-          )}
-          {mode === "forgot" && (
-            <button onClick={() => setMode("signin")} className="hover:text-primary">
-              Back to sign in
-            </button>
-          )}
-        </div>
+        <button
+          onClick={() => setMode((m) => (m === "signin" ? "signup" : "signin"))}
+          className="block mx-auto mt-4 text-xs text-muted-foreground hover:text-primary"
+        >
+          {mode === "signin" ? "Need an account? Create one" : "Have an account? Sign in"}
+        </button>
       </div>
     </div>
   );
