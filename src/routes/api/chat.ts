@@ -277,7 +277,7 @@ export const Route = createFileRoute("/api/chat")({
         // turns — anything older is rarely useful and just inflates latency
         // and token cost. Durable context lives in user_facts.
         const HISTORY_LIMIT = 40;
-        const [histRes, factsRes] = await Promise.all([
+        const [histRes, factsRes, lessonsRes, feedbackRes] = await Promise.all([
           supabase
             .from("messages")
             .select("role,content")
@@ -289,10 +289,23 @@ export const Route = createFileRoute("/api/chat")({
             .select("key,value")
             .order("updated_at", { ascending: false })
             .limit(50),
+          supabase
+            .from("lessons_learned")
+            .select("lesson,context")
+            .order("created_at", { ascending: false })
+            .limit(20),
+          supabase
+            .from("message_feedback")
+            .select("rating,note,created_at")
+            .eq("rating", "down")
+            .order("created_at", { ascending: false })
+            .limit(5),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         const rows = (histRes.data ?? []).slice().reverse();
         const factRows = factsRes.data;
+        const lessonRows = lessonsRes.data ?? [];
+        const feedbackRows = feedbackRes.data ?? [];
 
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
         const factsBlock =
@@ -302,10 +315,24 @@ export const Route = createFileRoute("/api/chat")({
                 .join("\n")}\nUse these naturally. If a fact is wrong, offer to update or forget it.`
             : "";
 
+        const lessonsBlock =
+          lessonRows.length > 0
+            ? `\n\n# Lessons learned (apply these automatically)\nThese are corrections and preferences captured from past conversations. Treat them as standing rules unless the user clearly overrides one.\n${lessonRows
+                .map((l) => `- ${l.lesson}${l.context ? ` (context: ${l.context})` : ""}`)
+                .join("\n")}`
+            : "";
+
+        const feedbackBlock =
+          feedbackRows.length > 0
+            ? `\n\n# Recent thumbs-down feedback\nThe user marked recent answers as unhelpful. Avoid repeating these mistakes. When relevant, silently call \`save_lesson\` to record the fix.\n${feedbackRows
+                .map((f) => `- ${f.note ? f.note : "(no note)"}`)
+                .join("\n")}`
+            : "";
+
         const userBlock = userEmail
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${userBlock}${factsBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
