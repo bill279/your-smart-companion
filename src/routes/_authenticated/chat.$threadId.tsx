@@ -524,10 +524,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       pendingContextRef.current = "";
       if (ctx) {
         try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
-        window.setTimeout(() => {
-          if (!mountedRef.current || !voiceDesiredRef.current || voiceStateRef.current !== "connected") return;
-          try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
-        }, 350);
       }
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
@@ -760,11 +756,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         conversationToken: token,
         connectionType: "webrtc",
         useWakeLock: true,
-        overrides: {
-          agent: {
-            firstMessage: " ",
-          },
-        },
+        preferHeadphonesForIosDevices: true,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
