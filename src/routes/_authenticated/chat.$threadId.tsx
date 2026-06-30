@@ -277,7 +277,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastAssistantTextRef = useRef<string>("");
   const stopRequestedRef = useRef(false);
   const sessionStartingRef = useRef(false);
-  const firstMessageOverrideRef = useRef(true);
+  const allowFirstMessageOverrideRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const [exportOpen, setExportOpen] = useState(false);
@@ -613,6 +613,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       const msg = String(e || "");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
+      if (/override.*first[_\s-]?message|first[_\s-]?message.*override/i.test(msg)) {
+        allowFirstMessageOverrideRef.current = false;
+      }
       clearVoiceConnectTimeout();
       stopVoiceKeepAlive();
       sessionStartingRef.current = false;
@@ -838,10 +841,9 @@ function ThreadView({ threadId }: { threadId: string }) {
         else setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
-      const overrides = firstMessageOverrideRef.current
+      const overrides = allowFirstMessageOverrideRef.current
         ? { agent: { firstMessage: "" } }
         : undefined;
-      firstMessageOverrideRef.current = false;
       conversation.startSession({
         signedUrl,
         connectionType: "websocket",
