@@ -13,7 +13,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentSignedUrl,
+  getElevenLabsAgentToken,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -99,6 +99,31 @@ function hidePartialTables(text: string): string {
   return out.join("\n");
 }
 
+function appendNonDuplicate(base: string, chunk: string) {
+  if (!chunk) return base;
+  if (!base) return chunk;
+  if (base.endsWith(chunk)) return base;
+  const max = Math.min(base.length, chunk.length);
+  for (let i = max; i > 0; i--) {
+    if (base.endsWith(chunk.slice(0, i))) return base + chunk.slice(i);
+  }
+  return base + chunk;
+}
+
+function normalizeVoiceText(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
+}
+
+function isNearDuplicateVoiceText(a: string, b: string) {
+  const x = normalizeVoiceText(a);
+  const y = normalizeVoiceText(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const short = x.length < y.length ? x : y;
+  const long = x.length < y.length ? y : x;
+  return short.length >= 24 && long.includes(short);
+}
+
 type SearchData = {
   threads: Array<{ id: string; title: string; updated_at: string }>;
   messages: Array<{ id: string; thread_id: string; role: string; snippet: string; created_at: string }>;
@@ -182,7 +207,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const getAgentToken = useServerFn(getElevenLabsAgentToken);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -221,15 +246,23 @@ function ThreadView({ threadId }: { threadId: string }) {
   const pendingContextRef = useRef<string>("");
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
+  const persistedVoiceAiEventsRef = useRef<Set<string>>(new Set());
   const voiceStateRef = useRef<VoiceUiState>("idle");
+  const voiceDesiredRef = useRef(false);
   const startAttemptRef = useRef(0);
   const connectTimeoutRef = useRef<number | null>(null);
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const pendingAssistantRafRef = useRef<number | null>(null);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const liveAssistantRef = useRef<string>("");
-  const liveStreamSourceRef = useRef<"none" | "part" | "alignment">("none");
+  const liveTextEventIdRef = useRef<number | null>(null);
+  const liveTextFromPartsRef = useRef(false);
+  const lastVoiceUserAtRef = useRef(0);
   const lastAssistantTextRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -342,9 +375,12 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
     window.addEventListener("unhandledrejection", handler);
     return () => {
+      mountedRef.current = false;
       window.removeEventListener("unhandledrejection", handler);
       voiceStateRef.current = "idle";
       clearVoiceConnectTimeout();
+      clearVoiceReconnectTimeout();
+      resetLiveVoiceAssistant();
       try {
         conversationRef.current?.endSession();
       } catch (err) {
@@ -352,6 +388,55 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     };
   }, []);
+
+  function clearVoiceReconnectTimeout() {
+    if (reconnectTimeoutRef.current !== null) {
+      window.clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+  }
+
+  function scheduleVoiceReconnect(delay = 700) {
+    if (!voiceDesiredRef.current) return;
+    clearVoiceReconnectTimeout();
+    const sdkStatus = conversationRef.current?.status;
+    const shouldWaitForSdk = sdkStatus === "connecting" || sdkStatus === "connected";
+    const attempts = reconnectAttemptsRef.current;
+    const backoff = Math.min(8000, delay + attempts * 1200);
+    reconnectTimeoutRef.current = window.setTimeout(() => {
+      reconnectTimeoutRef.current = null;
+      if (!mountedRef.current) return;
+      const currentStatus = conversationRef.current?.status;
+      if (currentStatus === "connecting" || currentStatus === "connected") {
+        scheduleVoiceReconnect(1200);
+        return;
+      }
+      if (voiceDesiredRef.current && voiceStateRef.current === "idle") {
+        reconnectAttemptsRef.current += 1;
+        void startVoice({ reconnect: true });
+      }
+    }, shouldWaitForSdk ? Math.max(backoff, 1500) : backoff);
+  }
+
+  function resetLiveVoiceAssistant() {
+    liveAssistantRef.current = "";
+    liveTextEventIdRef.current = null;
+    liveTextFromPartsRef.current = false;
+    if (pendingAssistantRafRef.current !== null) {
+      cancelAnimationFrame(pendingAssistantRafRef.current);
+      pendingAssistantRafRef.current = null;
+    }
+  }
+
+  function schedulePendingAssistant(text: string) {
+    const cleaned = cleanAssistantText(text);
+    if (pendingAssistantRafRef.current !== null) cancelAnimationFrame(pendingAssistantRafRef.current);
+    pendingAssistantRafRef.current = requestAnimationFrame(() => {
+      pendingAssistantRafRef.current = null;
+      if (!mountedRef.current) return;
+      setPendingAssistant(cleaned);
+    });
+  }
 
   const conversation = useConversation({
     clientTools: {
@@ -386,50 +471,55 @@ function ThreadView({ threadId }: { threadId: string }) {
       },
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
-      // Stream agent text to the chat in real time as ElevenLabs generates it.
+      if (!mountedRef.current) return;
+      // Prefer the canonical text-response stream over audio-alignment chars.
+      // The ElevenLabs SDK can emit overlapping deltas/corrections; append only
+      // non-duplicate suffixes so the UI doesn't repeat or shimmer.
       const kind = part?.type;
+      const eventId = typeof part?.event_id === "number" ? part.event_id : null;
       const chunk = part?.text ?? "";
-      if (kind === "start") {
+      if (kind === "start" || (eventId !== null && liveTextEventIdRef.current !== null && eventId !== liveTextEventIdRef.current)) {
         liveAssistantRef.current = chunk;
-        liveStreamSourceRef.current = "part";
+        liveTextEventIdRef.current = eventId;
+        liveTextFromPartsRef.current = true;
       } else if (kind === "delta") {
-        if (liveStreamSourceRef.current === "alignment") {
-          liveAssistantRef.current = chunk;
-          liveStreamSourceRef.current = "part";
-        }
-        liveAssistantRef.current += chunk;
+        liveTextFromPartsRef.current = true;
+        if (eventId !== null) liveTextEventIdRef.current = eventId;
+        liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       } else if (kind === "stop") {
-        if (chunk) liveAssistantRef.current += chunk;
+        if (chunk) liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       }
-      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
+      schedulePendingAssistant(liveAssistantRef.current);
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
+      if (!mountedRef.current) return;
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
-      // Only use audio alignment as a fallback when the agent is NOT already
-      // streaming text via onAgentChatResponsePart — otherwise we'd append
-      // the same content twice and the chat would show duplicated text.
-      if (liveStreamSourceRef.current === "part") return;
-      if (liveStreamSourceRef.current === "none") {
-        liveAssistantRef.current = "";
-        liveStreamSourceRef.current = "alignment";
-      }
-      liveAssistantRef.current += chars.join("");
-      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
+      // Alignment is a fallback only. If response parts are active, using both
+      // creates duplicated/garbled text and makes the voice feel glitchy.
+      if (liveTextFromPartsRef.current) return;
+      liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chars.join(""));
+      schedulePendingAssistant(liveAssistantRef.current);
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
+      if (!mountedRef.current) return;
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
       liveAssistantRef.current = corrected;
-      setPendingAssistant(cleanAssistantText(corrected));
+      schedulePendingAssistant(corrected);
     },
     onConnect: () => {
+      if (!mountedRef.current) return;
       clearVoiceConnectTimeout();
+      clearVoiceReconnectTimeout();
+      reconnectAttemptsRef.current = 0;
       hasConnectedVoiceRef.current = true;
+      voiceDesiredRef.current = true;
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
-      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
+      resetLiveVoiceAssistant();
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
       if (ctx) {
@@ -437,24 +527,24 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
+      if (!mountedRef.current) return;
       clearVoiceConnectTimeout();
       const wasStopping = voiceStateRef.current === "stopping";
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       pendingContextRef.current = "";
+      resetLiveVoiceAssistant();
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
+        voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
-      // If the session was previously connected and dropped for any non-error
-      // reason (typically ElevenLabs idle timeout), silently reconnect so the
-      // user stays in voice mode until they explicitly tap to stop.
-      if (hasConnectedVoiceRef.current && details?.reason !== "error") {
-        setTimeout(() => {
-          if (voiceStateRef.current === "idle") void startVoice();
-        }, 300);
+      // Keep voice mode active until the user explicitly stops it. ElevenLabs
+      // may close idle sockets; reconnect silently instead of forcing another tap.
+      if (voiceDesiredRef.current) {
+        scheduleVoiceReconnect(800);
         return;
       }
       voiceUserHasSpokenRef.current = false;
@@ -463,6 +553,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
     },
     onError: (e) => {
+      if (!mountedRef.current) return;
       const msg = String(e || "");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
@@ -470,20 +561,30 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
+      resetLiveVoiceAssistant();
       if (/quota/i.test(msg)) {
+        voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
-      // Silent auto-reconnect if we were mid-session (transient socket glitch).
-      if (hasConnectedVoiceRef.current) {
-        setTimeout(() => {
-          if (voiceStateRef.current === "idle") void startVoice();
-        }, 500);
+      // Silent auto-reconnect if the user still wants voice mode on.
+      if (voiceDesiredRef.current) {
+        scheduleVoiceReconnect(1000);
         return;
       }
       setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
     },
+    onInterruption: () => {
+      if (!mountedRef.current) return;
+      resetLiveVoiceAssistant();
+      setPendingAssistant("");
+    },
+    onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => {
+      if (!mountedRef.current) return;
+      if (mode === "listening") resetLiveVoiceAssistant();
+    },
     onMessage: async (message: { source?: string; message?: string }) => {
+      if (!mountedRef.current) return;
       const text = message?.message;
       if (!text) return;
       const voiceMessage = message as { source?: string; message?: string; event_id?: number };
@@ -499,34 +600,35 @@ function ThreadView({ threadId }: { threadId: string }) {
           // emit it as a "user" transcript. If this text closely matches what
           // the assistant just said, ignore it instead of saving a duplicate
           // user-side bubble that mirrors the assistant message.
-          const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
-          const u = norm(text);
-          const a = norm(lastAssistantTextRef.current);
-          if (u && a) {
-            const short = u.length < a.length ? u : a;
-            const long = u.length < a.length ? a : u;
-            if (short.length >= 12 && long.includes(short)) {
-              return;
-            }
-          }
+          if (isNearDuplicateVoiceText(text, lastAssistantTextRef.current)) return;
           voiceUserHasSpokenRef.current = true;
+          lastVoiceUserAtRef.current = Date.now();
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          if (!mountedRef.current) return;
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          if (!cleaned) return;
+          const persistKey = voiceMessage.event_id ? `ai:${voiceMessage.event_id}` : `ai:${normalizeVoiceText(cleaned).slice(0, 120)}`;
+          if (persistedVoiceAiEventsRef.current.has(persistKey)) return;
+          if (isNearDuplicateVoiceText(cleaned, lastAssistantTextRef.current)) return;
+          persistedVoiceAiEventsRef.current.add(persistKey);
+          if (persistedVoiceAiEventsRef.current.size > 120) {
+            persistedVoiceAiEventsRef.current = new Set(Array.from(persistedVoiceAiEventsRef.current).slice(-80));
+          }
           lastAssistantTextRef.current = cleaned;
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
           await add({ data: { threadId, role: "assistant", content: cleaned } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          if (!mountedRef.current) return;
           setPendingAssistant("");
-          liveAssistantRef.current = "";
-          liveStreamSourceRef.current = "none";
+          resetLiveVoiceAssistant();
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
@@ -556,11 +658,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   function buildVoiceContext() {
-    // Keep ElevenLabs context healthy on long threads: strip markdown noise
-    // (tables, bullets, headings) so the LLM doesn't try to read it aloud, and
-    // cap to ~6k chars + 60 turns. Overflow is the #1 cause of voice "gibberish".
-    const MAX_CHARS = 6000;
-    const MAX_TURNS = 60;
+    // Keep ElevenLabs context lean. Long hidden context makes voice slower,
+    // increases repetition, and can cause the model to read markdown/table noise.
+    const MAX_CHARS = 3000;
+    const MAX_TURNS = 24;
     const stripMd = (s: string) =>
       s
         .replace(/```[\s\S]*?```/g, "[code]")
@@ -588,8 +689,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     const rules = [
       "Behavioral rules for this session:",
       "- Do not greet or introduce yourself again.",
-      "- EXECUTIVE OUTPUT: default chat response is **Bottom line:** plus 2–4 tight bullets. No long paragraphs. No generic deeper-insights dump.",
-      "- VOICE BREVITY: keep spoken replies under 40 words and conversational. Never read out long lists, tables, or markdown syntax — summarize them out loud and say \"I've put the details in the chat.\" The full structured answer (tables, bullets) goes silently to the chat via the visual transcript.",
+      "- EXECUTIVE OUTPUT: answer like a Fortune 500 chief of staff. Default to 1 direct sentence or 2–3 tight bullets. No long paragraphs. No generic deeper-insights dump.",
+      "- VOICE BREVITY: keep spoken replies under 30 words unless the user explicitly asks for detail. Never read out long lists, tables, or markdown syntax.",
       "- NO MARKDOWN OUT LOUD: do NOT speak characters like \"asterisk\", \"pipe\", \"hash\", or read tables row by row. If you need to show structured data, mention it briefly and let the chat render it.",
       "- If asked for a table, output a GitHub-Flavored Markdown table directly in the chat, and say one short sentence summarizing it out loud.",
       "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
@@ -606,23 +707,40 @@ function ThreadView({ threadId }: { threadId: string }) {
       : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
-  async function startVoice() {
+  async function startVoice(opts: { reconnect?: boolean } = {}) {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    const sdkStatus = conversationRef.current?.status;
+    if (sdkStatus === "connecting" || sdkStatus === "connected") {
+      if (opts.reconnect) scheduleVoiceReconnect(1200);
+      return;
+    }
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
       toast.error("Voice quota exhausted — text chat still works.");
       setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       return;
     }
+    voiceDesiredRef.current = true;
+    clearVoiceReconnectTimeout();
+    resetLiveVoiceAssistant();
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
-    hasConnectedVoiceRef.current = false;
-    voiceUserHasSpokenRef.current = false;
+    if (!opts.reconnect) {
+      hasConnectedVoiceRef.current = false;
+      voiceUserHasSpokenRef.current = false;
+    }
     setVoiceState("starting");
     setVoiceError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: { ideal: 1 },
+        },
+      });
       stream.getTracks().forEach((t) => t.stop());
-      const { signedUrl } = await getAgentSignedUrl({});
+      const { token } = await getAgentToken({});
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
@@ -630,12 +748,15 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
         setVoiceState("idle");
         pendingContextRef.current = "";
-        setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
+        if (voiceDesiredRef.current) scheduleVoiceReconnect(1200);
+        else setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
       conversation.startSession({
-        signedUrl,
-        connectionType: "websocket",
+        conversationToken: token,
+        connectionType: "webrtc",
+        useWakeLock: true,
+        preferHeadphonesForIosDevices: true,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
@@ -643,20 +764,25 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceState("idle");
       pendingContextRef.current = "";
       if (/permission|notallowed/i.test(raw)) {
+        voiceDesiredRef.current = false;
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
         toast.error("Microphone blocked");
       } else if (/quota/i.test(raw)) {
+        voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       } else {
         console.warn("startVoice failed", raw);
-        setVoiceError("Voice failed to connect. Tap the mic once to try again.");
+        if (voiceDesiredRef.current && opts.reconnect) scheduleVoiceReconnect(1500);
+        else setVoiceError("Voice failed to connect. Tap the mic once to try again.");
       }
     }
   }
 
   async function stopVoice() {
+    voiceDesiredRef.current = false;
     startAttemptRef.current += 1;
     clearVoiceConnectTimeout();
+    clearVoiceReconnectTimeout();
     setVoiceState("stopping");
     pendingContextRef.current = "";
     setVoiceError(null);
@@ -667,6 +793,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     } finally {
       hasConnectedVoiceRef.current = false;
       voiceUserHasSpokenRef.current = false;
+      resetLiveVoiceAssistant();
       setVoiceState("idle");
     }
   }

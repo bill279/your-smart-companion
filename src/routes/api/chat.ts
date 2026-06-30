@@ -36,6 +36,14 @@ General style:
 - Never wrap a whole answer in a code block. Never dump raw JSON unless asked.
 - Match length to the question: a one-line question gets a one-line answer. A "deep dive" request gets the full brief.
 
+# Response budget (strict)
+- Default answer: **under 90 words**.
+- Voice-style or casual user input: **under 45 words**.
+- If the user asks for options: max **3 bullets** unless they ask for more.
+- If you need a table: keep it to the smallest useful table, usually **3–6 rows**.
+- Only exceed this when the user explicitly asks for a deep dive, report, draft, table, document, or full analysis.
+- Never include generic recap, preamble, or closing offers. Stop when the answer is useful.
+
 # What NOT to do (these break the Claude/ChatGPT feel)
 - Don't prefix every reply with "**Bottom line:**" or end with "**Next:**" — those are crutches.
 - Don't bullet a single fact. If there's only one point, write the sentence.
@@ -359,6 +367,8 @@ export const Route = createFileRoute("/api/chat")({
           model: gateway("openai/gpt-5.5"),
           system: systemWithUser,
           messages: baseMessages,
+          temperature: 0.3,
+          maxOutputTokens: 900,
           stopWhen: stepCountIs(50),
           tools: {
             web_search: tool({
