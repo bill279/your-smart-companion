@@ -278,7 +278,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastAssistantTextRef = useRef<string>("");
   const stopRequestedRef = useRef(false);
   const sessionStartingRef = useRef(false);
-  const allowFirstMessageOverrideRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const [exportOpen, setExportOpen] = useState(false);
@@ -597,9 +596,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       // be replaced by the persisted message or the reconnected stream.
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
-      if (/override.*first[_\s-]?message|first[_\s-]?message.*override/i.test(closeText)) {
-        allowFirstMessageOverrideRef.current = false;
-      }
       if (/quota/i.test(closeText)) {
         voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
@@ -621,9 +617,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       const msg = String(e || "");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
-      if (/override.*first[_\s-]?message|first[_\s-]?message.*override/i.test(msg)) {
-        allowFirstMessageOverrideRef.current = false;
-      }
       clearVoiceConnectTimeout();
       stopVoiceKeepAlive();
       sessionStartingRef.current = false;
@@ -840,16 +833,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         else setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
-      const overrides = allowFirstMessageOverrideRef.current
-        ? { agent: { firstMessage: " " } }
-        : undefined;
       conversation.startSession({
         signedUrl,
         connectionType: "websocket",
         useWakeLock: true,
         preferHeadphonesForIosDevices: true,
         inputChunkDurationMs: 25,
-        overrides,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
