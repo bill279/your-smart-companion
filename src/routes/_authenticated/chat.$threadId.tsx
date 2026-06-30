@@ -651,8 +651,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   function buildVoiceContext() {
-    const MAX_CHARS = 12000;
-    const recent = (messages ?? []).slice(-100).map(
+    const MAX_CHARS = 5000;
+    const recent = (messages ?? []).slice(-30).map(
       (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
     );
     let total = 0;
@@ -673,7 +673,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
       "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
       "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
-      "- BE CONCISE: keep spoken replies short and conversational. Avoid long monologues so the user can interject naturally.",
+      "- BE CONCISE: keep spoken replies to 1-2 short sentences and under 25 words by default. Avoid long monologues so the user can interject naturally.",
+      "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content. If uncertain, ask one concise question.",
+      "- VISUAL CONTENT: for tables, comparisons, email drafts, documents, code, or long lists, call show_in_chat with the full Markdown immediately and speak only a brief summary. Do not read long content out loud.",
       "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
       "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
