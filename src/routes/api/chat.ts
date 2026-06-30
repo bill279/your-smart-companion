@@ -430,16 +430,45 @@ export const Route = createFileRoute("/api/chat")({
             }),
             send_email: tool({
               description:
-                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves.",
+                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves. Supports optional file attachments (PDF / Word / Excel) generated from Markdown — use this for 'email me the table as a PDF', 'send this as a report', etc.",
               inputSchema: z.object({
                 to: z.string().email().describe("Recipient email address"),
                 subject: z.string().min(1).max(200),
                 body: z.string().min(1).max(20000),
                 cc: z.string().email().optional(),
+                attachments: z
+                  .array(
+                    z.object({
+                      filename: z.string().min(1).max(120).describe("File name without extension is fine; the right .pdf/.xlsx/.docx is appended automatically."),
+                      type: z.enum(["pdf", "xlsx", "docx"]),
+                      title: z.string().max(200).optional().describe("Optional document title rendered at the top of the file."),
+                      content: z.string().min(1).max(50000).describe("Markdown source of the attachment. Use GFM tables for spreadsheets/PDF tables, headings, bullet lists, paragraphs."),
+                    }),
+                  )
+                  .max(4)
+                  .optional()
+                  .describe("Optional list of generated attachments. The model produces the markdown; the server renders to PDF/XLSX/DOCX."),
               }),
-              execute: async ({ to, subject, body: emailBody, cc }) => {
+              execute: async ({ to, subject, body: emailBody, cc, attachments }) => {
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const { marked } = await import("marked");
+                const builtAttachments: Array<{ filename: string; mimeType: string; base64: string }> = [];
+                if (attachments && attachments.length > 0) {
+                  const { buildAttachment } = await import("@/lib/email-attachments.server");
+                  for (const a of attachments) {
+                    try {
+                      builtAttachments.push(await buildAttachment(a));
+                    } catch (e) {
+                      await logAction(
+                        "send_email",
+                        `Failed to build attachment ${a.filename}.${a.type}`,
+                        { filename: a.filename, type: a.type, error: String(e).slice(0, 200) },
+                        "error",
+                      );
+                      return { error: `Failed to build attachment "${a.filename}.${a.type}": ${String(e).slice(0, 160)}` };
+                    }
+                  }
+                }
                 const renderHtml = (md: string) => {
                   const inner = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
                   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -471,41 +500,79 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                            ...(cc
                              ? { ccRecipients: [{ emailAddress: { address: cc } }] }
                              : {}),
+                            ...(builtAttachments.length > 0
+                              ? {
+                                  attachments: builtAttachments.map((a) => ({
+                                    "@odata.type": "#microsoft.graph.fileAttachment",
+                                    name: a.filename,
+                                    contentType: a.mimeType,
+                                    contentBytes: a.base64,
+                                  })),
+                                }
+                              : {}),
                          },
                        }),
                      },
                    );
                    if (!r.ok) {
                      const t = await r.text();
-                     await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
+                     await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status, attachments: builtAttachments.map((a) => a.filename) }, "error");
                      return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
                    }
-                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook" });
-                   return { ok: true, provider: "outlook", to, subject };
+                    await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attachments: builtAttachments.map((a) => a.filename) });
+                    return { ok: true, provider: "outlook", to, subject, attachments: builtAttachments.map((a) => a.filename) };
                  }
                  if (process.env.GOOGLE_MAIL_API_KEY) {
-                  const boundary = `bpa_${Math.random().toString(36).slice(2)}`;
-                  const lines = [`To: ${to}`];
-                  if (cc) lines.push(`Cc: ${cc}`);
-                  lines.push(
+                  const altBoundary = `alt_${Math.random().toString(36).slice(2)}`;
+                  const mixedBoundary = `mix_${Math.random().toString(36).slice(2)}`;
+                  const useMixed = builtAttachments.length > 0;
+                  const headerLines: string[] = [`To: ${to}`];
+                  if (cc) headerLines.push(`Cc: ${cc}`);
+                  headerLines.push(
                     `Subject: ${subject}`,
                     "MIME-Version: 1.0",
-                    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+                    useMixed
+                      ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`
+                      : `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
                     "",
-                    `--${boundary}`,
+                  );
+                  const altPart = [
+                    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+                    "",
+                    `--${altBoundary}`,
                     "Content-Type: text/plain; charset=UTF-8",
                     "",
                     emailBody,
                     "",
-                    `--${boundary}`,
+                    `--${altBoundary}`,
                     "Content-Type: text/html; charset=UTF-8",
                     "",
                     renderHtml(emailBody),
                     "",
-                    `--${boundary}--`,
+                    `--${altBoundary}--`,
                     "",
-                  );
-                  const raw = Buffer.from(lines.join("\r\n"))
+                  ].join("\r\n");
+                  let bodyMime: string;
+                  if (useMixed) {
+                    const parts: string[] = [`--${mixedBoundary}`, altPart];
+                    for (const a of builtAttachments) {
+                      parts.push(
+                        `--${mixedBoundary}`,
+                        `Content-Type: ${a.mimeType}; name="${a.filename}"`,
+                        "Content-Transfer-Encoding: base64",
+                        `Content-Disposition: attachment; filename="${a.filename}"`,
+                        "",
+                        // 76-char wrap
+                        a.base64.replace(/.{76}/g, "$&\r\n"),
+                        "",
+                      );
+                    }
+                    parts.push(`--${mixedBoundary}--`, "");
+                    bodyMime = parts.join("\r\n");
+                  } else {
+                    bodyMime = altPart;
+                  }
+                  const raw = Buffer.from(headerLines.join("\r\n") + bodyMime)
                     .toString("base64")
                     .replace(/\+/g, "-")
                     .replace(/\//g, "_")
@@ -520,11 +587,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   );
                   if (!r.ok) {
                     const t = await r.text();
-                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status }, "error");
+                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status, attachments: builtAttachments.map((a) => a.filename) }, "error");
                     return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
                   }
-                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail" });
-                  return { ok: true, provider: "gmail", to, subject };
+                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail", attachments: builtAttachments.map((a) => a.filename) });
+                  return { ok: true, provider: "gmail", to, subject, attachments: builtAttachments.map((a) => a.filename) };
                 }
                 return { error: "No email provider connected." };
               },
