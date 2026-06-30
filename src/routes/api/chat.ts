@@ -417,18 +417,28 @@ export const Route = createFileRoute("/api/chat")({
               execute: async ({ url }) => {
                 const key = process.env.FIRECRAWL_API_KEY;
                 if (!key) return { error: "Web scrape not configured" };
-                const r = await fetch("https://api.firecrawl.dev/v2/scrape", {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${key}`,
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    url,
-                    formats: ["markdown"],
-                    onlyMainContent: true,
-                  }),
-                });
+                const ac = new AbortController();
+                const t = setTimeout(() => ac.abort(), 12000);
+                let r: Response;
+                try {
+                  r = await fetch("https://api.firecrawl.dev/v2/scrape", {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${key}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      url,
+                      formats: ["markdown"],
+                      onlyMainContent: true,
+                    }),
+                    signal: ac.signal,
+                  });
+                } catch {
+                  return { error: "Scrape timed out — skip this URL and try another." };
+                } finally {
+                  clearTimeout(t);
+                }
                 if (!r.ok) return { error: `Scrape failed (${r.status})` };
                 const j = (await r.json()) as {
                   data?: { markdown?: string; metadata?: { title?: string } };
@@ -436,7 +446,7 @@ export const Route = createFileRoute("/api/chat")({
                 const md = j.data?.markdown ?? "";
                 return {
                   title: j.data?.metadata?.title,
-                  markdown: md.length > 8000 ? md.slice(0, 8000) + "\n\n…[truncated]" : md,
+                  markdown: md.length > 4000 ? md.slice(0, 4000) + "\n\n…[truncated]" : md,
                 };
               },
             }),
