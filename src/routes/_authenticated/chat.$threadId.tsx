@@ -724,6 +724,17 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceUiState(next);
   }
 
+  function isVoiceBusy() {
+    const sdkStatus = conversationRef.current?.status;
+    return (
+      sessionStartingRef.current ||
+      voiceStateRef.current === "starting" ||
+      voiceStateRef.current === "connected" ||
+      sdkStatus === "connecting" ||
+      sdkStatus === "connected"
+    );
+  }
+
   function clearVoiceConnectTimeout() {
     if (connectTimeoutRef.current !== null) {
       window.clearTimeout(connectTimeoutRef.current);
@@ -782,7 +793,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   async function startVoice(opts: { reconnect?: boolean } = {}) {
-    if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    if (isVoiceBusy()) {
+      if (opts.reconnect && voiceDesiredRef.current && voiceStateRef.current !== "connected") scheduleVoiceReconnect(1500);
+      return;
+    }
     const sdkStatus = conversationRef.current?.status;
     if (sdkStatus === "connecting" || sdkStatus === "connected") {
       if (opts.reconnect) scheduleVoiceReconnect(1200);
@@ -794,8 +808,10 @@ function ThreadView({ threadId }: { threadId: string }) {
       return;
     }
     voiceDesiredRef.current = true;
+    stopRequestedRef.current = false;
+    sessionStartingRef.current = true;
     clearVoiceReconnectTimeout();
-    resetLiveVoiceAssistant();
+    if (!opts.reconnect) resetLiveVoiceAssistant();
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
     if (!opts.reconnect) {
@@ -820,20 +836,28 @@ function ThreadView({ threadId }: { threadId: string }) {
       clearVoiceConnectTimeout();
       connectTimeoutRef.current = window.setTimeout(() => {
         if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
+        sessionStartingRef.current = false;
         setVoiceState("idle");
         pendingContextRef.current = "";
         if (voiceDesiredRef.current) scheduleVoiceReconnect(1200);
         else setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
+      const overrides = firstMessageOverrideRef.current
+        ? { agent: { firstMessage: "" } }
+        : undefined;
+      firstMessageOverrideRef.current = false;
       conversation.startSession({
         signedUrl,
         connectionType: "websocket",
         useWakeLock: true,
         preferHeadphonesForIosDevices: true,
+        inputChunkDurationMs: 50,
+        overrides,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
+      sessionStartingRef.current = false;
       const raw = e instanceof Error ? e.message : "Could not start voice";
       setVoiceState("idle");
       pendingContextRef.current = "";
@@ -854,9 +878,12 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function stopVoice() {
     voiceDesiredRef.current = false;
+    stopRequestedRef.current = true;
+    sessionStartingRef.current = false;
     startAttemptRef.current += 1;
     clearVoiceConnectTimeout();
     clearVoiceReconnectTimeout();
+    stopVoiceKeepAlive();
     setVoiceState("stopping");
     pendingContextRef.current = "";
     setVoiceError(null);
