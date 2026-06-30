@@ -284,6 +284,12 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastUserSpeechAtRef = useRef<number>(0);
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
+  // Tracks whether the current voice turn is already streaming text via
+  // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
+  // bubble doesn't get doubled (chat parts + per-character audio chars),
+  // which is what caused the "looks longer for a second, then changes"
+  // flicker the user reported.
+  const chatPartsThisTurnRef = useRef<boolean>(false);
   const abortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
@@ -445,17 +451,20 @@ function ThreadView({ threadId }: { threadId: string }) {
       const chunk = part?.text ?? "";
       if (kind === "start") {
         liveAssistantRef.current = chunk;
+        chatPartsThisTurnRef.current = true;
       } else if (kind === "delta") {
         liveAssistantRef.current += chunk;
+        chatPartsThisTurnRef.current = true;
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
       }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
-      // Fallback live transcript: reveal each character as the audio chunk
-      // for it is generated. This guarantees the chat updates while the bot
-      // is speaking even when the agent does not stream text response parts.
+      // Fallback live transcript: only used when the agent isn't already
+      // streaming text via onAgentChatResponsePart for this turn. Otherwise
+      // appending here would duplicate text and cause a visible flicker.
+      if (chatPartsThisTurnRef.current) return;
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       liveAssistantRef.current += chars.join("");
