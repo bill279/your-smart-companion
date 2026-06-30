@@ -583,7 +583,13 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => {
       if (!mountedRef.current) return;
-      if (mode === "listening") resetLiveVoiceAssistant();
+      // Don't wipe the live caption when the bot stops talking — keep it on
+      // screen so the user can read it. It clears naturally when the
+      // persisted message arrives in the next refetch.
+      if (mode === "speaking") {
+        // New utterance starting — reset the streaming buffer.
+        resetLiveVoiceAssistant();
+      }
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       if (!mountedRef.current) return;
