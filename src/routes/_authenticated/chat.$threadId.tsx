@@ -827,15 +827,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState("starting");
     setVoiceError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: { ideal: 1 },
-        },
-      });
-      stream.getTracks().forEach((t) => t.stop());
       const { signedUrl } = await getAgentSignedUrl({});
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
@@ -857,7 +848,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         connectionType: "websocket",
         useWakeLock: true,
         preferHeadphonesForIosDevices: true,
-        inputChunkDurationMs: 50,
+        inputChunkDurationMs: 25,
         overrides,
       });
     } catch (e) {
