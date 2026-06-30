@@ -237,15 +237,19 @@ export const Route = createFileRoute("/api/chat")({
 
         // Generate signed URLs for any attachments on the just-sent message
         // (used as multimodal blocks for the model on this turn).
+        // Sign all attachment URLs in parallel.
+        const signedResults = await Promise.all(
+          attachments.map((a) =>
+            supabase.storage.from("chat-uploads").createSignedUrl(a.path, 60 * 60),
+          ),
+        );
         const turnAttachmentBlocks: Array<
           | { type: "image"; image: URL; mediaType: string }
           | { type: "file"; data: URL; mediaType: string; filename: string }
         > = [];
-        for (const a of attachments) {
-          const { data: signed } = await supabase.storage
-            .from("chat-uploads")
-            .createSignedUrl(a.path, 60 * 60);
-          if (!signed?.signedUrl) continue;
+        attachments.forEach((a, i) => {
+          const signed = signedResults[i]?.data;
+          if (!signed?.signedUrl) return;
           const url = new URL(signed.signedUrl);
           if (a.mimeType.startsWith("image/")) {
             turnAttachmentBlocks.push({ type: "image", image: url, mediaType: a.mimeType });
@@ -257,7 +261,7 @@ export const Route = createFileRoute("/api/chat")({
               filename: a.name,
             });
           }
-        }
+        });
 
         // Load recent history + facts in parallel. Cap history at the last 40
         // turns — anything older is rarely useful and just inflates latency
