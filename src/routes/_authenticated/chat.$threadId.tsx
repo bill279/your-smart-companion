@@ -273,6 +273,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const liveAssistantRef = useRef<string>("");
   const liveTextEventIdRef = useRef<number | null>(null);
   const liveTextFromPartsRef = useRef(false);
+  const lastTextPartAtRef = useRef(0);
   const lastVoiceUserAtRef = useRef(0);
   const lastVoiceActivityAtRef = useRef(0);
   const lastAssistantTextRef = useRef<string>("");
@@ -465,6 +466,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     liveAssistantRef.current = "";
     liveTextEventIdRef.current = null;
     liveTextFromPartsRef.current = false;
+    lastTextPartAtRef.current = 0;
     if (pendingAssistantRafRef.current !== null) {
       cancelAnimationFrame(pendingAssistantRafRef.current);
       pendingAssistantRafRef.current = null;
@@ -515,7 +517,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
       if (!mountedRef.current) return;
-      lastVoiceActivityAtRef.current = Date.now();
+      const now = Date.now();
+      lastVoiceActivityAtRef.current = now;
+      lastTextPartAtRef.current = now;
       // Prefer the canonical text-response stream over audio-alignment chars.
       // The ElevenLabs SDK can emit overlapping deltas/corrections; append only
       // non-duplicate suffixes so the UI doesn't repeat or shimmer.
@@ -545,9 +549,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       lastVoiceActivityAtRef.current = Date.now();
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
-      // Alignment is a fallback only. If response parts are active, using both
-      // creates duplicated/garbled text and makes the voice feel glitchy.
-      if (liveTextFromPartsRef.current) return;
+      // Alignment is a fallback. Prefer text-response parts, but do not ignore
+      // alignment forever: some ElevenLabs sessions emit audio chars without
+      // reliable response-part deltas, which made the chat look frozen.
+      const partStreamIsHealthy =
+        liveTextFromPartsRef.current &&
+        liveAssistantRef.current.trim().length > 0 &&
+        Date.now() - lastTextPartAtRef.current < 900;
+      if (partStreamIsHealthy) return;
       const chunk = chars.join("");
       if (isFillerVoicePrompt(chunk)) return;
       liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
@@ -840,7 +849,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         connectionType: "websocket",
         useWakeLock: true,
         preferHeadphonesForIosDevices: true,
-        inputChunkDurationMs: 25,
+        inputChunkDurationMs: 100,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
