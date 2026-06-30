@@ -284,6 +284,12 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastUserSpeechAtRef = useRef<number>(0);
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
+  // Tracks whether the current voice turn is already streaming text via
+  // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
+  // bubble doesn't get doubled (chat parts + per-character audio chars),
+  // which is what caused the "looks longer for a second, then changes"
+  // flicker the user reported.
+  const chatPartsThisTurnRef = useRef<boolean>(false);
   const abortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
@@ -445,17 +451,20 @@ function ThreadView({ threadId }: { threadId: string }) {
       const chunk = part?.text ?? "";
       if (kind === "start") {
         liveAssistantRef.current = chunk;
+        chatPartsThisTurnRef.current = true;
       } else if (kind === "delta") {
         liveAssistantRef.current += chunk;
+        chatPartsThisTurnRef.current = true;
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
       }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
-      // Fallback live transcript: reveal each character as the audio chunk
-      // for it is generated. This guarantees the chat updates while the bot
-      // is speaking even when the agent does not stream text response parts.
+      // Fallback live transcript: only used when the agent isn't already
+      // streaming text via onAgentChatResponsePart for this turn. Otherwise
+      // appending here would duplicate text and cause a visible flicker.
+      if (chatPartsThisTurnRef.current) return;
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       liveAssistantRef.current += chars.join("");
@@ -536,6 +545,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           lastUserSpeechAtRef.current = Date.now();
+          // New user turn — reset the per-turn streaming source flag so
+          // the next assistant turn can correctly pick between chat parts
+          // and audio alignment without leftover state from the prior turn.
+          chatPartsThisTurnRef.current = false;
+          liveAssistantRef.current = "";
           // Reset 90s idle auto-stop on every user utterance.
           if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
           idleTimerRef.current = window.setTimeout(() => {
@@ -559,6 +573,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingAssistant("");
           liveAssistantRef.current = "";
+          chatPartsThisTurnRef.current = false;
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
