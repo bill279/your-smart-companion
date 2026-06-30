@@ -497,6 +497,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
       }
+      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
@@ -507,11 +508,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       liveAssistantRef.current += chars.join("");
+      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
+      if (looksUnstableVoiceText(corrected)) return;
       liveAssistantRef.current = corrected;
       setPendingAssistant(cleanAssistantText(corrected));
     },
@@ -605,6 +608,12 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          if (looksUnstableVoiceText(cleaned)) {
+            setPendingAssistant("");
+            liveAssistantRef.current = "";
+            chatPartsThisTurnRef.current = false;
+            return;
+          }
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
