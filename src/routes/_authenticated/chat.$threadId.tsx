@@ -309,6 +309,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastUserSpeechAtRef = useRef<number>(0);
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
+  const prefetchedVoiceTokenRef = useRef<{ token: string; createdAt: number } | null>(null);
   // Tracks whether the current voice turn is already streaming text via
   // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
   // bubble doesn't get doubled (chat parts + per-character audio chars),
@@ -357,6 +358,19 @@ function ThreadView({ threadId }: { threadId: string }) {
       warnedQuotaRef.current = key;
     }
   }, [quota, quotaTone]);
+
+  useEffect(() => {
+    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) return;
+    let cancelled = false;
+    getAgentToken({})
+      .then(({ token }) => {
+        if (!cancelled) prefetchedVoiceTokenRef.current = { token, createdAt: Date.now() };
+      })
+      .catch((err) => console.warn("voice token prefetch failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [getAgentToken, quota]);
 
   function scrollToLatest() {
     const el = scrollRef.current;
