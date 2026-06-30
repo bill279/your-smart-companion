@@ -731,6 +731,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           },
         },
         inputChunkDurationMs: 15,
+        connectionDelay: { default: 0, android: 0, ios: 0 },
       });
     } catch (e) {
       clearVoiceConnectTimeout();
