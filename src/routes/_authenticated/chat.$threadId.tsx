@@ -1330,37 +1330,52 @@ function Bubble({
   role,
   content,
   attachments = [],
+  streaming = false,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
+  streaming?: boolean;
 }) {
   const isUser = role === "user";
   const displayContent = isUser ? content : cleanAssistantText(content);
-  return (
-    <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
-      {!isUser && (
-        <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">
-          BP
+  if (isUser) {
+    return (
+      <div className="group flex flex-col items-end gap-1">
+        <div className="max-w-[85%] min-w-0 overflow-x-auto rounded-2xl rounded-tr-md px-4 py-2.5 text-[15px] leading-relaxed bg-primary text-primary-foreground">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {attachments.map((a) => (
+                <div
+                  key={a.path}
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs bg-primary-foreground/15 text-primary-foreground"
+                >
+                  {a.mimeType.startsWith("image/") ? "🖼️" : "📎"}
+                  <span className="max-w-[180px] truncate">{a.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="whitespace-pre-wrap break-words">{displayContent}</div>
         </div>
-      )}
-      <div
-        className={`max-w-[78%] min-w-0 overflow-x-auto rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-card border border-border text-foreground"
-        }`}
-      >
+        <div className="opacity-0 group-hover:opacity-100 transition pr-1">
+          <CopyButton text={displayContent} />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="group flex gap-3">
+      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0 mt-0.5">
+        BP
+      </div>
+      <div className="flex-1 min-w-0">
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {attachments.map((a) => (
               <div
                 key={a.path}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${
-                  isUser
-                    ? "bg-primary-foreground/15 text-primary-foreground"
-                    : "bg-secondary text-foreground border border-border"
-                }`}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs bg-secondary text-foreground border border-border"
               >
                 {a.mimeType.startsWith("image/") ? "🖼️" : "📎"}
                 <span className="max-w-[180px] truncate">{a.name}</span>
@@ -1369,12 +1384,18 @@ function Bubble({
           </div>
         )}
         <div
-          className={`prose prose-sm max-w-none ${
-            isUser ? "prose-invert" : ""
-          } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
+          className="prose prose-sm max-w-none text-foreground prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-pre:rounded-md prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.9em] prose-a:text-accent prose-a:underline-offset-2 prose-blockquote:border-l-primary prose-blockquote:text-muted-foreground"
         >
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+          {streaming && (
+            <span className="inline-block w-1.5 h-4 align-[-2px] ml-0.5 bg-foreground/70 animate-pulse rounded-sm" />
+          )}
         </div>
+        {!streaming && displayContent && (
+          <div className="mt-2 opacity-0 group-hover:opacity-100 transition">
+            <CopyButton text={displayContent} />
+          </div>
+        )}
       </div>
     </div>
   );
