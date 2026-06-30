@@ -540,7 +540,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
-      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
+      // Keep output muted until the first stable assistant text/audio chunk for
+      // the turn arrives; this prevents transient/gibberish audio from leaking.
+      try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
       if (ctx) {
@@ -616,7 +618,9 @@ function ThreadView({ threadId }: { threadId: string }) {
               try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
             }
           }, 90_000);
-          try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+          // Mute assistant output at the start of each turn; stable response
+          // streaming callbacks below unmute it immediately when content looks sane.
+          try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
@@ -793,7 +797,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       // If voice is connected, route through ElevenLabs instead.
       if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
-        try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+        try { conversation.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
         conversation.sendUserMessage(content);
         setPendingUser(null);
