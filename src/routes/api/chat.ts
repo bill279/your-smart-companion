@@ -68,8 +68,23 @@ You have tools:
 - remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
 - search_knowledge_base — semantic search over the user's uploaded company documents/SOPs (PDFs, docs, notes). Use this FIRST whenever the user asks about internal/company-specific info, processes, products, pricing sheets, policies, or anything that sounds like it would live in their files. Cite the document name in the answer.
+- product_search — visual product search. Returns a list of products with **images, prices, and links**. Use this whenever the user asks to find, shop for, look up, compare, or recommend physical products (gear, gadgets, hardware, equipment, cameras, parts, tools, supplies, etc.) — anything they would buy. Prefer this over web_search for buying intent.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
+
+# Rich product results (mandatory format)
+When you call \`product_search\` and get results, you MUST render them as a product-card block so the user sees images, not just links. Output the cards block on its own lines using this exact fence:
+
+:::products
+[
+  {"title":"Product name","price":"$820.00","image":"https://...jpg","url":"https://...","source":"robotshop.com","snippet":"one-line why it fits"}
+]
+:::
+
+Rules:
+- The block contents must be valid JSON (an array of product objects). Include only products that have an \`image\` URL.
+- Put a short one-sentence lead-in before the block, and a short comparison/recommendation paragraph after it. Do NOT also repeat the products as a bulleted list or table — the cards already show them.
+- Keep 3–6 products max.
 
 # Auto-memory (silent)
 Proactively call \`remember_fact\` — without being asked, without announcing it — whenever the user shares a stable, reusable fact about themselves, their work, or their preferences. Examples worth remembering:
@@ -405,6 +420,72 @@ export const Route = createFileRoute("/api/chat")({
                   title: j.data?.metadata?.title,
                   markdown: md.length > 8000 ? md.slice(0, 8000) + "\n\n…[truncated]" : md,
                 };
+              },
+            }),
+            product_search: tool({
+              description:
+                "Visual product search. Returns products with title, price, image, url, and source. Use whenever the user asks to find, shop for, compare, look up, or recommend buyable items (gear, hardware, electronics, equipment, supplies, parts, tools, etc.). Always render the results as the :::products card block.",
+              inputSchema: z.object({
+                query: z.string().describe("Natural product query, e.g. 'best stereo vision cameras for industrial robotics'"),
+                limit: z.number().int().min(1).max(8).optional(),
+              }),
+              execute: async ({ query, limit }) => {
+                const key = process.env.FIRECRAWL_API_KEY;
+                if (!key) return { error: "Product search not configured" };
+                const n = limit ?? 5;
+                const r = await fetch("https://api.firecrawl.dev/v2/search", {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${key}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    query: `${query} buy price specs`,
+                    limit: n,
+                    scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
+                  }),
+                });
+                if (!r.ok) return { error: `Product search failed (${r.status})` };
+                const j = (await r.json()) as {
+                  data?:
+                    | Array<{
+                        title?: string;
+                        url?: string;
+                        description?: string;
+                        markdown?: string;
+                        metadata?: Record<string, unknown>;
+                      }>
+                    | { web?: Array<{ title?: string; url?: string; description?: string; markdown?: string; metadata?: Record<string, unknown> }> };
+                };
+                const arr = Array.isArray(j.data) ? j.data : j.data?.web ?? [];
+                const priceRe = /(?:US\$|CA\$|USD\s?|CAD\s?|\$|£|€)\s?\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?/;
+                const pickImage = (meta: Record<string, unknown> | undefined): string | undefined => {
+                  if (!meta) return undefined;
+                  const keys = ["ogImage", "og:image", "twitterImage", "twitter:image", "image"];
+                  for (const k of keys) {
+                    const v = meta[k];
+                    if (typeof v === "string" && /^https?:\/\//.test(v)) return v;
+                    if (Array.isArray(v) && typeof v[0] === "string" && /^https?:\/\//.test(v[0] as string)) return v[0] as string;
+                  }
+                  return undefined;
+                };
+                const products = arr
+                  .map((x) => {
+                    const text = x.markdown ?? x.description ?? "";
+                    const priceMatch = text.match(priceRe);
+                    let source: string | undefined;
+                    try { source = x.url ? new URL(x.url).hostname.replace(/^www\./, "") : undefined; } catch { /* noop */ }
+                    return {
+                      title: x.title || (x.metadata?.title as string | undefined) || source || "Untitled",
+                      url: x.url,
+                      image: pickImage(x.metadata),
+                      price: priceMatch?.[0],
+                      source,
+                      snippet: (x.description || "").slice(0, 160),
+                    };
+                  })
+                  .filter((p) => p.url && p.image);
+                return { products: products.slice(0, n) };
               },
             }),
             send_email: tool({

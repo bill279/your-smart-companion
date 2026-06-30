@@ -1403,6 +1403,7 @@ function Bubble({
   const displayContent = isUser
     ? content
     : hidePartialTables(cleanAssistantText(content));
+  const segments = isUser ? [{ kind: "md" as const, text: displayContent }] : splitProductBlocks(displayContent);
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   async function copyText() {
@@ -1451,15 +1452,22 @@ function Bubble({
             isUser ? "prose-invert" : ""
           } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
         >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-            components={{
-              pre: ({ children, ...props }) => <CodeBlock {...props}>{children}</CodeBlock>,
-            }}
-          >
-            {displayContent}
-          </ReactMarkdown>
+          {segments.map((seg, i) =>
+            seg.kind === "products" ? (
+              <ProductCards key={i} products={seg.products} />
+            ) : (
+              <ReactMarkdown
+                key={i}
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+                components={{
+                  pre: ({ children, ...props }) => <CodeBlock {...props}>{children}</CodeBlock>,
+                }}
+              >
+                {seg.text}
+              </ReactMarkdown>
+            )
+          )}
         </div>
       </div>
         {/* Hover actions */}
@@ -1640,6 +1648,81 @@ function FollowUpActions({ onPick }: { onPick: (prompt: string) => void }) {
           {f.icon}
           {f.label}
         </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------- Product cards ----------
+type Product = {
+  title: string;
+  url: string;
+  image?: string;
+  price?: string;
+  source?: string;
+  snippet?: string;
+};
+
+type Segment =
+  | { kind: "md"; text: string }
+  | { kind: "products"; products: Product[] };
+
+function splitProductBlocks(text: string): Segment[] {
+  if (!text) return [{ kind: "md", text: "" }];
+  const re = /:::products\s*([\s\S]*?):::/g;
+  const out: Segment[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push({ kind: "md", text: text.slice(last, m.index) });
+    let products: Product[] = [];
+    try {
+      const parsed = JSON.parse(m[1].trim());
+      if (Array.isArray(parsed)) products = parsed.filter((p) => p && p.title && p.url);
+    } catch {
+      // partial/streaming — skip until valid
+    }
+    if (products.length) out.push({ kind: "products", products });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ kind: "md", text: text.slice(last) });
+  if (out.length === 0) out.push({ kind: "md", text });
+  return out;
+}
+
+function ProductCards({ products }: { products: Product[] }) {
+  return (
+    <div className="not-prose my-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {products.map((p, i) => (
+        <a
+          key={i}
+          href={p.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex flex-col rounded-xl border border-border bg-card overflow-hidden hover:border-accent hover:shadow-md transition"
+        >
+          {p.image ? (
+            <div className="aspect-square w-full bg-secondary overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={p.image}
+                alt={p.title}
+                loading="lazy"
+                className="w-full h-full object-contain group-hover:scale-[1.02] transition"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+            </div>
+          ) : (
+            <div className="aspect-square w-full bg-secondary" />
+          )}
+          <div className="p-2.5 flex flex-col gap-1">
+            <div className="text-[13px] font-medium text-foreground line-clamp-2 leading-snug">{p.title}</div>
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              {p.price ? <span className="font-semibold text-foreground">{p.price}</span> : <span />}
+              {p.source && <span className="truncate ml-2">{p.source}</span>}
+            </div>
+          </div>
+        </a>
       ))}
     </div>
   );
