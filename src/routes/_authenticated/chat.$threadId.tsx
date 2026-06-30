@@ -304,6 +304,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   const voiceStateRef = useRef<VoiceUiState>("idle");
   const startAttemptRef = useRef(0);
   const connectTimeoutRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const wantsVoiceModeRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const lastUserSpeechAtRef = useRef<number>(0);
@@ -423,6 +426,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       window.removeEventListener("unhandledrejection", handler);
       voiceStateRef.current = "idle";
       clearVoiceConnectTimeout();
+      clearVoiceReconnectTimer();
       try {
         conversationRef.current?.endSession();
       } catch (err) {
@@ -536,7 +540,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onConnect: () => {
       clearVoiceConnectTimeout();
+      clearVoiceReconnectTimer();
+      reconnectAttemptsRef.current = 0;
       hasConnectedVoiceRef.current = true;
+      wantsVoiceModeRef.current = true;
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
@@ -559,26 +566,19 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
+        wantsVoiceModeRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
-      // If the session was previously connected and dropped for any non-error
-      // reason (typically ElevenLabs idle timeout), silently reconnect so the
-      // user stays in voice mode until they explicitly tap to stop.
-      if (hasConnectedVoiceRef.current && details?.reason !== "error") {
-        // Only auto-reconnect if the user actually spoke in the last 60s.
-        // Otherwise the session was idle and we'd just burn ElevenLabs credits.
-        const recentlyActive = Date.now() - lastUserSpeechAtRef.current < 60_000;
-        if (recentlyActive) {
-          setTimeout(() => {
-            if (voiceStateRef.current === "idle") void startVoice();
-          }, 300);
-          return;
-        }
+      // Voice mode is intentionally persistent: if ElevenLabs drops the
+      // transport, reconnect automatically until the user taps the mic to stop.
+      if (wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
+        scheduleVoiceReconnect(closeText);
+        return;
       }
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
-        setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
+        setVoiceError(closeText || "Voice disconnected. Reconnecting automatically…");
       }
     },
     onError: (e) => {
@@ -589,7 +589,17 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      setVoiceError(/quota/i.test(msg) ? "ElevenLabs voice quota is exhausted. Text chat still works." : msg || "Voice failed to connect. Tap the mic once to try again.");
+      if (/quota/i.test(msg)) {
+        wantsVoiceModeRef.current = false;
+        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+      } else if (/permission|notallowed/i.test(msg)) {
+        wantsVoiceModeRef.current = false;
+        setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
+      } else if (wantsVoiceModeRef.current) {
+        scheduleVoiceReconnect(msg);
+      } else {
+        setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
+      }
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       const text = message?.message;
@@ -610,14 +620,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           // and audio alignment without leftover state from the prior turn.
           chatPartsThisTurnRef.current = false;
           liveAssistantRef.current = "";
-          // Reset 90s idle auto-stop on every user utterance.
-          if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
-          idleTimerRef.current = window.setTimeout(() => {
-            if (voiceStateRef.current === "connected") {
-              setVoiceError("Voice paused after 90s of silence. Tap the mic to resume.");
-              try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
-            }
-          }, 90_000);
           // Mute assistant output at the start of each turn; stable response
           // streaming callbacks below unmute it immediately when content looks sane.
           try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
@@ -672,6 +674,41 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
   }
 
+  function clearVoiceReconnectTimer() {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }
+
+  function scheduleVoiceReconnect(reason?: string) {
+    if (!wantsVoiceModeRef.current) return;
+    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
+      wantsVoiceModeRef.current = false;
+      setVoiceState("idle");
+      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+      return;
+    }
+    if (/permission|notallowed/i.test(reason ?? "")) {
+      wantsVoiceModeRef.current = false;
+      setVoiceState("idle");
+      setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
+      return;
+    }
+    if (reconnectTimerRef.current !== null || voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    const attempt = reconnectAttemptsRef.current + 1;
+    reconnectAttemptsRef.current = attempt;
+    const delay = Math.min(500 * 2 ** Math.min(attempt - 1, 4), 8000);
+    setVoiceState("starting");
+    setVoiceError(attempt > 2 ? "Voice connection is unstable — reconnecting automatically…" : null);
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (!wantsVoiceModeRef.current || voiceStateRef.current === "connected") return;
+      setVoiceState("idle");
+      void startVoice({ automaticReconnect: true });
+    }, delay);
+  }
+
   function buildVoiceContext() {
     const MAX_CHARS = 5000;
     const recent = (messages ?? []).slice(-30).map(
@@ -707,20 +744,33 @@ function ThreadView({ threadId }: { threadId: string }) {
       : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
-  async function startVoice() {
+  async function startVoice(options: { automaticReconnect?: boolean } = {}) {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
+      wantsVoiceModeRef.current = false;
       toast.error("Voice quota exhausted — text chat still works.");
       setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       return;
     }
+    if (!options.automaticReconnect) {
+      wantsVoiceModeRef.current = true;
+      reconnectAttemptsRef.current = 0;
+    }
+    clearVoiceReconnectTimer();
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
-    hasConnectedVoiceRef.current = false;
+    if (!options.automaticReconnect) hasConnectedVoiceRef.current = false;
     voiceUserHasSpokenRef.current = false;
     setVoiceState("starting");
     setVoiceError(null);
     try {
+      // Request mic access immediately on a manual tap so browser gesture rules
+      // don't block the SDK after async token fetching. Auto-reconnect relies on
+      // the already-granted permission and avoids prompting again.
+      if (!options.automaticReconnect) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      }
       const cached = prefetchedVoiceTokenRef.current;
       const token = cached && Date.now() - cached.createdAt < 45_000
         ? cached.token
@@ -733,10 +783,14 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
         setVoiceState("idle");
         pendingContextRef.current = "";
-        setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
+        if (wantsVoiceModeRef.current) {
+          scheduleVoiceReconnect("connect timeout");
+        } else {
+          setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
+        }
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 10000);
-      conversation.startSession({
+      await conversation.startSession({
         conversationToken: token,
         connectionType: "webrtc",
         overrides: {
@@ -761,10 +815,15 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceState("idle");
       pendingContextRef.current = "";
       if (/permission|notallowed/i.test(raw)) {
+        wantsVoiceModeRef.current = false;
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
         toast.error("Microphone blocked");
       } else if (/quota/i.test(raw)) {
+        wantsVoiceModeRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+      } else if (wantsVoiceModeRef.current) {
+        console.warn("startVoice failed; retrying", raw);
+        scheduleVoiceReconnect(raw);
       } else {
         console.warn("startVoice failed", raw);
         setVoiceError("Voice failed to connect. Tap the mic once to try again.");
@@ -773,6 +832,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   async function stopVoice() {
+    wantsVoiceModeRef.current = false;
+    clearVoiceReconnectTimer();
     startAttemptRef.current += 1;
     clearVoiceConnectTimeout();
     setVoiceState("stopping");
