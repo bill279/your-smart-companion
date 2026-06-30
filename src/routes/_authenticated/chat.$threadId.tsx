@@ -238,6 +238,28 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const messages = messagesQ.data ?? [];
 
+  // Auto-title: when a thread is still "New conversation" and the user has
+  // sent at least one message, derive a short title from the first user
+  // message so the sidebar reads like ChatGPT.
+  const renameMut = useMutation({
+    mutationFn: async (vars: { id: string; title: string }) =>
+      rename({ data: vars }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["threads"] }),
+  });
+  useEffect(() => {
+    if (!threads.data || messages.length === 0) return;
+    const t = threads.data.find((x) => x.id === threadId);
+    if (!t) return;
+    const current = cleanThreadTitle(t.title);
+    if (current !== "New conversation") return;
+    const firstUser = messages.find((m) => m.role === "user");
+    if (!firstUser?.content?.trim()) return;
+    const short = firstUser.content.trim().split(/\s+/).slice(0, 7).join(" ");
+    const title = short.length > 60 ? short.slice(0, 57) + "…" : short;
+    if (title && title !== current) renameMut.mutate({ id: threadId, title });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, messages.length, threads.data]);
+
   const voiceQuotaFn = useServerFn(getVoiceQuota);
   const voiceQuotaQ = useQuery({
     queryKey: ["voiceQuota"],
