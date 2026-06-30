@@ -13,7 +13,6 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentToken,
   getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
@@ -43,12 +42,13 @@ const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automatio
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
-type VoiceUiState = "idle" | "starting" | "connected" | "stopping";
+type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
 
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
     .replace(/^\s*Hello there!\s*I'm Alex[\s\S]*?today\??\s*/i, "")
+    .replace(/^\s*(?:I(?:'m| am)\s+listening|Listening|Go ahead)\.?\s*/i, "")
     .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BPA_INTRO, "")
@@ -123,6 +123,18 @@ function isNearDuplicateVoiceText(a: string, b: string) {
   const short = x.length < y.length ? x : y;
   const long = x.length < y.length ? y : x;
   return short.length >= 24 && long.includes(short);
+}
+
+function isFillerVoicePrompt(text: string) {
+  const normalized = normalizeVoiceText(text);
+  return (
+    normalized === "im listening" ||
+    normalized === "i am listening" ||
+    normalized === "listening" ||
+    normalized === "go ahead" ||
+    normalized === "im here" ||
+    normalized === "i am here"
+  );
 }
 
 type SearchData = {
@@ -208,7 +220,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentToken = useServerFn(getElevenLabsAgentToken);
   const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
@@ -255,6 +266,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const connectTimeoutRef = useRef<number | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const keepAliveIntervalRef = useRef<number | null>(null);
   const pendingAssistantRafRef = useRef<number | null>(null);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
@@ -262,7 +274,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const liveTextEventIdRef = useRef<number | null>(null);
   const liveTextFromPartsRef = useRef(false);
   const lastVoiceUserAtRef = useRef(0);
+  const lastVoiceActivityAtRef = useRef(0);
   const lastAssistantTextRef = useRef<string>("");
+  const stopRequestedRef = useRef(false);
+  const sessionStartingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const [exportOpen, setExportOpen] = useState(false);
@@ -382,6 +397,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       clearVoiceConnectTimeout();
       clearVoiceReconnectTimeout();
+      stopVoiceKeepAlive();
       resetLiveVoiceAssistant();
       try {
         conversationRef.current?.endSession();
@@ -398,9 +414,34 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
   }
 
+  function stopVoiceKeepAlive() {
+    if (keepAliveIntervalRef.current !== null) {
+      window.clearInterval(keepAliveIntervalRef.current);
+      keepAliveIntervalRef.current = null;
+    }
+  }
+
+  function startVoiceKeepAlive() {
+    stopVoiceKeepAlive();
+    lastVoiceActivityAtRef.current = Date.now();
+    keepAliveIntervalRef.current = window.setInterval(() => {
+      if (!voiceDesiredRef.current || voiceStateRef.current !== "connected") return;
+      try {
+        // ElevenLabs sockets can close during silence. This lightweight activity
+        // ping keeps the session alive without prompting the agent to speak.
+        conversationRef.current?.sendUserActivity();
+      } catch (err) {
+        console.warn("voice keepalive failed", err);
+      }
+    }, 15_000);
+  }
+
   function scheduleVoiceReconnect(delay = 700) {
     if (!voiceDesiredRef.current) return;
     clearVoiceReconnectTimeout();
+    if (voiceStateRef.current === "idle") {
+      setVoiceState("reconnecting");
+    }
     const sdkStatus = conversationRef.current?.status;
     const shouldWaitForSdk = sdkStatus === "connecting" || sdkStatus === "connected";
     const attempts = reconnectAttemptsRef.current;
@@ -413,7 +454,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         scheduleVoiceReconnect(1200);
         return;
       }
-      if (voiceDesiredRef.current && voiceStateRef.current === "idle") {
+      if (voiceDesiredRef.current && (voiceStateRef.current === "idle" || voiceStateRef.current === "reconnecting")) {
         reconnectAttemptsRef.current += 1;
         void startVoice({ reconnect: true });
       }
@@ -474,12 +515,14 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
       if (!mountedRef.current) return;
+      lastVoiceActivityAtRef.current = Date.now();
       // Prefer the canonical text-response stream over audio-alignment chars.
       // The ElevenLabs SDK can emit overlapping deltas/corrections; append only
       // non-duplicate suffixes so the UI doesn't repeat or shimmer.
       const kind = part?.type;
       const eventId = typeof part?.event_id === "number" ? part.event_id : null;
       const chunk = part?.text ?? "";
+      if (isFillerVoicePrompt(chunk)) return;
       if (kind === "start" || (eventId !== null && liveTextEventIdRef.current !== null && eventId !== liveTextEventIdRef.current)) {
         liveAssistantRef.current = chunk;
         liveTextEventIdRef.current = eventId;
@@ -490,23 +533,31 @@ function ThreadView({ threadId }: { threadId: string }) {
         liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
+      } else if (chunk) {
+        liveTextFromPartsRef.current = true;
+        if (eventId !== null) liveTextEventIdRef.current = eventId;
+        liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       }
       schedulePendingAssistant(liveAssistantRef.current);
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
       if (!mountedRef.current) return;
+      lastVoiceActivityAtRef.current = Date.now();
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       // Alignment is a fallback only. If response parts are active, using both
       // creates duplicated/garbled text and makes the voice feel glitchy.
       if (liveTextFromPartsRef.current) return;
-      liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chars.join(""));
+      const chunk = chars.join("");
+      if (isFillerVoicePrompt(chunk)) return;
+      liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       schedulePendingAssistant(liveAssistantRef.current);
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
       if (!mountedRef.current) return;
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
+      if (isFillerVoicePrompt(corrected)) return;
       liveAssistantRef.current = corrected;
       schedulePendingAssistant(corrected);
     },
@@ -517,10 +568,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       reconnectAttemptsRef.current = 0;
       hasConnectedVoiceRef.current = true;
       voiceDesiredRef.current = true;
+      stopRequestedRef.current = false;
+      sessionStartingRef.current = false;
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
       resetLiveVoiceAssistant();
+      startVoiceKeepAlive();
       try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
@@ -530,12 +584,16 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
       if (!mountedRef.current) return;
+      console.warn("voice disconnected", details);
       clearVoiceConnectTimeout();
-      const wasStopping = voiceStateRef.current === "stopping";
+      stopVoiceKeepAlive();
+      sessionStartingRef.current = false;
+      const wasStopping = voiceStateRef.current === "stopping" || stopRequestedRef.current;
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       pendingContextRef.current = "";
-      resetLiveVoiceAssistant();
+      // Keep the live caption visible if the socket drops mid-answer; it will
+      // be replaced by the persisted message or the reconnected stream.
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
@@ -560,10 +618,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
       clearVoiceConnectTimeout();
+      stopVoiceKeepAlive();
+      sessionStartingRef.current = false;
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      resetLiveVoiceAssistant();
+      // Do not wipe the live caption here; a transient socket error should not
+      // make the answer disappear from the chat.
       if (/quota/i.test(msg)) {
         voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
@@ -583,6 +644,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => {
       if (!mountedRef.current) return;
+      lastVoiceActivityAtRef.current = Date.now();
       // Don't wipe the live caption when the bot stops talking — keep it on
       // screen so the user can read it. It clears naturally when the
       // persisted message arrives in the next refetch.
@@ -591,19 +653,21 @@ function ThreadView({ threadId }: { threadId: string }) {
         resetLiveVoiceAssistant();
       }
     },
-    onMessage: async (message: { source?: string; message?: string }) => {
+    onMessage: async (message: { source?: string; role?: "user" | "agent"; message?: string; event_id?: number }) => {
       if (!mountedRef.current) return;
       const text = message?.message;
       if (!text) return;
-      const voiceMessage = message as { source?: string; message?: string; event_id?: number };
-      const eventKey = `${voiceMessage.source ?? "unknown"}:${voiceMessage.event_id ?? text}`;
+      if (isFillerVoicePrompt(text)) return;
+      lastVoiceActivityAtRef.current = Date.now();
+      const role = message.role === "agent" || message.source === "ai" ? "assistant" : message.role === "user" || message.source === "user" ? "user" : "unknown";
+      const eventKey = `${role}:${message.event_id ?? text}`;
       if (seenVoiceEventsRef.current.has(eventKey)) return;
       seenVoiceEventsRef.current.add(eventKey);
       if (seenVoiceEventsRef.current.size > 250) {
         seenVoiceEventsRef.current = new Set(Array.from(seenVoiceEventsRef.current).slice(-120));
       }
       try {
-        if (message.source === "user") {
+        if (role === "user") {
           // Drop echo: if the mic picks up the bot's own audio, ElevenLabs will
           // emit it as a "user" transcript. If this text closely matches what
           // the assistant just said, ignore it instead of saving a duplicate
@@ -618,10 +682,11 @@ function ThreadView({ threadId }: { threadId: string }) {
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           if (!mountedRef.current) return;
           setPendingUser(null);
-        } else if (message.source === "ai") {
+        } else if (role === "assistant") {
           const cleaned = cleanAssistantText(text);
           if (!cleaned) return;
-          const persistKey = voiceMessage.event_id ? `ai:${voiceMessage.event_id}` : `ai:${normalizeVoiceText(cleaned).slice(0, 120)}`;
+          if (isFillerVoicePrompt(cleaned)) return;
+          const persistKey = message.event_id ? `ai:${message.event_id}` : `ai:${normalizeVoiceText(cleaned).slice(0, 120)}`;
           if (persistedVoiceAiEventsRef.current.has(persistKey)) return;
           if (isNearDuplicateVoiceText(cleaned, lastAssistantTextRef.current)) return;
           persistedVoiceAiEventsRef.current.add(persistKey);
@@ -661,6 +726,17 @@ function ThreadView({ threadId }: { threadId: string }) {
   function setVoiceState(next: VoiceUiState) {
     voiceStateRef.current = next;
     setVoiceUiState(next);
+  }
+
+  function isVoiceBusy() {
+    const sdkStatus = conversationRef.current?.status;
+    return (
+      sessionStartingRef.current ||
+      voiceStateRef.current === "starting" ||
+      voiceStateRef.current === "connected" ||
+      sdkStatus === "connecting" ||
+      sdkStatus === "connected"
+    );
   }
 
   function clearVoiceConnectTimeout() {
@@ -721,10 +797,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   async function startVoice(opts: { reconnect?: boolean } = {}) {
-    if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
-    const sdkStatus = conversationRef.current?.status;
-    if (sdkStatus === "connecting" || sdkStatus === "connected") {
-      if (opts.reconnect) scheduleVoiceReconnect(1200);
+    if (isVoiceBusy()) {
+      if (opts.reconnect && voiceDesiredRef.current && voiceStateRef.current !== "connected") scheduleVoiceReconnect(1500);
       return;
     }
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
@@ -733,8 +807,10 @@ function ThreadView({ threadId }: { threadId: string }) {
       return;
     }
     voiceDesiredRef.current = true;
+    stopRequestedRef.current = false;
+    sessionStartingRef.current = true;
     clearVoiceReconnectTimeout();
-    resetLiveVoiceAssistant();
+    if (!opts.reconnect) resetLiveVoiceAssistant();
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
     if (!opts.reconnect) {
@@ -744,21 +820,13 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState("starting");
     setVoiceError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: { ideal: 1 },
-        },
-      });
-      stream.getTracks().forEach((t) => t.stop());
       const { signedUrl } = await getAgentSignedUrl({});
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
       connectTimeoutRef.current = window.setTimeout(() => {
         if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
+        sessionStartingRef.current = false;
         setVoiceState("idle");
         pendingContextRef.current = "";
         if (voiceDesiredRef.current) scheduleVoiceReconnect(1200);
@@ -770,9 +838,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         connectionType: "websocket",
         useWakeLock: true,
         preferHeadphonesForIosDevices: true,
+        inputChunkDurationMs: 25,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
+      sessionStartingRef.current = false;
       const raw = e instanceof Error ? e.message : "Could not start voice";
       setVoiceState("idle");
       pendingContextRef.current = "";
@@ -793,9 +863,12 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function stopVoice() {
     voiceDesiredRef.current = false;
+    stopRequestedRef.current = true;
+    sessionStartingRef.current = false;
     startAttemptRef.current += 1;
     clearVoiceConnectTimeout();
     clearVoiceReconnectTimeout();
+    stopVoiceKeepAlive();
     setVoiceState("stopping");
     pendingContextRef.current = "";
     setVoiceError(null);
@@ -1130,8 +1203,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceActive = voiceUiState === "connected" || (voiceUiState === "starting" && conversation.status !== "error");
-  const voiceConnecting = voiceUiState === "starting";
+  const voiceActive = voiceUiState === "connected" || voiceUiState === "reconnecting" || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceConnecting = voiceUiState === "starting" || voiceUiState === "reconnecting";
 
   return (
     <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
