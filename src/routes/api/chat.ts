@@ -259,22 +259,28 @@ export const Route = createFileRoute("/api/chat")({
           }
         }
 
-        // Load full history
-        const { data: rows, error: histErr } = await supabase
-          .from("messages")
-          .select("role,content")
-          .eq("thread_id", body.threadId)
-          .order("created_at", { ascending: true });
-        if (histErr) return new Response(histErr.message, { status: 400 });
+        // Load recent history + facts in parallel. Cap history at the last 40
+        // turns — anything older is rarely useful and just inflates latency
+        // and token cost. Durable context lives in user_facts.
+        const HISTORY_LIMIT = 40;
+        const [histRes, factsRes] = await Promise.all([
+          supabase
+            .from("messages")
+            .select("role,content")
+            .eq("thread_id", body.threadId)
+            .order("created_at", { ascending: false })
+            .limit(HISTORY_LIMIT),
+          supabase
+            .from("user_facts")
+            .select("key,value")
+            .order("updated_at", { ascending: false })
+            .limit(50),
+        ]);
+        if (histRes.error) return new Response(histRes.error.message, { status: 400 });
+        const rows = (histRes.data ?? []).slice().reverse();
+        const factRows = factsRes.data;
 
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
-
-        // Load durable user facts to inject into the system prompt
-        const { data: factRows } = await supabase
-          .from("user_facts")
-          .select("key,value")
-          .order("updated_at", { ascending: false })
-          .limit(50);
         const factsBlock =
           factRows && factRows.length > 0
             ? `\n\n# Remembered facts about this user\n${factRows
