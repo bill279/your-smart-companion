@@ -147,7 +147,17 @@ Efficiency first — minimize tool calls and latency.
 - Never scrape more than one URL per turn unless the user asked for an in-depth report.
 - Do NOT ask "would you like me to refine / broaden / delve deeper?" — just deliver the best answer you have.
 - For "top X" / "best X" / comparisons: give a ranked list or compact markdown table with a one-line "why it fits" each. Cite sources only when you actually searched.
-- Never end a research answer with "Would you like me to…". End with the result.`;
+- Never end a research answer with "Would you like me to…". End with the result.
+
+# No narration of intent (CRITICAL — wastes voice credits)
+- NEVER say "To provide X, I need to…", "I will perform another search…", "Let me gather…", "I'll look into…", "Give me a moment…", or any variant that describes what you are *about* to do.
+- Just do it. Run the tool calls silently, then return ONE final answer with the results.
+- If a task needs multiple searches/scrapes, chain them in the same turn without sending an interim "I'm going to…" message.
+- Voice mode especially: a status message costs real money and confuses the user. Only speak the final result.
+
+# No unsolicited follow-ups
+- After you finish a response, STOP. Do not send a second message like "Is there anything else I can help with?" or "I'm sorry, I didn't catch that" unless the user has sent a new message.
+- Never re-prompt the user while they are reading or thinking. One user turn = one assistant response.`;
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
