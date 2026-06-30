@@ -384,7 +384,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     clearVoiceReconnectTimeout();
     reconnectTimeoutRef.current = window.setTimeout(() => {
       reconnectTimeoutRef.current = null;
-      if (voiceDesiredRef.current && voiceStateRef.current === "idle") void startVoice(true);
+      if (voiceDesiredRef.current && voiceStateRef.current === "idle") void startVoice({ reconnect: true });
     }, delay);
   }
 
@@ -578,8 +578,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           await add({ data: { threadId, role: "assistant", content: cleaned } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingAssistant("");
-          liveAssistantRef.current = "";
-          liveStreamSourceRef.current = "none";
+          resetLiveVoiceAssistant();
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
