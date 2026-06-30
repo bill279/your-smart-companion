@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2 } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check } from "lucide-react";
 import { exportToPdf, exportToDocx, exportToXlsx, exportToCsv } from "@/lib/chat-export";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
@@ -57,6 +57,48 @@ function cleanAssistantText(text: string) {
 function cleanThreadTitle(title: string) {
   const cleaned = cleanAssistantText(title);
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
+}
+
+function groupThreadsByDate<T extends { updated_at: string }>(items: T[]): Array<{ label: string; items: T[] }> {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+  const startOf7 = startOfToday - 7 * 24 * 60 * 60 * 1000;
+  const startOf30 = startOfToday - 30 * 24 * 60 * 60 * 1000;
+  const buckets: Record<string, T[]> = { Today: [], Yesterday: [], "Previous 7 days": [], "Previous 30 days": [], Older: [] };
+  for (const it of items) {
+    const t = new Date(it.updated_at).getTime();
+    if (t >= startOfToday) buckets.Today.push(it);
+    else if (t >= startOfYesterday) buckets.Yesterday.push(it);
+    else if (t >= startOf7) buckets["Previous 7 days"].push(it);
+    else if (t >= startOf30) buckets["Previous 30 days"].push(it);
+    else buckets.Older.push(it);
+  }
+  return Object.entries(buckets)
+    .filter(([, arr]) => arr.length > 0)
+    .map(([label, arr]) => ({ label, items: arr }));
+}
+
+function CopyButton({ text, className = "" }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {}
+      }}
+      title={copied ? "Copied" : "Copy"}
+      className={`inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition ${className}`}
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+      <span>{copied ? "Copied" : "Copy"}</span>
+    </button>
+  );
 }
 
 type SearchData = {
@@ -887,41 +929,48 @@ function ThreadView({ threadId }: { threadId: string }) {
               }}
             />
           ) : (
-            threads.data?.map((t) => {
-              const active = t.id === threadId;
-              return (
-                <div
-                  key={t.id}
-                  className={`flex items-center gap-1 rounded-md pr-1 text-sm ${
-                    active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
-                  }`}
-                >
-                  <Link
-                    to="/chat/$threadId"
-                    params={{ threadId: t.id }}
-                    className="flex-1 truncate px-2 py-1.5"
-                    onClick={() => setSidebarOpen(false)}
-                  >
-                    {cleanThreadTitle(t.title)}
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const name = cleanThreadTitle(t.title);
-                      if (confirm(`Delete "${name}"? This cannot be undone.`)) {
-                        delMut.mutate(t.id);
-                      }
-                    }}
-                    aria-label="Delete chat"
-                    className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+            groupThreadsByDate(threads.data ?? []).map((group) => (
+              <div key={group.label} className="mb-3">
+                <div className="px-2 pb-1 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
+                  {group.label}
                 </div>
-              );
-            })
+                {group.items.map((t) => {
+                  const active = t.id === threadId;
+                  return (
+                    <div
+                      key={t.id}
+                      className={`group flex items-center gap-1 rounded-md pr-1 text-sm ${
+                        active ? "bg-secondary text-foreground" : "hover:bg-secondary/60 text-muted-foreground"
+                      }`}
+                    >
+                      <Link
+                        to="/chat/$threadId"
+                        params={{ threadId: t.id }}
+                        className="flex-1 truncate px-2 py-1.5"
+                        onClick={() => setSidebarOpen(false)}
+                      >
+                        {cleanThreadTitle(t.title)}
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const name = cleanThreadTitle(t.title);
+                          if (confirm(`Delete "${name}"? This cannot be undone.`)) {
+                            delMut.mutate(t.id);
+                          }
+                        }}
+                        aria-label="Delete chat"
+                        className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
 
@@ -1044,26 +1093,60 @@ function ThreadView({ threadId }: { threadId: string }) {
           </div>
         </div>
         {/* Messages */}
-        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
-          {messages.length === 0 && !pendingUser && (
-            <div className="text-center text-muted-foreground text-sm pt-12">
-              How can I help you today?
-            </div>
-          )}
-          {messages.map((m) => {
-            const att = (m as unknown as { attachments?: Attachment[] | null }).attachments;
-            return (
-              <Bubble
-                key={m.id}
-                role={m.role}
-                content={m.content}
-                attachments={Array.isArray(att) ? att : []}
-              />
-            );
-          })}
-          {pendingUser && <Bubble role="user" content={pendingUser} />}
-          {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
-          <div ref={latestMessageRef} aria-hidden="true" />
+        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pt-16 md:pt-6 pb-6">
+          <div className="mx-auto w-full max-w-3xl px-4 md:px-6 space-y-6">
+            {messages.length === 0 && !pendingUser && !pendingAssistant && (
+              <div className="pt-16 md:pt-24 flex flex-col items-center text-center">
+                <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
+                  BP
+                </div>
+                <h2 className="text-xl md:text-2xl font-semibold text-foreground">How can I help today?</h2>
+                <p className="text-sm text-muted-foreground mt-1">Ask anything, draft an email, search the web, or generate a document.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-6 w-full max-w-xl">
+                  {[
+                    { title: "Draft an email", body: "Draft a professional email to a client following up on our last meeting." },
+                    { title: "Compare options", body: "Compare the pros and cons of three CRMs for a small B2B team in a table." },
+                    { title: "Summarize a topic", body: "Give me a brief, executive-level summary of BP Automation's industry." },
+                    { title: "Export a report", body: "Create a one-page PDF report titled \"Weekly Update\" with sample sections." },
+                  ].map((p) => (
+                    <button
+                      key={p.title}
+                      type="button"
+                      onClick={() => setInput(p.body)}
+                      className="text-left rounded-lg border border-border bg-card hover:bg-secondary/60 transition p-3"
+                    >
+                      <div className="text-sm font-medium text-foreground">{p.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{p.body}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {messages.map((m) => {
+              const att = (m as unknown as { attachments?: Attachment[] | null }).attachments;
+              return (
+                <Bubble
+                  key={m.id}
+                  role={m.role}
+                  content={m.content}
+                  attachments={Array.isArray(att) ? att : []}
+                />
+              );
+            })}
+            {pendingUser && <Bubble role="user" content={pendingUser} />}
+            {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
+            {addMut.isPending && !pendingAssistant && !isConnected && (
+              <div className="flex gap-3 justify-start">
+                <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
+                <div className="flex items-center gap-1.5 pt-3 text-muted-foreground text-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            )}
+            <div ref={latestMessageRef} aria-hidden="true" />
+          </div>
         </div>
 
         {/* Composer */}
@@ -1089,8 +1172,9 @@ function ThreadView({ threadId }: { threadId: string }) {
         )}
         <form
           onSubmit={onSubmit}
-          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex flex-col gap-2"
+          className="relative z-10 mx-auto w-full max-w-3xl px-4 md:px-6 mb-6"
         >
+          <div className="rounded-2xl border border-border bg-card shadow-sm p-2 flex flex-col gap-2">
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-1 pt-1">
               {attachments.map((a) => (
@@ -1158,10 +1242,22 @@ function ThreadView({ threadId }: { threadId: string }) {
           >
             <Paperclip size={16} />
           </button>
-          <input
+          <textarea
             autoFocus
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              const el = e.currentTarget;
+              el.style.height = "auto";
+              el.style.height = Math.min(el.scrollHeight, 220) + "px";
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
+              }
+            }}
+            rows={1}
             placeholder={
               voiceConnecting
                 ? "Connecting voice…"
@@ -1171,7 +1267,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                   : "Listening… or type"
                 : "Message BPA Bot…"
             }
-            className="flex-1 bg-transparent outline-none px-3 text-sm"
+            className="flex-1 bg-transparent outline-none px-3 py-2 text-[15px] leading-6 resize-none max-h-[220px] min-h-[40px]"
           />
           {addMut.isPending && !isConnected ? (
             <button
@@ -1191,6 +1287,7 @@ function ThreadView({ threadId }: { threadId: string }) {
               <Send size={14} /> Send
             </button>
           )}
+          </div>
           </div>
         </form>
         {/* Regenerate action below composer when there's an assistant message and we're idle */}
@@ -1247,37 +1344,52 @@ function Bubble({
   role,
   content,
   attachments = [],
+  streaming = false,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
+  streaming?: boolean;
 }) {
   const isUser = role === "user";
   const displayContent = isUser ? content : cleanAssistantText(content);
-  return (
-    <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
-      {!isUser && (
-        <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">
-          BP
+  if (isUser) {
+    return (
+      <div className="group flex flex-col items-end gap-1">
+        <div className="max-w-[85%] min-w-0 overflow-x-auto rounded-2xl rounded-tr-md px-4 py-2.5 text-[15px] leading-relaxed bg-primary text-primary-foreground">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {attachments.map((a) => (
+                <div
+                  key={a.path}
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs bg-primary-foreground/15 text-primary-foreground"
+                >
+                  {a.mimeType.startsWith("image/") ? "🖼️" : "📎"}
+                  <span className="max-w-[180px] truncate">{a.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="whitespace-pre-wrap break-words">{displayContent}</div>
         </div>
-      )}
-      <div
-        className={`max-w-[78%] min-w-0 overflow-x-auto rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-card border border-border text-foreground"
-        }`}
-      >
+        <div className="opacity-0 group-hover:opacity-100 transition pr-1">
+          <CopyButton text={displayContent} />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="group flex gap-3">
+      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0 mt-0.5">
+        BP
+      </div>
+      <div className="flex-1 min-w-0">
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {attachments.map((a) => (
               <div
                 key={a.path}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${
-                  isUser
-                    ? "bg-primary-foreground/15 text-primary-foreground"
-                    : "bg-secondary text-foreground border border-border"
-                }`}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs bg-secondary text-foreground border border-border"
               >
                 {a.mimeType.startsWith("image/") ? "🖼️" : "📎"}
                 <span className="max-w-[180px] truncate">{a.name}</span>
@@ -1286,12 +1398,18 @@ function Bubble({
           </div>
         )}
         <div
-          className={`prose prose-sm max-w-none ${
-            isUser ? "prose-invert" : ""
-          } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
+          className="prose prose-sm max-w-none text-foreground prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-pre:rounded-md prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.9em] prose-a:text-accent prose-a:underline-offset-2 prose-blockquote:border-l-primary prose-blockquote:text-muted-foreground"
         >
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+          {streaming && (
+            <span className="inline-block w-1.5 h-4 align-[-2px] ml-0.5 bg-foreground/70 animate-pulse rounded-sm" />
+          )}
         </div>
+        {!streaming && displayContent && (
+          <div className="mt-2 opacity-0 group-hover:opacity-100 transition">
+            <CopyButton text={displayContent} />
+          </div>
+        )}
       </div>
     </div>
   );
