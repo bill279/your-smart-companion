@@ -13,7 +13,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentSignedUrl,
+  getElevenLabsAgentToken,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -24,6 +24,14 @@ import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
+
+VOICE OUTPUT CONTRACT:
+- Speak in 1-2 short sentences by default. Keep spoken answers under 25 words unless the user explicitly asks for detail.
+- Never think out loud, fill silence, narrate internal steps, ramble, repeat yourself, or say unrelated/random words.
+- If you are unsure, ask one concise clarifying question. Do not improvise details.
+- For tables, comparisons, email drafts, documents, code, lists, or anything long: call show_in_chat with the full Markdown content immediately, then speak only a brief summary.
+- Do not read long tables, long drafts, or long research results out loud.
+- If the user interrupts, stop immediately and listen.
 
 Format answers for this chat UI. If the user asks for a table, visual table, comparison, schedule, specs, rows/columns, or tabular data, output a GitHub-Flavored Markdown table using pipes, for example:
 | Item | Detail |
@@ -57,6 +65,23 @@ function cleanAssistantText(text: string) {
 function cleanThreadTitle(title: string) {
   const cleaned = cleanAssistantText(title);
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
+}
+
+function looksUnstableVoiceText(text: string) {
+  const s = cleanAssistantText(text).trim();
+  if (!s) return false;
+  if (/(.)\1{10,}/.test(s)) return true;
+  if (/\b(?:undefined|null|nan|lorem ipsum)\b/i.test(s)) return true;
+  if (/(?:\b\w{1,2}\b[\s,.!?-]*){12,}/i.test(s)) return true;
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length >= 8) {
+    const odd = words.filter((w) => {
+      const stripped = w.replace(/[^a-z]/gi, "");
+      return stripped.length >= 7 && !/[aeiouy]/i.test(stripped);
+    }).length;
+    if (odd / words.length > 0.3) return true;
+  }
+  return false;
 }
 
 function groupThreadsByDate<T extends { updated_at: string }>(items: T[]): Array<{ label: string; items: T[] }> {
