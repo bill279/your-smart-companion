@@ -13,6 +13,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
+  getElevenLabsAgentToken,
   getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
@@ -97,6 +98,17 @@ function hidePartialTables(text: string): string {
     }
   }
   return out.join("\n");
+}
+
+function appendNonDuplicate(base: string, chunk: string) {
+  if (!chunk) return base;
+  if (!base) return chunk;
+  if (base.endsWith(chunk)) return base;
+  const max = Math.min(base.length, chunk.length);
+  for (let i = max; i > 0; i--) {
+    if (base.endsWith(chunk.slice(0, i))) return base + chunk.slice(i);
+  }
+  return base + chunk;
 }
 
 type SearchData = {
