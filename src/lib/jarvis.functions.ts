@@ -155,7 +155,7 @@ export const getElevenLabsAgentToken = createServerFn({ method: "POST" })
     if (!res.ok) {
       const text = await res.text();
       if (res.status === 429 && /concurrent|capacity|rate/i.test(text)) {
-        throw new Error("Voice is still closing another session. Wait a few seconds, then tap the mic once.");
+        throw new Error("VOICE_RETRYABLE_CLOSING");
       }
       throw new Error(`Voice connection failed (${res.status}). Please try again.`);
     }
@@ -178,7 +178,7 @@ export const getElevenLabsAgentSignedUrl = createServerFn({ method: "POST" })
     if (!res.ok) {
       const text = await res.text();
       if (res.status === 429 && /concurrent|capacity|rate/i.test(text)) {
-        throw new Error("Voice is still closing another session. Wait a few seconds, then tap the mic once.");
+        throw new Error("VOICE_RETRYABLE_CLOSING");
       }
       throw new Error(`Voice connection failed (${res.status}). Please try again.`);
     }

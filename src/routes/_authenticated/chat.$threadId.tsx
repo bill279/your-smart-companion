@@ -48,12 +48,22 @@ const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, stru
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
 type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
-const MAX_VOICE_RECONNECT_ATTEMPTS = 1;
+const MAX_VOICE_RECONNECT_ATTEMPTS = 6;
 const VOICE_IDLE_MS = 60_000;
-const VOICE_RESTART_COOLDOWN_MS = 2_500;
+const VOICE_RESTART_COOLDOWN_MS = 4_000;
+const MAX_VOICE_TOKEN_RETRY_ATTEMPTS = 8;
+const VOICE_CONNECT_TIMEOUT_MS = 15_000;
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isRetryableVoiceStartError(message: string) {
+  return /VOICE_RETRYABLE_CLOSING|still closing|closing another|another session|concurrent|capacity|rate|too many|429|active.*conversation|conversation.*active|already.*conversation|already.*session/i.test(message);
+}
+
+function voiceRetryDelay(attempt: number) {
+  return Math.min(Math.max(VOICE_RESTART_COOLDOWN_MS, 1_500 * 2 ** Math.min(attempt, 3)), 10_000);
 }
 
 function cleanAssistantText(text: string) {
@@ -582,6 +592,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
+      if (isRetryableVoiceStartError(closeText)) {
+        setVoiceState("reconnecting");
+        setVoiceError(null);
+        scheduleVoiceReconnect(closeText);
+        return;
+      }
       // Voice mode is intentionally persistent: if ElevenLabs drops the
       // transport, reconnect automatically until the user taps the mic to stop.
       if (hasConnectedVoiceRef.current) {
@@ -608,6 +624,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         wantsVoiceModeRef.current = false;
         setVoiceState("idle");
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
+      } else if (isRetryableVoiceStartError(msg) && wantsVoiceModeRef.current) {
+        setVoiceState("reconnecting");
+        setVoiceError(null);
+        scheduleVoiceReconnect(msg);
       } else if (wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
         setVoiceState("reconnecting");
         scheduleVoiceReconnect(msg);
@@ -751,9 +771,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (reconnectTimerRef.current !== null || voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
     const attempt = reconnectAttemptsRef.current + 1;
     reconnectAttemptsRef.current = attempt;
-    const delay = Math.min(500 * 2 ** Math.min(attempt - 1, 4), 8000);
+    const delay = voiceRetryDelay(attempt - 1);
     setVoiceState("reconnecting");
-    setVoiceError(attempt > 2 ? "Voice connection is unstable — reconnecting automatically…" : null);
+    setVoiceError(null);
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       if (!wantsVoiceModeRef.current || voiceStateRef.current === "connected") return;
@@ -829,16 +849,16 @@ function ThreadView({ threadId }: { threadId: string }) {
       let conversationToken = cached && Date.now() - cached.createdAt < 45_000 ? cached.token : "";
       if (!conversationToken) {
         let lastError = "Could not start voice";
-        for (let i = 0; i < 4; i += 1) {
+        for (let i = 0; i < MAX_VOICE_TOKEN_RETRY_ATTEMPTS; i += 1) {
           try {
             conversationToken = (await getAgentToken({})).token;
             break;
           } catch (err) {
             lastError = err instanceof Error ? err.message : String(err || lastError);
-            if (!/still closing|concurrent|capacity|rate/i.test(lastError) || i === 3) throw new Error(lastError);
-            setVoiceState("starting");
-            setVoiceError("Finishing the previous voice session… reconnecting automatically.");
-            await wait(1_500 + i * 1_000);
+            if (!isRetryableVoiceStartError(lastError) || i === MAX_VOICE_TOKEN_RETRY_ATTEMPTS - 1) throw new Error(lastError);
+            setVoiceState("reconnecting");
+            setVoiceError(null);
+            await wait(voiceRetryDelay(i));
             if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
           }
         }
@@ -859,7 +879,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         }
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
-      }, 10000);
+      }, VOICE_CONNECT_TIMEOUT_MS);
       await conversation.startSession({
         conversationToken,
         connectionType: "webrtc",
@@ -877,17 +897,14 @@ function ThreadView({ threadId }: { threadId: string }) {
         wantsVoiceModeRef.current = false;
         setVoiceState("idle");
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+      } else if (isRetryableVoiceStartError(raw) && wantsVoiceModeRef.current) {
+        console.warn("voice session is still closing; keeping retry loop active", raw);
+        setVoiceState("reconnecting");
+        setVoiceError(null);
+        scheduleVoiceReconnect(raw);
       } else if (options.automaticReconnect && wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
         console.warn("startVoice failed; retrying", raw);
         scheduleVoiceReconnect(raw);
-      } else if (/still closing|concurrent|capacity|rate/i.test(raw) && wantsVoiceModeRef.current) {
-        console.warn("voice session still closing; retrying", raw);
-        setVoiceState("reconnecting");
-        setVoiceError("Finishing the previous voice session… reconnecting automatically.");
-        reconnectTimerRef.current = window.setTimeout(() => {
-          reconnectTimerRef.current = null;
-          void startVoice({ automaticReconnect: true });
-        }, 2_000);
       } else {
         wantsVoiceModeRef.current = false;
         hasConnectedVoiceRef.current = false;
@@ -1180,7 +1197,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceActive = voiceUiState === "connected" || voiceUiState === "reconnecting" || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceStopping = voiceUiState === "stopping";
+  const voiceActive = voiceUiState === "connected" || voiceUiState === "reconnecting" || voiceStopping || (voiceUiState === "starting" && conversation.status !== "error");
   const voiceConnecting = voiceUiState === "starting";
   const voiceReconnecting = voiceUiState === "reconnecting";
 
@@ -1546,12 +1564,15 @@ function ThreadView({ threadId }: { threadId: string }) {
           <button
             type="button"
             onClick={() => {
+              if (voiceStopping) return;
               if (voiceActive) void stopVoice();
               else void startVoice();
             }}
             title={
               voiceConnecting
                 ? "Connecting…"
+                : voiceStopping
+                ? "Stopping voice…"
                 : voiceReconnecting
                 ? "Reconnecting… tap to stop"
                 : voiceActive
@@ -1561,6 +1582,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                 : "Tap to talk"
             }
             aria-label={voiceActive ? "Stop voice mode" : "Start voice mode"}
+            disabled={voiceStopping}
             className={`relative shrink-0 h-10 rounded-full border font-semibold transition-all duration-200 ${
               voiceActive
                 ? "w-[8.25rem] border-destructive bg-destructive text-destructive-foreground shadow-lg shadow-destructive/30"
