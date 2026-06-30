@@ -514,12 +514,14 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
       if (!mountedRef.current) return;
+      lastVoiceActivityAtRef.current = Date.now();
       // Prefer the canonical text-response stream over audio-alignment chars.
       // The ElevenLabs SDK can emit overlapping deltas/corrections; append only
       // non-duplicate suffixes so the UI doesn't repeat or shimmer.
       const kind = part?.type;
       const eventId = typeof part?.event_id === "number" ? part.event_id : null;
       const chunk = part?.text ?? "";
+      if (isFillerVoicePrompt(chunk)) return;
       if (kind === "start" || (eventId !== null && liveTextEventIdRef.current !== null && eventId !== liveTextEventIdRef.current)) {
         liveAssistantRef.current = chunk;
         liveTextEventIdRef.current = eventId;
@@ -535,18 +537,22 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
       if (!mountedRef.current) return;
+      lastVoiceActivityAtRef.current = Date.now();
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       // Alignment is a fallback only. If response parts are active, using both
       // creates duplicated/garbled text and makes the voice feel glitchy.
       if (liveTextFromPartsRef.current) return;
-      liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chars.join(""));
+      const chunk = chars.join("");
+      if (isFillerVoicePrompt(chunk)) return;
+      liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       schedulePendingAssistant(liveAssistantRef.current);
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
       if (!mountedRef.current) return;
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
+      if (isFillerVoicePrompt(corrected)) return;
       liveAssistantRef.current = corrected;
       schedulePendingAssistant(corrected);
     },
@@ -557,10 +563,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       reconnectAttemptsRef.current = 0;
       hasConnectedVoiceRef.current = true;
       voiceDesiredRef.current = true;
+      stopRequestedRef.current = false;
+      sessionStartingRef.current = false;
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
       resetLiveVoiceAssistant();
+      startVoiceKeepAlive();
       try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
@@ -570,12 +579,16 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
       if (!mountedRef.current) return;
+      console.warn("voice disconnected", details);
       clearVoiceConnectTimeout();
+      stopVoiceKeepAlive();
+      sessionStartingRef.current = false;
       const wasStopping = voiceStateRef.current === "stopping";
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       pendingContextRef.current = "";
-      resetLiveVoiceAssistant();
+      // Keep the live caption visible if the socket drops mid-answer; it will
+      // be replaced by the persisted message or the reconnected stream.
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
@@ -600,10 +613,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
       clearVoiceConnectTimeout();
+      stopVoiceKeepAlive();
+      sessionStartingRef.current = false;
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      resetLiveVoiceAssistant();
+      // Do not wipe the live caption here; a transient socket error should not
+      // make the answer disappear from the chat.
       if (/quota/i.test(msg)) {
         voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
@@ -623,6 +639,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => {
       if (!mountedRef.current) return;
+      lastVoiceActivityAtRef.current = Date.now();
       // Don't wipe the live caption when the bot stops talking — keep it on
       // screen so the user can read it. It clears naturally when the
       // persisted message arrives in the next refetch.
@@ -631,19 +648,21 @@ function ThreadView({ threadId }: { threadId: string }) {
         resetLiveVoiceAssistant();
       }
     },
-    onMessage: async (message: { source?: string; message?: string }) => {
+    onMessage: async (message: { source?: string; role?: "user" | "agent"; message?: string; event_id?: number }) => {
       if (!mountedRef.current) return;
       const text = message?.message;
       if (!text) return;
-      const voiceMessage = message as { source?: string; message?: string; event_id?: number };
-      const eventKey = `${voiceMessage.source ?? "unknown"}:${voiceMessage.event_id ?? text}`;
+      if (isFillerVoicePrompt(text)) return;
+      lastVoiceActivityAtRef.current = Date.now();
+      const role = message.role === "agent" || message.source === "ai" ? "assistant" : message.role === "user" || message.source === "user" ? "user" : "unknown";
+      const eventKey = `${role}:${message.event_id ?? text}`;
       if (seenVoiceEventsRef.current.has(eventKey)) return;
       seenVoiceEventsRef.current.add(eventKey);
       if (seenVoiceEventsRef.current.size > 250) {
         seenVoiceEventsRef.current = new Set(Array.from(seenVoiceEventsRef.current).slice(-120));
       }
       try {
-        if (message.source === "user") {
+        if (role === "user") {
           // Drop echo: if the mic picks up the bot's own audio, ElevenLabs will
           // emit it as a "user" transcript. If this text closely matches what
           // the assistant just said, ignore it instead of saving a duplicate
@@ -658,10 +677,11 @@ function ThreadView({ threadId }: { threadId: string }) {
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           if (!mountedRef.current) return;
           setPendingUser(null);
-        } else if (message.source === "ai") {
+        } else if (role === "assistant") {
           const cleaned = cleanAssistantText(text);
           if (!cleaned) return;
-          const persistKey = voiceMessage.event_id ? `ai:${voiceMessage.event_id}` : `ai:${normalizeVoiceText(cleaned).slice(0, 120)}`;
+          if (isFillerVoicePrompt(cleaned)) return;
+          const persistKey = message.event_id ? `ai:${message.event_id}` : `ai:${normalizeVoiceText(cleaned).slice(0, 120)}`;
           if (persistedVoiceAiEventsRef.current.has(persistKey)) return;
           if (isNearDuplicateVoiceText(cleaned, lastAssistantTextRef.current)) return;
           persistedVoiceAiEventsRef.current.add(persistKey);
