@@ -635,11 +635,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   function buildVoiceContext() {
-    // Keep ElevenLabs context healthy on long threads: strip markdown noise
-    // (tables, bullets, headings) so the LLM doesn't try to read it aloud, and
-    // cap to ~6k chars + 60 turns. Overflow is the #1 cause of voice "gibberish".
-    const MAX_CHARS = 6000;
-    const MAX_TURNS = 60;
+    // Keep ElevenLabs context lean. Long hidden context makes voice slower,
+    // increases repetition, and can cause the model to read markdown/table noise.
+    const MAX_CHARS = 3000;
+    const MAX_TURNS = 24;
     const stripMd = (s: string) =>
       s
         .replace(/```[\s\S]*?```/g, "[code]")
@@ -667,8 +666,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     const rules = [
       "Behavioral rules for this session:",
       "- Do not greet or introduce yourself again.",
-      "- EXECUTIVE OUTPUT: default chat response is **Bottom line:** plus 2–4 tight bullets. No long paragraphs. No generic deeper-insights dump.",
-      "- VOICE BREVITY: keep spoken replies under 40 words and conversational. Never read out long lists, tables, or markdown syntax — summarize them out loud and say \"I've put the details in the chat.\" The full structured answer (tables, bullets) goes silently to the chat via the visual transcript.",
+      "- EXECUTIVE OUTPUT: answer like a Fortune 500 chief of staff. Default to 1 direct sentence or 2–3 tight bullets. No long paragraphs. No generic deeper-insights dump.",
+      "- VOICE BREVITY: keep spoken replies under 30 words unless the user explicitly asks for detail. Never read out long lists, tables, or markdown syntax.",
       "- NO MARKDOWN OUT LOUD: do NOT speak characters like \"asterisk\", \"pipe\", \"hash\", or read tables row by row. If you need to show structured data, mention it briefly and let the chat render it.",
       "- If asked for a table, output a GitHub-Flavored Markdown table directly in the chat, and say one short sentence summarizing it out loud.",
       "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
