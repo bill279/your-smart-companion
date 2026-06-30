@@ -797,11 +797,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (opts.reconnect && voiceDesiredRef.current && voiceStateRef.current !== "connected") scheduleVoiceReconnect(1500);
       return;
     }
-    const sdkStatus = conversationRef.current?.status;
-    if (sdkStatus === "connecting" || sdkStatus === "connected") {
-      if (opts.reconnect) scheduleVoiceReconnect(1200);
-      return;
-    }
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
       toast.error("Voice quota exhausted — text chat still works.");
       setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
