@@ -1372,7 +1372,9 @@ function ThreadView({ threadId }: { threadId: string }) {
               );
             })}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
-            {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
+            {pendingAssistant && messages[messages.length - 1]?.content?.trim() !== pendingAssistant.trim() && (
+              <Bubble role="assistant" content={pendingAssistant} streaming />
+            )}
             {addMut.isPending && !pendingAssistant && !isConnected && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
