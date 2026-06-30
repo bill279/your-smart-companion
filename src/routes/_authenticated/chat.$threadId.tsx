@@ -14,7 +14,6 @@ import {
   createThread,
   deleteThread,
   getElevenLabsAgentToken,
-  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -111,6 +110,20 @@ function appendNonDuplicate(base: string, chunk: string) {
   return base + chunk;
 }
 
+function normalizeVoiceText(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
+}
+
+function isNearDuplicateVoiceText(a: string, b: string) {
+  const x = normalizeVoiceText(a);
+  const y = normalizeVoiceText(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const short = x.length < y.length ? x : y;
+  const long = x.length < y.length ? y : x;
+  return short.length >= 24 && long.includes(short);
+}
+
 type SearchData = {
   threads: Array<{ id: string; title: string; updated_at: string }>;
   messages: Array<{ id: string; thread_id: string; role: string; snippet: string; created_at: string }>;
@@ -195,7 +208,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const getAgentToken = useServerFn(getElevenLabsAgentToken);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
