@@ -288,7 +288,7 @@ export const Route = createFileRoute("/api/chat")({
         // Load recent history + facts in parallel. Cap history at the last 40
         // turns — anything older is rarely useful and just inflates latency
         // and token cost. Durable context lives in user_facts.
-        const HISTORY_LIMIT = 40;
+        const HISTORY_LIMIT = 20;
         const [histRes, factsRes, lessonsRes, feedbackRes] = await Promise.all([
           supabase
             .from("messages")
@@ -300,18 +300,18 @@ export const Route = createFileRoute("/api/chat")({
             .from("user_facts")
             .select("key,value")
             .order("updated_at", { ascending: false })
-            .limit(50),
+            .limit(15),
           supabase
             .from("lessons_learned")
             .select("lesson,context")
             .order("created_at", { ascending: false })
-            .limit(20),
+            .limit(8),
           supabase
             .from("message_feedback")
             .select("rating,note,created_at")
             .eq("rating", "down")
             .order("created_at", { ascending: false })
-            .limit(5),
+            .limit(3),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         const rows = (histRes.data ?? []).slice().reverse();
@@ -365,7 +365,7 @@ export const Route = createFileRoute("/api/chat")({
           };
         });
         const result = streamText({
-          model: gateway("google/gemini-3.5-flash"),
+          model: gateway("google/gemini-3.1-flash-lite"),
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(12),
