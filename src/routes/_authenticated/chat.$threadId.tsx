@@ -48,7 +48,8 @@ const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, stru
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
 type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
-const MAX_VOICE_RECONNECT_ATTEMPTS = 2;
+const MAX_VOICE_RECONNECT_ATTEMPTS = 1;
+const VOICE_IDLE_MS = 60_000;
 
 function cleanAssistantText(text: string) {
   return text
