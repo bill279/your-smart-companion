@@ -440,50 +440,50 @@ function ThreadView({ threadId }: { threadId: string }) {
       },
     },
     onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
-      // Stream agent text to the chat in real time as ElevenLabs generates it.
+      // Prefer the canonical text-response stream over audio-alignment chars.
+      // The ElevenLabs SDK can emit overlapping deltas/corrections; append only
+      // non-duplicate suffixes so the UI doesn't repeat or shimmer.
       const kind = part?.type;
+      const eventId = typeof part?.event_id === "number" ? part.event_id : null;
       const chunk = part?.text ?? "";
-      if (kind === "start") {
+      if (kind === "start" || (eventId !== null && liveTextEventIdRef.current !== null && eventId !== liveTextEventIdRef.current)) {
         liveAssistantRef.current = chunk;
-        liveStreamSourceRef.current = "part";
+        liveTextEventIdRef.current = eventId;
+        liveTextFromPartsRef.current = true;
       } else if (kind === "delta") {
-        if (liveStreamSourceRef.current === "alignment") {
-          liveAssistantRef.current = chunk;
-          liveStreamSourceRef.current = "part";
-        }
-        liveAssistantRef.current += chunk;
+        liveTextFromPartsRef.current = true;
+        if (eventId !== null) liveTextEventIdRef.current = eventId;
+        liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       } else if (kind === "stop") {
-        if (chunk) liveAssistantRef.current += chunk;
+        if (chunk) liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chunk);
       }
-      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
+      schedulePendingAssistant(liveAssistantRef.current);
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
-      // Only use audio alignment as a fallback when the agent is NOT already
-      // streaming text via onAgentChatResponsePart — otherwise we'd append
-      // the same content twice and the chat would show duplicated text.
-      if (liveStreamSourceRef.current === "part") return;
-      if (liveStreamSourceRef.current === "none") {
-        liveAssistantRef.current = "";
-        liveStreamSourceRef.current = "alignment";
-      }
-      liveAssistantRef.current += chars.join("");
-      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
+      // Alignment is a fallback only. If response parts are active, using both
+      // creates duplicated/garbled text and makes the voice feel glitchy.
+      if (liveTextFromPartsRef.current) return;
+      liveAssistantRef.current = appendNonDuplicate(liveAssistantRef.current, chars.join(""));
+      schedulePendingAssistant(liveAssistantRef.current);
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
       liveAssistantRef.current = corrected;
-      setPendingAssistant(cleanAssistantText(corrected));
+      schedulePendingAssistant(corrected);
     },
     onConnect: () => {
       clearVoiceConnectTimeout();
+      clearVoiceReconnectTimeout();
       hasConnectedVoiceRef.current = true;
+      voiceDesiredRef.current = true;
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
-      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
+      resetLiveVoiceAssistant();
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
       if (ctx) {
@@ -496,19 +496,18 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       pendingContextRef.current = "";
+      resetLiveVoiceAssistant();
       if (wasStopping) return;
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
+        voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
-      // If the session was previously connected and dropped for any non-error
-      // reason (typically ElevenLabs idle timeout), silently reconnect so the
-      // user stays in voice mode until they explicitly tap to stop.
-      if (hasConnectedVoiceRef.current && details?.reason !== "error") {
-        setTimeout(() => {
-          if (voiceStateRef.current === "idle") void startVoice();
-        }, 300);
+      // Keep voice mode active until the user explicitly stops it. ElevenLabs
+      // may close idle sockets; reconnect silently instead of forcing another tap.
+      if (voiceDesiredRef.current && details?.reason !== "error") {
+        scheduleVoiceReconnect(800);
         return;
       }
       voiceUserHasSpokenRef.current = false;
@@ -524,15 +523,15 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
+      resetLiveVoiceAssistant();
       if (/quota/i.test(msg)) {
+        voiceDesiredRef.current = false;
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
-      // Silent auto-reconnect if we were mid-session (transient socket glitch).
-      if (hasConnectedVoiceRef.current) {
-        setTimeout(() => {
-          if (voiceStateRef.current === "idle") void startVoice();
-        }, 500);
+      // Silent auto-reconnect if the user still wants voice mode on.
+      if (voiceDesiredRef.current) {
+        scheduleVoiceReconnect(1000);
         return;
       }
       setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
