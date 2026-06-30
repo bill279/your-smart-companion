@@ -422,6 +422,72 @@ export const Route = createFileRoute("/api/chat")({
                 };
               },
             }),
+            product_search: tool({
+              description:
+                "Visual product search. Returns products with title, price, image, url, and source. Use whenever the user asks to find, shop for, compare, look up, or recommend buyable items (gear, hardware, electronics, equipment, supplies, parts, tools, etc.). Always render the results as the :::products card block.",
+              inputSchema: z.object({
+                query: z.string().describe("Natural product query, e.g. 'best stereo vision cameras for industrial robotics'"),
+                limit: z.number().int().min(1).max(8).optional(),
+              }),
+              execute: async ({ query, limit }) => {
+                const key = process.env.FIRECRAWL_API_KEY;
+                if (!key) return { error: "Product search not configured" };
+                const n = limit ?? 5;
+                const r = await fetch("https://api.firecrawl.dev/v2/search", {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${key}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    query: `${query} buy price specs`,
+                    limit: n,
+                    scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
+                  }),
+                });
+                if (!r.ok) return { error: `Product search failed (${r.status})` };
+                const j = (await r.json()) as {
+                  data?:
+                    | Array<{
+                        title?: string;
+                        url?: string;
+                        description?: string;
+                        markdown?: string;
+                        metadata?: Record<string, unknown>;
+                      }>
+                    | { web?: Array<{ title?: string; url?: string; description?: string; markdown?: string; metadata?: Record<string, unknown> }> };
+                };
+                const arr = Array.isArray(j.data) ? j.data : j.data?.web ?? [];
+                const priceRe = /(?:US\$|CA\$|USD\s?|CAD\s?|\$|£|€)\s?\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?/;
+                const pickImage = (meta: Record<string, unknown> | undefined): string | undefined => {
+                  if (!meta) return undefined;
+                  const keys = ["ogImage", "og:image", "twitterImage", "twitter:image", "image"];
+                  for (const k of keys) {
+                    const v = meta[k];
+                    if (typeof v === "string" && /^https?:\/\//.test(v)) return v;
+                    if (Array.isArray(v) && typeof v[0] === "string" && /^https?:\/\//.test(v[0] as string)) return v[0] as string;
+                  }
+                  return undefined;
+                };
+                const products = arr
+                  .map((x) => {
+                    const text = x.markdown ?? x.description ?? "";
+                    const priceMatch = text.match(priceRe);
+                    let source: string | undefined;
+                    try { source = x.url ? new URL(x.url).hostname.replace(/^www\./, "") : undefined; } catch { /* noop */ }
+                    return {
+                      title: x.title || (x.metadata?.title as string | undefined) || source || "Untitled",
+                      url: x.url,
+                      image: pickImage(x.metadata),
+                      price: priceMatch?.[0],
+                      source,
+                      snippet: (x.description || "").slice(0, 160),
+                    };
+                  })
+                  .filter((p) => p.url && p.image);
+                return { products: products.slice(0, n) };
+              },
+            }),
             send_email: tool({
               description:
                 "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves. Supports optional file attachments (PDF / Word / Excel) generated from Markdown — use this for 'email me the table as a PDF', 'send this as a report', etc.",
