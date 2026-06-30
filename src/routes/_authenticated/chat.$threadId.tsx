@@ -1093,26 +1093,60 @@ function ThreadView({ threadId }: { threadId: string }) {
           </div>
         </div>
         {/* Messages */}
-        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
-          {messages.length === 0 && !pendingUser && (
-            <div className="text-center text-muted-foreground text-sm pt-12">
-              How can I help you today?
-            </div>
-          )}
-          {messages.map((m) => {
-            const att = (m as unknown as { attachments?: Attachment[] | null }).attachments;
-            return (
-              <Bubble
-                key={m.id}
-                role={m.role}
-                content={m.content}
-                attachments={Array.isArray(att) ? att : []}
-              />
-            );
-          })}
-          {pendingUser && <Bubble role="user" content={pendingUser} />}
-          {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
-          <div ref={latestMessageRef} aria-hidden="true" />
+        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pt-16 md:pt-6 pb-6">
+          <div className="mx-auto w-full max-w-3xl px-4 md:px-6 space-y-6">
+            {messages.length === 0 && !pendingUser && !pendingAssistant && (
+              <div className="pt-16 md:pt-24 flex flex-col items-center text-center">
+                <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
+                  BP
+                </div>
+                <h2 className="text-xl md:text-2xl font-semibold text-foreground">How can I help today?</h2>
+                <p className="text-sm text-muted-foreground mt-1">Ask anything, draft an email, search the web, or generate a document.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-6 w-full max-w-xl">
+                  {[
+                    { title: "Draft an email", body: "Draft a professional email to a client following up on our last meeting." },
+                    { title: "Compare options", body: "Compare the pros and cons of three CRMs for a small B2B team in a table." },
+                    { title: "Summarize a topic", body: "Give me a brief, executive-level summary of BP Automation's industry." },
+                    { title: "Export a report", body: "Create a one-page PDF report titled \"Weekly Update\" with sample sections." },
+                  ].map((p) => (
+                    <button
+                      key={p.title}
+                      type="button"
+                      onClick={() => setInput(p.body)}
+                      className="text-left rounded-lg border border-border bg-card hover:bg-secondary/60 transition p-3"
+                    >
+                      <div className="text-sm font-medium text-foreground">{p.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{p.body}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {messages.map((m) => {
+              const att = (m as unknown as { attachments?: Attachment[] | null }).attachments;
+              return (
+                <Bubble
+                  key={m.id}
+                  role={m.role}
+                  content={m.content}
+                  attachments={Array.isArray(att) ? att : []}
+                />
+              );
+            })}
+            {pendingUser && <Bubble role="user" content={pendingUser} />}
+            {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
+            {addMut.isPending && !pendingAssistant && !isConnected && (
+              <div className="flex gap-3 justify-start">
+                <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
+                <div className="flex items-center gap-1.5 pt-3 text-muted-foreground text-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            )}
+            <div ref={latestMessageRef} aria-hidden="true" />
+          </div>
         </div>
 
         {/* Composer */}
