@@ -1518,14 +1518,11 @@ function ThreadView({ threadId }: { threadId: string }) {
                 : "w-10 border-border bg-secondary hover:bg-secondary/80 text-primary"
             }`}
           >
-            {voiceActive && (
-              <span className="absolute -inset-1 rounded-full border-2 border-destructive/70 animate-ping pointer-events-none" />
-            )}
             <span className="relative z-10 flex h-full items-center justify-center gap-2 px-3">
               {voiceActive ? <Square size={14} fill="currentColor" /> : <Mic size={18} />}
               {voiceActive && (
                 <span className="flex items-center gap-1.5 text-xs uppercase">
-                  <span className="h-2 w-2 rounded-full bg-destructive-foreground animate-pulse" />
+                  <span className="h-2 w-2 rounded-full bg-destructive-foreground" />
                   Stop voice
                 </span>
               )}
