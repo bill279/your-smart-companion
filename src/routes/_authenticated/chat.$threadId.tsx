@@ -1403,6 +1403,7 @@ function Bubble({
   const displayContent = isUser
     ? content
     : hidePartialTables(cleanAssistantText(content));
+  const segments = isUser ? [{ kind: "md" as const, text: displayContent }] : splitProductBlocks(displayContent);
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   async function copyText() {
@@ -1451,15 +1452,22 @@ function Bubble({
             isUser ? "prose-invert" : ""
           } prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-accent`}
         >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-            components={{
-              pre: ({ children, ...props }) => <CodeBlock {...props}>{children}</CodeBlock>,
-            }}
-          >
-            {displayContent}
-          </ReactMarkdown>
+          {segments.map((seg, i) =>
+            seg.kind === "products" ? (
+              <ProductCards key={i} products={seg.products} />
+            ) : (
+              <ReactMarkdown
+                key={i}
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+                components={{
+                  pre: ({ children, ...props }) => <CodeBlock {...props}>{children}</CodeBlock>,
+                }}
+              >
+                {seg.text}
+              </ReactMarkdown>
+            )
+          )}
         </div>
       </div>
         {/* Hover actions */}
