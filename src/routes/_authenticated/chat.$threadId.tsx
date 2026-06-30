@@ -501,7 +501,12 @@ function ThreadView({ threadId }: { threadId: string }) {
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
       }
-      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
+      if (looksUnstableVoiceText(liveAssistantRef.current)) {
+        // Don't leave a stale half-streamed bubble visible if the stream
+        // started generating gibberish — clear it so we don't ghost the UI.
+        setPendingAssistant("");
+        return;
+      }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
