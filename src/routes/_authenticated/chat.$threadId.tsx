@@ -711,7 +711,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceRestartReadyAtRef.current = Date.now() + VOICE_RESTART_COOLDOWN_MS;
       voiceStopPromiseRef.current = Promise.resolve(conversationRef.current.endSession())
         .catch(() => {})
-        .then(() => wait(VOICE_RESTART_COOLDOWN_MS))
+        .then(async () => {
+          await wait(VOICE_RESTART_COOLDOWN_MS);
+        })
         .finally(() => {
           voiceStopPromiseRef.current = null;
           setVoiceState("idle");
@@ -910,7 +912,9 @@ function ThreadView({ threadId }: { threadId: string }) {
         .catch((err) => {
           console.warn("endSession failed", err);
         })
-        .then(() => wait(VOICE_RESTART_COOLDOWN_MS));
+        .then(async () => {
+          await wait(VOICE_RESTART_COOLDOWN_MS);
+        });
       await voiceStopPromiseRef.current;
     } catch (err) {
       console.warn("endSession failed", err);
