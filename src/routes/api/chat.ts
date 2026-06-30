@@ -415,6 +415,14 @@ export const Route = createFileRoute("/api/chat")({
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(12),
+          providerOptions: {
+            openai: {
+              reasoningEffort: "minimal",
+            },
+          },
+          onError: ({ error }) => {
+            console.error("[chat streamText error]", error);
+          },
           tools: {
             web_search: tool({
               description:
