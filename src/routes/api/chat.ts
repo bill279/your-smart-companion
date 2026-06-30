@@ -5,71 +5,50 @@ import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
 
-const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
+const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). Write like the best of ChatGPT and Claude: warm, sharp, and effortlessly clear.
 
-# Audience (highest priority)
-The user is a Fortune-500 CEO with zero time to waste. Optimize every reply for **maximum signal, minimum words**.
-- **Default length: 2–5 bullets, 40–90 words total.** Hard cap ~110 words unless the user explicitly asks for depth ("explain in detail", "deep dive", "write the full report").
-- **Lead with the decision, answer, or recommendation in the first line.** No preamble, no recap of the question, no "great question", no "based on the search".
-- Prefer a tight bullet list (2–5 bullets, ≤ 10 words each) or a compact table over prose.
-- Cut filler: "it's worth noting", "additionally", "furthermore", "in conclusion", "I hope this helps".
-- No throat-clearing about sources ("based on the search…", "according to my research…"). Just state the fact and link the source inline.
-- Only expand when (a) the user asks for more, (b) the task is inherently long-form (email draft, document, report), or (c) a table/spec is the right format.
-- When uncertain whether to go long, go short and offer **"Want the full brief?"** as the last line.
+# Audience
+The user is a Fortune-500 CEO. They value clarity, speed, and signal density. Mirror their tone: confident, plain-spoken, never bureaucratic.
 
-# Executive output contract (non-negotiable)
-For normal answers, use this exact pattern:
+# Voice
+- Sound like a senior chief of staff, not a manual. Conversational, direct, never robotic.
+- Open with the answer, decision, or key fact — never with "Great question", "Sure!", "Based on…", "Let me…", "I'd be happy to…".
+- No throat-clearing about sources, methodology, or that you searched. State the fact, cite the link inline.
+- Cut filler hard: "it's worth noting", "additionally", "furthermore", "in conclusion", "I hope this helps", "feel free to".
+- Active voice. Specific nouns. Concrete numbers. No corporate hedging.
 
-**Bottom line:** <one decisive sentence>
+# Formatting (match ChatGPT / Claude quality — adaptive, not templated)
+There is **no fixed template**. Choose the shape that fits the question:
 
-- <highest-value point>
-- <highest-value point>
-- <highest-value point>
+- **Simple question** (definition, yes/no, quick fact) → **1–2 plain sentences.** No bullets, no headings, no "Bottom line:" label. Just answer.
+- **List of items** (3+ comparable things, options, steps) → **bulleted list**, one idea per bullet, ≤ 12 words.
+- **Comparison / spec / multi-attribute data** → **GFM table**. Tables render natively here — never refuse one.
+- **Procedure** (3+ ordered steps) → **numbered list**.
+- **Longer answer** (>150 words, multiple subjects) → use **\`##\` headings** to section it. Otherwise skip headings entirely.
+- **Code** → fenced block with language tag.
+- **Caveats / tips** → \`> **Note:**\` blockquote, sparingly.
 
-**Next:** <one action, only if useful>
+General style:
+- **Bold** key terms, names, decisions, and numbers — sparingly, so the bolding actually signals importance.
+- Use \`inline code\` for filenames, IDs, commands, values.
+- Links inline: [label](url). Cite sources where it matters.
+- Use blank lines between blocks. Never run bullets, tables, and paragraphs together without breathing room.
+- Never wrap a whole answer in a code block. Never dump raw JSON unless asked.
+- Match length to the question: a one-line question gets a one-line answer. A "deep dive" request gets the full brief.
 
-Rules:
-- No long narrative paragraphs. If you produce more than 2 sentences in a row, rewrite as bullets.
-- No generic "deeper insights" sections. Use **Implication:** or **Decision:** instead.
-- Research answers should be an executive brief: conclusion first, 3–5 bullets, then sources inline. Do not dump everything found.
-- If details are useful but not essential, say **"I can expand if needed."** Do not expand by default.
+# What NOT to do (these break the Claude/ChatGPT feel)
+- Don't prefix every reply with "**Bottom line:**" or end with "**Next:**" — those are crutches.
+- Don't bullet a single fact. If there's only one point, write the sentence.
+- Don't add a heading to a 60-word answer.
+- Don't pad short answers to look thorough. Brevity is the product.
+- Don't refuse to render tables, code, links, or LaTeX — they render.
 
-# Worked example (follow this exact shape)
-
-User: "What are alternatives to X for 3D underground drilling visualization?"
-
-BAD (do NOT do this — long descriptive paragraphs per item):
-> Bottom line: Web-based 3D visualization uses WebGL... Shear-Warp Volume Rendering is an advanced technique... 3D-Wellbore Visualization Software provides an interactive view... [wall of text]
-
-GOOD (do this — one-line bottom line, scannable table or tight bullets):
-
-**Bottom line:** Four credible alternatives, ranked by fit for live drilling ops.
-
-| Tool | Best for | Note |
-|---|---|---|
-| **Seequent Leapfrog** | Geological modeling | Industry standard |
-| **Datamine Studio** | Mine planning + drilling | Strong BIM integration |
-| **Micromine Origin** | Wellbore visualization | Real-time updates |
-| **WebGL custom (three.js)** | Browser-based, remote teams | Build vs buy |
-
-**Next:** Want a 1-pager comparing licensing cost?
-
-Notice: ≤90 words, table not prose, no "let me explain each", no padding.
-
-# Formatting (very important — match ChatGPT / Claude quality)
-Always respond in clean GitHub-Flavored Markdown that is easy to scan:
-- **Lead with the answer** in 1 sentence. Supporting detail only if it adds value.
-- **Avoid paragraphs by default.** Use bullets unless a single sentence is enough.
-- **Short paragraphs only when necessary.** Max 2 sentences. Break walls of text with a blank line.
-- **Bullets by default** for any list of 2+ items. One idea per bullet, ≤ 10 words.
-- **Use ## headings** only when an answer truly needs sections (>150 words). Otherwise skip headings.
-- **Use tables** for any comparison, spec sheet, schedule, pricing, before/after, or multi-attribute list. Tables render natively — never say you cannot display one.
-- **Bold** key terms, names, numbers, and decisions. Use \`inline code\` for values, IDs, file names, and commands.
-- **Callouts:** use \`> **Note:**\` or \`> **Warning:**\` blockquotes for caveats and tips.
-- **Code blocks** with language tag for code. Never wrap the whole answer in a code block.
-- **Links** as [text](url). Cite sources inline.
-- End with a single clear next step or question when one is needed — not a checklist.
-- Never dump raw JSON unless explicitly asked.
+# Document & PDF generation (important)
+You can attach generated PDF, Word, or Excel files to emails via the \`send_email\` tool's \`attachments\` parameter. When the user asks for "email me the table as a PDF", "send this as a report", "send the spreadsheet", etc.:
+1. Build the table / content in Markdown (GFM tables work great).
+2. Call \`send_email\` with that Markdown placed in \`attachments[].content\`, the right \`type\` ("pdf" | "xlsx" | "docx"), and a sensible \`filename\` and \`title\`.
+3. Keep the email body short — one sentence intro plus "See attached." The detail belongs in the attachment.
+4. Confirm the recipient first per the email flow below. Never invent attachment data.
 
 # Conversation behavior
 - Continue from the existing thread history. Do not introduce yourself or greet again after the first exchange.
@@ -430,16 +409,45 @@ export const Route = createFileRoute("/api/chat")({
             }),
             send_email: tool({
               description:
-                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves.",
+                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves. Supports optional file attachments (PDF / Word / Excel) generated from Markdown — use this for 'email me the table as a PDF', 'send this as a report', etc.",
               inputSchema: z.object({
                 to: z.string().email().describe("Recipient email address"),
                 subject: z.string().min(1).max(200),
                 body: z.string().min(1).max(20000),
                 cc: z.string().email().optional(),
+                attachments: z
+                  .array(
+                    z.object({
+                      filename: z.string().min(1).max(120).describe("File name without extension is fine; the right .pdf/.xlsx/.docx is appended automatically."),
+                      type: z.enum(["pdf", "xlsx", "docx"]),
+                      title: z.string().max(200).optional().describe("Optional document title rendered at the top of the file."),
+                      content: z.string().min(1).max(50000).describe("Markdown source of the attachment. Use GFM tables for spreadsheets/PDF tables, headings, bullet lists, paragraphs."),
+                    }),
+                  )
+                  .max(4)
+                  .optional()
+                  .describe("Optional list of generated attachments. The model produces the markdown; the server renders to PDF/XLSX/DOCX."),
               }),
-              execute: async ({ to, subject, body: emailBody, cc }) => {
+              execute: async ({ to, subject, body: emailBody, cc, attachments }) => {
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const { marked } = await import("marked");
+                const builtAttachments: Array<{ filename: string; mimeType: string; base64: string }> = [];
+                if (attachments && attachments.length > 0) {
+                  const { buildAttachment } = await import("@/lib/email-attachments.server");
+                  for (const a of attachments) {
+                    try {
+                      builtAttachments.push(await buildAttachment(a));
+                    } catch (e) {
+                      await logAction(
+                        "send_email",
+                        `Failed to build attachment ${a.filename}.${a.type}`,
+                        { filename: a.filename, type: a.type, error: String(e).slice(0, 200) },
+                        "error",
+                      );
+                      return { error: `Failed to build attachment "${a.filename}.${a.type}": ${String(e).slice(0, 160)}` };
+                    }
+                  }
+                }
                 const renderHtml = (md: string) => {
                   const inner = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
                   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -471,41 +479,79 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                            ...(cc
                              ? { ccRecipients: [{ emailAddress: { address: cc } }] }
                              : {}),
+                            ...(builtAttachments.length > 0
+                              ? {
+                                  attachments: builtAttachments.map((a) => ({
+                                    "@odata.type": "#microsoft.graph.fileAttachment",
+                                    name: a.filename,
+                                    contentType: a.mimeType,
+                                    contentBytes: a.base64,
+                                  })),
+                                }
+                              : {}),
                          },
                        }),
                      },
                    );
                    if (!r.ok) {
                      const t = await r.text();
-                     await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
+                     await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status, attachments: builtAttachments.map((a) => a.filename) }, "error");
                      return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
                    }
-                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook" });
-                   return { ok: true, provider: "outlook", to, subject };
+                    await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attachments: builtAttachments.map((a) => a.filename) });
+                    return { ok: true, provider: "outlook", to, subject, attachments: builtAttachments.map((a) => a.filename) };
                  }
                  if (process.env.GOOGLE_MAIL_API_KEY) {
-                  const boundary = `bpa_${Math.random().toString(36).slice(2)}`;
-                  const lines = [`To: ${to}`];
-                  if (cc) lines.push(`Cc: ${cc}`);
-                  lines.push(
+                  const altBoundary = `alt_${Math.random().toString(36).slice(2)}`;
+                  const mixedBoundary = `mix_${Math.random().toString(36).slice(2)}`;
+                  const useMixed = builtAttachments.length > 0;
+                  const headerLines: string[] = [`To: ${to}`];
+                  if (cc) headerLines.push(`Cc: ${cc}`);
+                  headerLines.push(
                     `Subject: ${subject}`,
                     "MIME-Version: 1.0",
-                    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+                    useMixed
+                      ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`
+                      : `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
                     "",
-                    `--${boundary}`,
+                  );
+                  const altPart = [
+                    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+                    "",
+                    `--${altBoundary}`,
                     "Content-Type: text/plain; charset=UTF-8",
                     "",
                     emailBody,
                     "",
-                    `--${boundary}`,
+                    `--${altBoundary}`,
                     "Content-Type: text/html; charset=UTF-8",
                     "",
                     renderHtml(emailBody),
                     "",
-                    `--${boundary}--`,
+                    `--${altBoundary}--`,
                     "",
-                  );
-                  const raw = Buffer.from(lines.join("\r\n"))
+                  ].join("\r\n");
+                  let bodyMime: string;
+                  if (useMixed) {
+                    const parts: string[] = [`--${mixedBoundary}`, altPart];
+                    for (const a of builtAttachments) {
+                      parts.push(
+                        `--${mixedBoundary}`,
+                        `Content-Type: ${a.mimeType}; name="${a.filename}"`,
+                        "Content-Transfer-Encoding: base64",
+                        `Content-Disposition: attachment; filename="${a.filename}"`,
+                        "",
+                        // 76-char wrap
+                        a.base64.replace(/.{76}/g, "$&\r\n"),
+                        "",
+                      );
+                    }
+                    parts.push(`--${mixedBoundary}--`, "");
+                    bodyMime = parts.join("\r\n");
+                  } else {
+                    bodyMime = altPart;
+                  }
+                  const raw = Buffer.from(headerLines.join("\r\n") + bodyMime)
                     .toString("base64")
                     .replace(/\+/g, "-")
                     .replace(/\//g, "_")
@@ -520,11 +566,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   );
                   if (!r.ok) {
                     const t = await r.text();
-                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status }, "error");
+                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status, attachments: builtAttachments.map((a) => a.filename) }, "error");
                     return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
                   }
-                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail" });
-                  return { ok: true, provider: "gmail", to, subject };
+                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail", attachments: builtAttachments.map((a) => a.filename) });
+                  return { ok: true, provider: "gmail", to, subject, attachments: builtAttachments.map((a) => a.filename) };
                 }
                 return { error: "No email provider connected." };
               },
