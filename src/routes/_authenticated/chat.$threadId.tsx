@@ -534,6 +534,15 @@ function ThreadView({ threadId }: { threadId: string }) {
       try {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
+          lastUserSpeechAtRef.current = Date.now();
+          // Reset 90s idle auto-stop on every user utterance.
+          if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+          idleTimerRef.current = window.setTimeout(() => {
+            if (voiceStateRef.current === "connected") {
+              setVoiceError("Voice paused after 90s of silence. Tap the mic to resume.");
+              try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
+            }
+          }, 90_000);
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
