@@ -1507,23 +1507,29 @@ function ThreadView({ threadId }: { threadId: string }) {
                 ? "Reconnecting… tap to stop"
                 : voiceActive
                 ? conversation.isSpeaking
-                  ? "Speaking…"
-                  : "Listening… tap to stop"
+                  ? "BPA Bot is speaking — tap to stop voice"
+                  : "Voice is live and listening — tap to stop"
                 : "Tap to talk"
             }
-            className={`relative shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
+            aria-label={voiceActive ? "Stop voice mode" : "Start voice mode"}
+            className={`relative shrink-0 h-10 rounded-full border font-semibold transition-all duration-200 ${
               voiceActive
-                ? "border-red-500 bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.18)]"
-                : "border-border bg-secondary hover:bg-secondary/80 text-primary"
+                ? "w-[8.25rem] border-destructive bg-destructive text-destructive-foreground shadow-lg shadow-destructive/30"
+                : "w-10 border-border bg-secondary hover:bg-secondary/80 text-primary"
             }`}
           >
             {voiceActive && (
-              <span className="absolute inset-0 rounded-full border-2 border-red-500/60 animate-ping pointer-events-none" />
+              <span className="absolute -inset-1 rounded-full border-2 border-destructive/70 animate-ping pointer-events-none" />
             )}
-            <Mic size={18} />
-            {voiceActive && (
-              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-background animate-pulse" />
-            )}
+            <span className="relative z-10 flex h-full items-center justify-center gap-2 px-3">
+              {voiceActive ? <Square size={14} fill="currentColor" /> : <Mic size={18} />}
+              {voiceActive && (
+                <span className="flex items-center gap-1.5 text-xs uppercase">
+                  <span className="h-2 w-2 rounded-full bg-destructive-foreground animate-pulse" />
+                  Stop voice
+                </span>
+              )}
+            </span>
           </button>
           <input
             ref={fileInputRef}
