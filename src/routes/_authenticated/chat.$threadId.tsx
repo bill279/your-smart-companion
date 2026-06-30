@@ -869,6 +869,17 @@ function ThreadView({ threadId }: { threadId: string }) {
     } finally {
       hasConnectedVoiceRef.current = false;
       voiceUserHasSpokenRef.current = false;
+      reconnectAttemptsRef.current = 0;
+      // Clear any half-streamed assistant bubble so the next tap starts clean.
+      liveAssistantRef.current = "";
+      chatPartsThisTurnRef.current = false;
+      setPendingAssistant("");
+      setPendingUser(null);
+      if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+      // Give the WebRTC transport a tick to fully tear down before the user
+      // can tap again — restarting too fast can leave the previous peer
+      // connection half-open and the new session never connects.
+      await new Promise((r) => setTimeout(r, 250));
       setVoiceState("idle");
     }
   }
