@@ -518,6 +518,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       liveAssistantRef.current = corrected;
       setPendingAssistant(cleanAssistantText(corrected));
     },
+    onDebug: (event: unknown) => {
+      const e = event as { type?: string; tentative_user_transcription_event?: { user_transcript?: string } };
+      if (e?.type === "tentative_user_transcript") {
+        const text = e.tentative_user_transcription_event?.user_transcript?.trim();
+        if (text) setPendingUser(text);
+      }
+    },
     onConnect: () => {
       clearVoiceConnectTimeout();
       hasConnectedVoiceRef.current = true;
