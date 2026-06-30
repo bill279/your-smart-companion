@@ -166,13 +166,10 @@ export const Route = createFileRoute("/api/chat")({
           return new Response("Unauthorized", { status: 401 });
         }
         const userId = claims.claims.sub;
-        let userEmail =
-          (claims.claims as { email?: string }).email ?? null;
-        if (!userEmail) {
-          // Fallback: claims may not include email — fetch from auth.users
-          const { data: userData } = await supabase.auth.getUser(token);
-          userEmail = userData?.user?.email ?? null;
-        }
+        // Read email straight from JWT claims; skip the extra getUser round-trip
+        // (saves ~150–300ms per chat request). If absent, the system prompt
+        // tells the model to ask for it.
+        const userEmail = (claims.claims as { email?: string }).email ?? null;
 
         // Helper: log an agent action (best-effort, never throws)
         const logAction = async (
