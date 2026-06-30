@@ -816,19 +816,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       await conversation.startSession({
         signedUrl,
         connectionType: "websocket",
-        overrides: {
-          agent: {
-            firstMessage: " ",
-            prompt: { prompt: VOICE_SESSION_PROMPT },
-          },
-          tts: {
-            stability: 0.72,
-            speed: 1.08,
-          },
-          asr: {
-            keywords: ["BPA Bot", "BP Automation", "Claude", "Codex", "ChatGPT", "Gemini", "Outlook", "Gmail"],
-          },
-        },
         inputChunkDurationMs: 15,
         connectionDelay: { default: 0, android: 0, ios: 0 },
       });
