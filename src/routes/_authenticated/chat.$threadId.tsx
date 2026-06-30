@@ -728,7 +728,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         conversationToken: token,
         connectionType: "webrtc",
         useWakeLock: true,
-        preferHeadphonesForIosDevices: true,
         overrides: {
           agent: {
             firstMessage: " ",
