@@ -482,6 +482,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
       clearVoiceConnectTimeout();
+      if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
       const wasStopping = voiceStateRef.current === "stopping";
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
