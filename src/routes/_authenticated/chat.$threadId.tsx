@@ -699,8 +699,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState("starting");
     setVoiceError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
       const cached = prefetchedVoiceTokenRef.current;
       const token = cached && Date.now() - cached.createdAt < 45_000
         ? cached.token
