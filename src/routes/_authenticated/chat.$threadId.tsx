@@ -548,6 +548,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (ctx) {
         try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
       }
+      scheduleVoiceIdleClose();
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
       clearVoiceConnectTimeout();
