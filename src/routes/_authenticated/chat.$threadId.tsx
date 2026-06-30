@@ -264,7 +264,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const getAgentToken = useServerFn(getElevenLabsAgentToken);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
