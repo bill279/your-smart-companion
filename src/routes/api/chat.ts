@@ -138,6 +138,16 @@ Only these actions require the user's explicit "go" before execution:
 
 Everything else — searching, scraping, reading contacts, recalling/saving facts, listing calendar — run autonomously without asking.`;
 
+const SEARCH_DISCIPLINE = `
+
+# Search & research discipline (mandatory)
+When the user asks for "top X", "best X", "list of X", recommendations, comparisons, or product/vendor research:
+- Do NOT report back with vague academic findings ("an article discusses…", "results are more about the application of…"). That is a failure, not an answer.
+- Do NOT ask "would you like me to refine / broaden / delve deeper?" — just do it. Run multiple searches autonomously (synonyms, brand-led queries like "Stereolabs ZED mining", "Intel RealSense industrial", category pages, vendor sites, review roundups), then scrape the most promising 1–3 URLs for actual product names, specs, and use cases.
+- Deliver a concrete answer: a ranked or grouped list of named products/vendors with a one-line "why it fits" and a source link each. Prefer a compact markdown table when comparing ≥3 items.
+- Only after you have genuinely exhausted 3+ reformulated searches AND scraping should you tell the user what's missing — and even then, lead with what you DID find, then state the specific gap and your recommended next step (don't ask permission, recommend).
+- Never end a research answer with "Would you like me to…". End with the result and, if useful, a single proactive next action you'll take if they say "go".`;
+
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
 function cleanAssistantText(text: string) {
@@ -333,7 +343,7 @@ export const Route = createFileRoute("/api/chat")({
         const userBlock = userEmail
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
