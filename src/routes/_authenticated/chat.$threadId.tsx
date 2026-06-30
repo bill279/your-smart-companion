@@ -288,6 +288,27 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const conversation = useConversation({
     clientTools: {
+      show_in_chat: async (params: { markdown?: string; content?: string }) => {
+        // Render rich content (tables, lists, code, long drafts) directly in
+        // the chat WITHOUT the voice agent speaking it. The agent should call
+        // this whenever the user asks for a table/list/code/email draft so
+        // the audio stays a short spoken summary while the visual appears
+        // instantly in the transcript.
+        const md = (params.markdown ?? params.content ?? "").trim();
+        if (!md) return JSON.stringify({ error: "markdown required" });
+        try {
+          setPendingAssistant(md);
+          liveAssistantRef.current = md;
+          await add({ data: { threadId, role: "assistant", content: md } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          setPendingAssistant("");
+          liveAssistantRef.current = "";
+          return JSON.stringify({ ok: true });
+        } catch (err) {
+          console.warn("show_in_chat failed", err);
+          return JSON.stringify({ error: "failed to render" });
+        }
+      },
       web_search: async (params: { query?: string; limit?: number }) => {
         const query = params.query?.trim();
         if (!query) return JSON.stringify({ error: "query required" });
