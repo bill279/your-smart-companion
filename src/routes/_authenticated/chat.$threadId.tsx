@@ -48,7 +48,8 @@ const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, stru
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
 type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
-const MAX_VOICE_RECONNECT_ATTEMPTS = 2;
+const MAX_VOICE_RECONNECT_ATTEMPTS = 1;
+const VOICE_IDLE_MS = 60_000;
 
 function cleanAssistantText(text: string) {
   return text
@@ -547,6 +548,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (ctx) {
         try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
       }
+      scheduleVoiceIdleClose();
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
       clearVoiceConnectTimeout();
@@ -617,6 +619,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           lastUserSpeechAtRef.current = Date.now();
+          scheduleVoiceIdleClose();
           // New user turn — reset the per-turn streaming source flag so
           // the next assistant turn can correctly pick between chat parts
           // and audio alignment without leftover state from the prior turn.
@@ -634,6 +637,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          scheduleVoiceIdleClose();
           if (looksUnstableVoiceText(cleaned)) {
             setPendingAssistant("");
             liveAssistantRef.current = "";
@@ -681,6 +685,21 @@ function ThreadView({ threadId }: { threadId: string }) {
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+  }
+
+  function scheduleVoiceIdleClose() {
+    if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      if (!conversationRef.current) return;
+      // No activity for the idle window — close the voice session to stop
+      // burning ElevenLabs credits. The user can tap the mic to resume.
+      wantsVoiceModeRef.current = false;
+      setVoiceState("stopping");
+      void Promise.resolve(conversationRef.current.endSession())
+        .catch(() => {})
+        .finally(() => setVoiceState("idle"));
+    }, VOICE_IDLE_MS);
   }
 
   function scheduleVoiceReconnect(reason?: string) {
@@ -1371,7 +1390,9 @@ function ThreadView({ threadId }: { threadId: string }) {
               );
             })}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
-            {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
+            {pendingAssistant && messages[messages.length - 1]?.content?.trim() !== pendingAssistant.trim() && (
+              <Bubble role="assistant" content={pendingAssistant} streaming />
+            )}
             {addMut.isPending && !pendingAssistant && !isConnected && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
