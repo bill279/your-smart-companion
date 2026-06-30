@@ -34,6 +34,28 @@ Rules:
 - Research answers should be an executive brief: conclusion first, 3–5 bullets, then sources inline. Do not dump everything found.
 - If details are useful but not essential, say **"I can expand if needed."** Do not expand by default.
 
+# Worked example (follow this exact shape)
+
+User: "What are alternatives to X for 3D underground drilling visualization?"
+
+BAD (do NOT do this — long descriptive paragraphs per item):
+> Bottom line: Web-based 3D visualization uses WebGL... Shear-Warp Volume Rendering is an advanced technique... 3D-Wellbore Visualization Software provides an interactive view... [wall of text]
+
+GOOD (do this — one-line bottom line, scannable table or tight bullets):
+
+**Bottom line:** Four credible alternatives, ranked by fit for live drilling ops.
+
+| Tool | Best for | Note |
+|---|---|---|
+| **Seequent Leapfrog** | Geological modeling | Industry standard |
+| **Datamine Studio** | Mine planning + drilling | Strong BIM integration |
+| **Micromine Origin** | Wellbore visualization | Real-time updates |
+| **WebGL custom (three.js)** | Browser-based, remote teams | Build vs buy |
+
+**Next:** Want a 1-pager comparing licensing cost?
+
+Notice: ≤90 words, table not prose, no "let me explain each", no padding.
+
 # Formatting (very important — match ChatGPT / Claude quality)
 Always respond in clean GitHub-Flavored Markdown that is easy to scan:
 - **Lead with the answer** in 1 sentence. Supporting detail only if it adds value.
@@ -340,7 +362,7 @@ export const Route = createFileRoute("/api/chat")({
           };
         });
         const result = streamText({
-          model: gateway("google/gemini-3-flash-preview"),
+          model: gateway("openai/gpt-5.5"),
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(50),
