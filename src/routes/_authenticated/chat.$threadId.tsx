@@ -327,6 +327,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const liveAssistantRef = useRef<string>("");
   const voiceStopPromiseRef = useRef<Promise<void> | null>(null);
   const voiceRestartReadyAtRef = useRef(0);
+  const voiceResetInProgressRef = useRef(false);
   // Tracks whether the current voice turn is already streaming text via
   // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
   // bubble doesn't get doubled (chat parts + per-character audio chars),
@@ -565,6 +566,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
       const wasStopping = voiceStateRef.current === "stopping";
       pendingContextRef.current = "";
+      if (voiceResetInProgressRef.current) return;
       if (wasStopping) {
         setVoiceState("idle");
         return;
@@ -738,6 +740,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function endExistingVoiceTransport() {
     clearVoiceConnectTimeout();
     clearVoiceReconnectTimer();
+    voiceResetInProgressRef.current = true;
     pendingContextRef.current = "";
     liveAssistantRef.current = "";
     chatPartsThisTurnRef.current = false;
@@ -751,6 +754,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     voiceRestartReadyAtRef.current = Date.now() + VOICE_RESTART_COOLDOWN_MS;
     await waitForVoiceTransportReady();
+    voiceResetInProgressRef.current = false;
   }
 
   function scheduleVoiceReconnect(reason?: string) {
