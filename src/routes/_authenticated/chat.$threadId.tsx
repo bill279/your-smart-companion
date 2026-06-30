@@ -545,6 +545,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           lastUserSpeechAtRef.current = Date.now();
+          // New user turn — reset the per-turn streaming source flag so
+          // the next assistant turn can correctly pick between chat parts
+          // and audio alignment without leftover state from the prior turn.
+          chatPartsThisTurnRef.current = false;
+          liveAssistantRef.current = "";
           // Reset 90s idle auto-stop on every user utterance.
           if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
           idleTimerRef.current = window.setTimeout(() => {
@@ -568,6 +573,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingAssistant("");
           liveAssistantRef.current = "";
+          chatPartsThisTurnRef.current = false;
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
