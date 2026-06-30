@@ -13,6 +13,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
+  getElevenLabsAgentSignedUrl,
   getElevenLabsAgentToken,
   getThreadMessages,
   listThreads,
@@ -47,7 +48,7 @@ const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automatio
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
-type VoiceUiState = "idle" | "starting" | "connected" | "stopping";
+type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
 
 function cleanAssistantText(text: string) {
   return text
@@ -265,6 +266,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const getAgentToken = useServerFn(getElevenLabsAgentToken);
+  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -312,7 +314,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastUserSpeechAtRef = useRef<number>(0);
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
-  const prefetchedVoiceTokenRef = useRef<{ token: string; createdAt: number } | null>(null);
+  const prefetchedVoiceUrlRef = useRef<{ signedUrl: string; createdAt: number } | null>(null);
   // Tracks whether the current voice turn is already streaming text via
   // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
   // bubble doesn't get doubled (chat parts + per-character audio chars),
@@ -365,9 +367,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   useEffect(() => {
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) return;
     let cancelled = false;
-    getAgentToken({})
-      .then(({ token }) => {
-        if (!cancelled) prefetchedVoiceTokenRef.current = { token, createdAt: Date.now() };
+    getAgentSignedUrl({})
+      .then(({ signedUrl }) => {
+        if (!cancelled) prefetchedVoiceUrlRef.current = { signedUrl, createdAt: Date.now() };
       })
       .catch((err) => console.warn("voice token prefetch failed", err));
     return () => {
@@ -560,22 +562,26 @@ function ThreadView({ threadId }: { threadId: string }) {
       clearVoiceConnectTimeout();
       if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
       const wasStopping = voiceStateRef.current === "stopping";
-      voiceStateRef.current = "idle";
-      setVoiceUiState("idle");
       pendingContextRef.current = "";
-      if (wasStopping) return;
+      if (wasStopping) {
+        setVoiceState("idle");
+        return;
+      }
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
         wantsVoiceModeRef.current = false;
+        setVoiceState("idle");
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
       // Voice mode is intentionally persistent: if ElevenLabs drops the
       // transport, reconnect automatically until the user taps the mic to stop.
       if (wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
+        setVoiceState("reconnecting");
         scheduleVoiceReconnect(closeText);
         return;
       }
+      setVoiceState("idle");
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
         setVoiceError(closeText || "Voice disconnected. Reconnecting automatically…");
@@ -586,18 +592,20 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
       clearVoiceConnectTimeout();
-      voiceStateRef.current = "idle";
-      setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
       if (/quota/i.test(msg)) {
         wantsVoiceModeRef.current = false;
+        setVoiceState("idle");
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       } else if (/permission|notallowed/i.test(msg)) {
         wantsVoiceModeRef.current = false;
+        setVoiceState("idle");
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
       } else if (wantsVoiceModeRef.current) {
+        setVoiceState("reconnecting");
         scheduleVoiceReconnect(msg);
       } else {
+        setVoiceState("idle");
         setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
       }
     },
@@ -699,12 +707,11 @@ function ThreadView({ threadId }: { threadId: string }) {
     const attempt = reconnectAttemptsRef.current + 1;
     reconnectAttemptsRef.current = attempt;
     const delay = Math.min(500 * 2 ** Math.min(attempt - 1, 4), 8000);
-    setVoiceState("starting");
+    setVoiceState("reconnecting");
     setVoiceError(attempt > 2 ? "Voice connection is unstable — reconnecting automatically…" : null);
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       if (!wantsVoiceModeRef.current || voiceStateRef.current === "connected") return;
-      setVoiceState("idle");
       void startVoice({ automaticReconnect: true });
     }, delay);
   }
@@ -761,7 +768,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     startAttemptRef.current = attemptId;
     if (!options.automaticReconnect) hasConnectedVoiceRef.current = false;
     voiceUserHasSpokenRef.current = false;
-    setVoiceState("starting");
+    setVoiceState(options.automaticReconnect ? "reconnecting" : "starting");
     setVoiceError(null);
     try {
       // Request mic access immediately on a manual tap so browser gesture rules
@@ -771,28 +778,29 @@ function ThreadView({ threadId }: { threadId: string }) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach((track) => track.stop());
       }
-      const cached = prefetchedVoiceTokenRef.current;
-      const token = cached && Date.now() - cached.createdAt < 45_000
-        ? cached.token
-        : (await getAgentToken({})).token;
-      prefetchedVoiceTokenRef.current = null;
+      const cached = prefetchedVoiceUrlRef.current;
+      const signedUrl = cached && Date.now() - cached.createdAt < 45_000
+        ? cached.signedUrl
+        : (await getAgentSignedUrl({})).signedUrl;
+      prefetchedVoiceUrlRef.current = null;
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
       connectTimeoutRef.current = window.setTimeout(() => {
-        if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
-        setVoiceState("idle");
+        if (startAttemptRef.current !== attemptId || !["starting", "reconnecting"].includes(voiceStateRef.current)) return;
         pendingContextRef.current = "";
         if (wantsVoiceModeRef.current) {
+          setVoiceState("reconnecting");
           scheduleVoiceReconnect("connect timeout");
         } else {
+          setVoiceState("idle");
           setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         }
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 10000);
       await conversation.startSession({
-        conversationToken: token,
-        connectionType: "webrtc",
+        signedUrl,
+        connectionType: "websocket",
         overrides: {
           agent: {
             firstMessage: " ",
@@ -1098,8 +1106,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceActive = voiceUiState === "connected" || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceActive = voiceUiState === "connected" || voiceUiState === "reconnecting" || (voiceUiState === "starting" && conversation.status !== "error");
   const voiceConnecting = voiceUiState === "starting";
+  const voiceReconnecting = voiceUiState === "reconnecting";
 
   return (
     <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
@@ -1449,6 +1458,8 @@ function ThreadView({ threadId }: { threadId: string }) {
             title={
               voiceConnecting
                 ? "Connecting…"
+                : voiceReconnecting
+                ? "Reconnecting… tap to stop"
                 : voiceActive
                 ? conversation.isSpeaking
                   ? "Speaking…"
@@ -1499,6 +1510,8 @@ function ThreadView({ threadId }: { threadId: string }) {
             placeholder={
               voiceConnecting
                 ? "Connecting voice…"
+                : voiceReconnecting
+                ? "Reconnecting voice…"
                 : voiceActive
                 ? conversation.isSpeaking
                   ? "BPA Bot is speaking…"
