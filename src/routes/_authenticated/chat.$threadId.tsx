@@ -501,7 +501,12 @@ function ThreadView({ threadId }: { threadId: string }) {
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
       }
-      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
+      if (looksUnstableVoiceText(liveAssistantRef.current)) {
+        // Don't leave a stale half-streamed bubble visible if the stream
+        // started generating gibberish — clear it so we don't ghost the UI.
+        setPendingAssistant("");
+        return;
+      }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
@@ -864,6 +869,17 @@ function ThreadView({ threadId }: { threadId: string }) {
     } finally {
       hasConnectedVoiceRef.current = false;
       voiceUserHasSpokenRef.current = false;
+      reconnectAttemptsRef.current = 0;
+      // Clear any half-streamed assistant bubble so the next tap starts clean.
+      liveAssistantRef.current = "";
+      chatPartsThisTurnRef.current = false;
+      setPendingAssistant("");
+      setPendingUser(null);
+      if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+      // Give the WebRTC transport a tick to fully tear down before the user
+      // can tap again — restarting too fast can leave the previous peer
+      // connection half-open and the new session never connects.
+      await new Promise((r) => setTimeout(r, 250));
       setVoiceState("idle");
     }
   }
@@ -1390,9 +1406,27 @@ function ThreadView({ threadId }: { threadId: string }) {
               );
             })}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
-            {pendingAssistant && messages[messages.length - 1]?.content?.trim() !== pendingAssistant.trim() && (
-              <Bubble role="assistant" content={pendingAssistant} streaming />
-            )}
+            {(() => {
+              const p = pendingAssistant.trim();
+              if (!p) return null;
+              // Hide the streaming bubble if any recent assistant message
+              // already contains (or matches the start of) this text — that
+              // means the saved message has caught up and the pending bubble
+              // is just a stale ghost from a prior partial stream.
+              const recent = messages.slice(-3);
+              const norm = (s: string) => s.trim().replace(/\s+/g, " ");
+              const pn = norm(p);
+              const head = pn.slice(0, 60);
+              for (const m of recent) {
+                if (m.role !== "assistant") continue;
+                const mn = norm(m.content || "");
+                if (!mn) continue;
+                if (mn === pn || mn.startsWith(pn) || pn.startsWith(mn) || mn.includes(head)) {
+                  return null;
+                }
+              }
+              return <Bubble role="assistant" content={pendingAssistant} streaming />;
+            })()}
             {addMut.isPending && !pendingAssistant && !isConnected && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
