@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
 import { exportToPdf, exportToDocx, exportToXlsx, exportToCsv } from "@/lib/chat-export";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
@@ -99,6 +99,61 @@ function CopyButton({ text, className = "" }: { text: string; className?: string
       {copied ? <Check size={12} /> : <Copy size={12} />}
       <span>{copied ? "Copied" : "Copy"}</span>
     </button>
+  );
+}
+
+function FeedbackButtons({ messageId }: { messageId: string }) {
+  const [rating, setRating] = useState<"up" | "down" | null>(null);
+  const [saving, setSaving] = useState(false);
+  async function submit(next: "up" | "down") {
+    if (saving) return;
+    setSaving(true);
+    const note =
+      next === "down"
+        ? window.prompt("What was wrong? (optional — helps BPA Bot learn)") ?? ""
+        : "";
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setSaving(false);
+      return;
+    }
+    const { error } = await supabase.from("message_feedback").upsert(
+      {
+        user_id: user.id,
+        message_id: messageId,
+        rating: next,
+        note: note.trim() || null,
+      },
+      { onConflict: "user_id,message_id" },
+    );
+    if (!error) setRating(next);
+    setSaving(false);
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => submit("up")}
+        title="Helpful"
+        className={`inline-flex items-center text-xs transition px-1.5 py-1 rounded hover:text-foreground ${
+          rating === "up" ? "text-primary" : "text-muted-foreground"
+        }`}
+      >
+        <ThumbsUp size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={() => submit("down")}
+        title="Not helpful"
+        className={`inline-flex items-center text-xs transition px-1.5 py-1 rounded hover:text-foreground ${
+          rating === "down" ? "text-destructive" : "text-muted-foreground"
+        }`}
+      >
+        <ThumbsDown size={12} />
+      </button>
+    </>
   );
 }
 
@@ -1138,6 +1193,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                   key={m.id}
                   role={m.role}
                   content={m.content}
+                  messageId={m.id}
                   attachments={Array.isArray(att) ? att : []}
                 />
               );
@@ -1354,11 +1410,13 @@ function Bubble({
   content,
   attachments = [],
   streaming = false,
+  messageId,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
   streaming?: boolean;
+  messageId?: string;
 }) {
   const isUser = role === "user";
   const displayContent = isUser ? content : cleanAssistantText(content);
@@ -1415,8 +1473,9 @@ function Bubble({
           )}
         </div>
         {!streaming && displayContent && (
-          <div className="mt-2 opacity-0 group-hover:opacity-100 transition">
+          <div className="mt-2 flex items-center gap-1 opacity-60 md:opacity-0 md:group-hover:opacity-100 transition">
             <CopyButton text={displayContent} />
+            {messageId && <FeedbackButtons messageId={messageId} />}
           </div>
         )}
       </div>

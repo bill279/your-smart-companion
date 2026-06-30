@@ -46,6 +46,7 @@ You have tools:
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
 - search_knowledge_base — semantic search over the user's uploaded company documents/SOPs (PDFs, docs, notes). Use this FIRST whenever the user asks about internal/company-specific info, processes, products, pricing sheets, policies, or anything that sounds like it would live in their files. Cite the document name in the answer.
 - generate_document — create a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown content and return a download link. Use this whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc. Never say you cannot generate or attach a file — call this tool, then present the returned URL as a Markdown link like [Download report.pdf](url).
+- save_lesson — silently record a lesson the assistant should apply forever (e.g. user corrections, recurring preferences, "next time do X not Y"). Call this whenever the user corrects you, gives a thumbs-down explanation, or expresses a workflow preference. Do NOT announce it.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
 
@@ -277,7 +278,7 @@ export const Route = createFileRoute("/api/chat")({
         // turns — anything older is rarely useful and just inflates latency
         // and token cost. Durable context lives in user_facts.
         const HISTORY_LIMIT = 40;
-        const [histRes, factsRes] = await Promise.all([
+        const [histRes, factsRes, lessonsRes, feedbackRes] = await Promise.all([
           supabase
             .from("messages")
             .select("role,content")
@@ -289,10 +290,23 @@ export const Route = createFileRoute("/api/chat")({
             .select("key,value")
             .order("updated_at", { ascending: false })
             .limit(50),
+          supabase
+            .from("lessons_learned")
+            .select("lesson,context")
+            .order("created_at", { ascending: false })
+            .limit(20),
+          supabase
+            .from("message_feedback")
+            .select("rating,note,created_at")
+            .eq("rating", "down")
+            .order("created_at", { ascending: false })
+            .limit(5),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         const rows = (histRes.data ?? []).slice().reverse();
         const factRows = factsRes.data;
+        const lessonRows = lessonsRes.data ?? [];
+        const feedbackRows = feedbackRes.data ?? [];
 
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
         const factsBlock =
@@ -302,10 +316,24 @@ export const Route = createFileRoute("/api/chat")({
                 .join("\n")}\nUse these naturally. If a fact is wrong, offer to update or forget it.`
             : "";
 
+        const lessonsBlock =
+          lessonRows.length > 0
+            ? `\n\n# Lessons learned (apply these automatically)\nThese are corrections and preferences captured from past conversations. Treat them as standing rules unless the user clearly overrides one.\n${lessonRows
+                .map((l) => `- ${l.lesson}${l.context ? ` (context: ${l.context})` : ""}`)
+                .join("\n")}`
+            : "";
+
+        const feedbackBlock =
+          feedbackRows.length > 0
+            ? `\n\n# Recent thumbs-down feedback\nThe user marked recent answers as unhelpful. Avoid repeating these mistakes. When relevant, silently call \`save_lesson\` to record the fix.\n${feedbackRows
+                .map((f) => `- ${f.note ? f.note : "(no note)"}`)
+                .join("\n")}`
+            : "";
+
         const userBlock = userEmail
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${userBlock}${factsBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
@@ -751,6 +779,33 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 if (error) return { error: error.message };
                 await logAction("forget_fact", `Forgot ${normKey}`, { key: normKey });
                 return { ok: true, key: normKey };
+              },
+            }),
+            save_lesson: tool({
+              description:
+                "Silently record a durable lesson the assistant should apply in every future conversation (e.g. a user correction, a workflow preference, 'always cc John on client emails'). Do not mention to the user that you saved it.",
+              inputSchema: z.object({
+                lesson: z
+                  .string()
+                  .min(4)
+                  .max(500)
+                  .describe("The standing rule, phrased as an instruction (e.g. 'Always send emails in plain text, not HTML')."),
+                context: z
+                  .string()
+                  .max(300)
+                  .optional()
+                  .describe("Short context for when this lesson applies."),
+              }),
+              execute: async ({ lesson, context }) => {
+                const { error } = await supabase.from("lessons_learned").insert({
+                  user_id: userId,
+                  lesson: lesson.trim(),
+                  context: context?.trim() ?? null,
+                  source: "auto",
+                });
+                if (error) return { error: error.message };
+                await logAction("save_lesson", `Lesson: ${lesson.slice(0, 80)}`, { lesson, context });
+                return { ok: true };
               },
             }),
             search_knowledge_base: tool({
