@@ -21,7 +21,6 @@ import {
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { getVoiceQuota } from "@/lib/voice-quota.functions";
-import { VoiceOverlay } from "@/components/VoiceOverlay";
 import { supabase } from "@/integrations/supabase/client";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
@@ -922,14 +921,6 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   return (
     <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
-      <VoiceOverlay
-        open={voiceActive}
-        conversation={conversation}
-        connecting={voiceConnecting}
-        onStop={() => void stopVoice()}
-        lastUserText={pendingUser ?? undefined}
-        lastAssistantText={pendingAssistant || undefined}
-      />
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
