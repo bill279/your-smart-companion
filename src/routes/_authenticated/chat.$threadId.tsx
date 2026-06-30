@@ -585,7 +585,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       clearVoiceConnectTimeout();
       stopVoiceKeepAlive();
       sessionStartingRef.current = false;
-      const wasStopping = voiceStateRef.current === "stopping";
+      const wasStopping = voiceStateRef.current === "stopping" || stopRequestedRef.current;
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       pendingContextRef.current = "";
