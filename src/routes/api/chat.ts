@@ -462,6 +462,54 @@ export const Route = createFileRoute("/api/chat")({
                 };
               },
             }),
+            search_images: tool({
+              description:
+                "Search the web for IMAGES (product photos, what something looks like). Returns image URLs. ALWAYS render the top 2-4 results inline in your reply as Markdown image syntax: ![title](image_url) — one per line — followed by a short caption with a [source](page_url) link. Never say you cannot display images.",
+              inputSchema: z.object({
+                query: z.string().describe("What to find pictures of"),
+                limit: z.number().int().min(1).max(8).optional(),
+              }),
+              execute: async ({ query, limit }) => {
+                const key = process.env.FIRECRAWL_API_KEY;
+                if (!key) return { error: "Image search not configured" };
+                const ac = new AbortController();
+                const t = setTimeout(() => ac.abort(), 10000);
+                let r: Response;
+                try {
+                  r = await fetch("https://api.firecrawl.dev/v2/search", {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${key}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      query,
+                      limit: Math.min(limit ?? 5, 8),
+                      sources: ["images"],
+                    }),
+                    signal: ac.signal,
+                  });
+                } catch {
+                  return { error: "Image search timed out." };
+                } finally {
+                  clearTimeout(t);
+                }
+                if (!r.ok) return { error: `Image search failed (${r.status})` };
+                const j = (await r.json()) as {
+                  data?:
+                    | { images?: Array<{ title?: string; imageUrl?: string; url?: string; image_url?: string }> }
+                    | Array<{ title?: string; imageUrl?: string; url?: string; image_url?: string }>;
+                };
+                const arr = Array.isArray(j.data) ? j.data : j.data?.images ?? [];
+                return {
+                  images: arr.slice(0, limit ?? 5).map((x) => ({
+                    title: x.title,
+                    image_url: x.imageUrl ?? x.image_url,
+                    source_url: x.url,
+                  })).filter((x) => x.image_url),
+                };
+              },
+            }),
             send_email: tool({
               description:
                 "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves.",
