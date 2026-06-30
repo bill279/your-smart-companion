@@ -1172,8 +1172,9 @@ function ThreadView({ threadId }: { threadId: string }) {
         )}
         <form
           onSubmit={onSubmit}
-          className="relative z-10 mx-4 md:mx-10 mb-6 rounded-xl border border-border bg-card shadow-sm p-2 flex flex-col gap-2"
+          className="relative z-10 mx-auto w-full max-w-3xl px-4 md:px-6 mb-6"
         >
+          <div className="rounded-2xl border border-border bg-card shadow-sm p-2 flex flex-col gap-2">
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-1 pt-1">
               {attachments.map((a) => (
@@ -1241,10 +1242,22 @@ function ThreadView({ threadId }: { threadId: string }) {
           >
             <Paperclip size={16} />
           </button>
-          <input
+          <textarea
             autoFocus
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              const el = e.currentTarget;
+              el.style.height = "auto";
+              el.style.height = Math.min(el.scrollHeight, 220) + "px";
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
+              }
+            }}
+            rows={1}
             placeholder={
               voiceConnecting
                 ? "Connecting voice…"
@@ -1254,7 +1267,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                   : "Listening… or type"
                 : "Message BPA Bot…"
             }
-            className="flex-1 bg-transparent outline-none px-3 text-sm"
+            className="flex-1 bg-transparent outline-none px-3 py-2 text-[15px] leading-6 resize-none max-h-[220px] min-h-[40px]"
           />
           {addMut.isPending && !isConnected ? (
             <button
@@ -1274,6 +1287,7 @@ function ThreadView({ threadId }: { threadId: string }) {
               <Send size={14} /> Send
             </button>
           )}
+          </div>
           </div>
         </form>
         {/* Regenerate action below composer when there's an assistant message and we're idle */}
