@@ -635,8 +635,13 @@ function ThreadView({ threadId }: { threadId: string }) {
           await add({ data: { threadId, role: "assistant", content: cleaned } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           if (!mountedRef.current) return;
-          setPendingAssistant("");
-          resetLiveVoiceAssistant();
+          // Clear the live caption only after the persisted message is in
+          // the refetched list — otherwise the screen flashes empty.
+          requestAnimationFrame(() => {
+            if (!mountedRef.current) return;
+            setPendingAssistant("");
+            resetLiveVoiceAssistant();
+          });
           const t = threads.data?.find((x) => x.id === threadId);
           if (t && t.title === "New conversation") {
             const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
