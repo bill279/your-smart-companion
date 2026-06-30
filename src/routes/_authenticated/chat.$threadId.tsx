@@ -1355,11 +1355,13 @@ function Bubble({
   content,
   attachments = [],
   streaming = false,
+  messageId,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
   streaming?: boolean;
+  messageId?: string;
 }) {
   const isUser = role === "user";
   const displayContent = isUser ? content : cleanAssistantText(content);
@@ -1416,8 +1418,9 @@ function Bubble({
           )}
         </div>
         {!streaming && displayContent && (
-          <div className="mt-2 opacity-0 group-hover:opacity-100 transition">
+          <div className="mt-2 flex items-center gap-1 opacity-60 md:opacity-0 md:group-hover:opacity-100 transition">
             <CopyButton text={displayContent} />
+            {messageId && <FeedbackButtons messageId={messageId} />}
           </div>
         )}
       </div>
