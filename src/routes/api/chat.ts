@@ -992,7 +992,82 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
           },
         });
 
-        return result.toTextStreamResponse();
+        // Custom stream: interleave text deltas with tool activity events so the
+        // client can render "what BPA Bot is doing" chips (search/scrape/etc.)
+        // like ChatGPT/Claude. Tool events are sentinel-wrapped JSON:
+        //   \u0000{"t":"tool-start","id":...,"name":...,"label":...}\u0000
+        const labelForTool = (name: string, input: unknown): string => {
+          const a = (input ?? {}) as Record<string, unknown>;
+          switch (name) {
+            case "web_search":
+            case "product_search":
+              return typeof a.query === "string" ? a.query : name;
+            case "web_scrape":
+              return typeof a.url === "string" ? a.url : name;
+            case "send_email":
+              return typeof a.to === "string" ? `Email → ${a.to}` : "Send email";
+            case "save_contact":
+              return typeof a.name === "string" ? `Save contact: ${a.name}` : "Save contact";
+            case "create_calendar_event":
+              return typeof a.title === "string" ? `Calendar: ${a.title}` : "Create event";
+            case "list_calendar_events":
+              return "Check calendar";
+            case "list_contacts":
+              return "Look up contacts";
+            case "search_knowledge_base":
+              return typeof a.query === "string" ? `Knowledge: ${a.query}` : "Search knowledge";
+            case "recall_facts":
+              return "Recall memory";
+            case "remember_fact":
+              return typeof a.key === "string" ? `Remember: ${a.key}` : "Remember fact";
+            case "forget_fact":
+              return typeof a.key === "string" ? `Forget: ${a.key}` : "Forget fact";
+            default:
+              return name;
+          }
+        };
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              for await (const part of result.fullStream) {
+                if (part.type === "text-delta") {
+                  const delta = (part as unknown as { text?: string; textDelta?: string }).text
+                    ?? (part as unknown as { textDelta?: string }).textDelta
+                    ?? "";
+                  if (delta) controller.enqueue(encoder.encode(delta));
+                } else if (part.type === "tool-call") {
+                  const p = part as unknown as { toolCallId: string; toolName: string; input?: unknown; args?: unknown };
+                  const evt = {
+                    t: "tool-start",
+                    id: p.toolCallId,
+                    name: p.toolName,
+                    label: labelForTool(p.toolName, p.input ?? p.args),
+                  };
+                  controller.enqueue(encoder.encode(`\u0000${JSON.stringify(evt)}\u0000`));
+                } else if (part.type === "tool-result") {
+                  const p = part as unknown as { toolCallId: string; toolName: string };
+                  const evt = { t: "tool-end", id: p.toolCallId, name: p.toolName };
+                  controller.enqueue(encoder.encode(`\u0000${JSON.stringify(evt)}\u0000`));
+                } else if (part.type === "error") {
+                  // surface as a tool-end so chips don't spin forever
+                  const evt = { t: "error" };
+                  controller.enqueue(encoder.encode(`\u0000${JSON.stringify(evt)}\u0000`));
+                }
+              }
+              controller.close();
+            } catch (err) {
+              controller.error(err);
+            }
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+          },
+        });
       },
     },
   },
