@@ -166,13 +166,10 @@ export const Route = createFileRoute("/api/chat")({
           return new Response("Unauthorized", { status: 401 });
         }
         const userId = claims.claims.sub;
-        let userEmail =
-          (claims.claims as { email?: string }).email ?? null;
-        if (!userEmail) {
-          // Fallback: claims may not include email — fetch from auth.users
-          const { data: userData } = await supabase.auth.getUser(token);
-          userEmail = userData?.user?.email ?? null;
-        }
+        // Read email straight from JWT claims; skip the extra getUser round-trip
+        // (saves ~150–300ms per chat request). If absent, the system prompt
+        // tells the model to ask for it.
+        const userEmail = (claims.claims as { email?: string }).email ?? null;
 
         // Helper: log an agent action (best-effort, never throws)
         const logAction = async (
@@ -240,15 +237,19 @@ export const Route = createFileRoute("/api/chat")({
 
         // Generate signed URLs for any attachments on the just-sent message
         // (used as multimodal blocks for the model on this turn).
+        // Sign all attachment URLs in parallel.
+        const signedResults = await Promise.all(
+          attachments.map((a) =>
+            supabase.storage.from("chat-uploads").createSignedUrl(a.path, 60 * 60),
+          ),
+        );
         const turnAttachmentBlocks: Array<
           | { type: "image"; image: URL; mediaType: string }
           | { type: "file"; data: URL; mediaType: string; filename: string }
         > = [];
-        for (const a of attachments) {
-          const { data: signed } = await supabase.storage
-            .from("chat-uploads")
-            .createSignedUrl(a.path, 60 * 60);
-          if (!signed?.signedUrl) continue;
+        attachments.forEach((a, i) => {
+          const signed = signedResults[i]?.data;
+          if (!signed?.signedUrl) return;
           const url = new URL(signed.signedUrl);
           if (a.mimeType.startsWith("image/")) {
             turnAttachmentBlocks.push({ type: "image", image: url, mediaType: a.mimeType });
@@ -260,24 +261,30 @@ export const Route = createFileRoute("/api/chat")({
               filename: a.name,
             });
           }
-        }
+        });
 
-        // Load full history
-        const { data: rows, error: histErr } = await supabase
-          .from("messages")
-          .select("role,content")
-          .eq("thread_id", body.threadId)
-          .order("created_at", { ascending: true });
-        if (histErr) return new Response(histErr.message, { status: 400 });
+        // Load recent history + facts in parallel. Cap history at the last 40
+        // turns — anything older is rarely useful and just inflates latency
+        // and token cost. Durable context lives in user_facts.
+        const HISTORY_LIMIT = 40;
+        const [histRes, factsRes] = await Promise.all([
+          supabase
+            .from("messages")
+            .select("role,content")
+            .eq("thread_id", body.threadId)
+            .order("created_at", { ascending: false })
+            .limit(HISTORY_LIMIT),
+          supabase
+            .from("user_facts")
+            .select("key,value")
+            .order("updated_at", { ascending: false })
+            .limit(50),
+        ]);
+        if (histRes.error) return new Response(histRes.error.message, { status: 400 });
+        const rows = (histRes.data ?? []).slice().reverse();
+        const factRows = factsRes.data;
 
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
-
-        // Load durable user facts to inject into the system prompt
-        const { data: factRows } = await supabase
-          .from("user_facts")
-          .select("key,value")
-          .order("updated_at", { ascending: false })
-          .limit(50);
         const factsBlock =
           factRows && factRows.length > 0
             ? `\n\n# Remembered facts about this user\n${factRows
