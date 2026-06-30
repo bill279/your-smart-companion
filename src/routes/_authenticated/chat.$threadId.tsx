@@ -265,6 +265,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const connectTimeoutRef = useRef<number | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const keepAliveIntervalRef = useRef<number | null>(null);
   const pendingAssistantRafRef = useRef<number | null>(null);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
@@ -272,7 +273,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const liveTextEventIdRef = useRef<number | null>(null);
   const liveTextFromPartsRef = useRef(false);
   const lastVoiceUserAtRef = useRef(0);
+  const lastVoiceActivityAtRef = useRef(0);
   const lastAssistantTextRef = useRef<string>("");
+  const stopRequestedRef = useRef(false);
+  const sessionStartingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const [exportOpen, setExportOpen] = useState(false);
