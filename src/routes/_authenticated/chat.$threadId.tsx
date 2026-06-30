@@ -846,7 +846,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
       const overrides = allowFirstMessageOverrideRef.current
-        ? { agent: { firstMessage: "" } }
+        ? { agent: { firstMessage: " " } }
         : undefined;
       conversation.startSession({
         signedUrl,
