@@ -50,6 +50,11 @@ const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details 
 type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
 const MAX_VOICE_RECONNECT_ATTEMPTS = 1;
 const VOICE_IDLE_MS = 60_000;
+const VOICE_RESTART_COOLDOWN_MS = 2_500;
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 function cleanAssistantText(text: string) {
   return text
@@ -309,6 +314,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
   const prefetchedVoiceTokenRef = useRef<{ token: string; createdAt: number } | null>(null);
+  const voiceStopPromiseRef = useRef<Promise<void> | null>(null);
+  const voiceRestartReadyAtRef = useRef(0);
   // Tracks whether the current voice turn is already streaming text via
   // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
   // bubble doesn't get doubled (chat parts + per-character audio chars),
@@ -701,10 +708,21 @@ function ThreadView({ threadId }: { threadId: string }) {
       // burning ElevenLabs credits. The user can tap the mic to resume.
       wantsVoiceModeRef.current = false;
       setVoiceState("stopping");
-      void Promise.resolve(conversationRef.current.endSession())
+      voiceRestartReadyAtRef.current = Date.now() + VOICE_RESTART_COOLDOWN_MS;
+      voiceStopPromiseRef.current = Promise.resolve(conversationRef.current.endSession())
         .catch(() => {})
-        .finally(() => setVoiceState("idle"));
+        .then(() => wait(VOICE_RESTART_COOLDOWN_MS))
+        .finally(() => {
+          voiceStopPromiseRef.current = null;
+          setVoiceState("idle");
+        });
     }, VOICE_IDLE_MS);
+  }
+
+  async function waitForVoiceTransportReady() {
+    if (voiceStopPromiseRef.current) await voiceStopPromiseRef.current;
+    const remaining = voiceRestartReadyAtRef.current - Date.now();
+    if (remaining > 0) await wait(remaining);
   }
 
   function scheduleVoiceReconnect(reason?: string) {
@@ -796,6 +814,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState(options.automaticReconnect ? "reconnecting" : "starting");
     setVoiceError(null);
     try {
+      await waitForVoiceTransportReady();
+      if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
       // Request mic access immediately on a manual tap so browser gesture rules
       // don't block the SDK after async token fetching. Auto-reconnect relies on
       // the already-granted permission and avoids prompting again.
@@ -804,9 +824,23 @@ function ThreadView({ threadId }: { threadId: string }) {
         stream.getTracks().forEach((track) => track.stop());
       }
       const cached = prefetchedVoiceTokenRef.current;
-      const conversationToken = cached && Date.now() - cached.createdAt < 45_000
-        ? cached.token
-        : (await getAgentToken({})).token;
+      let conversationToken = cached && Date.now() - cached.createdAt < 45_000 ? cached.token : "";
+      if (!conversationToken) {
+        let lastError = "Could not start voice";
+        for (let i = 0; i < 4; i += 1) {
+          try {
+            conversationToken = (await getAgentToken({})).token;
+            break;
+          } catch (err) {
+            lastError = err instanceof Error ? err.message : String(err || lastError);
+            if (!/still closing|concurrent|capacity|rate/i.test(lastError) || i === 3) throw new Error(lastError);
+            setVoiceState("starting");
+            setVoiceError("Finishing the previous voice session… reconnecting automatically.");
+            await wait(1_500 + i * 1_000);
+            if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
+          }
+        }
+      }
       prefetchedVoiceTokenRef.current = null;
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
@@ -844,6 +878,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       } else if (options.automaticReconnect && wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
         console.warn("startVoice failed; retrying", raw);
         scheduleVoiceReconnect(raw);
+      } else if (/still closing|concurrent|capacity|rate/i.test(raw) && wantsVoiceModeRef.current) {
+        console.warn("voice session still closing; retrying", raw);
+        setVoiceState("reconnecting");
+        setVoiceError("Finishing the previous voice session… reconnecting automatically.");
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = null;
+          void startVoice({ automaticReconnect: true });
+        }, 2_000);
       } else {
         wantsVoiceModeRef.current = false;
         hasConnectedVoiceRef.current = false;
@@ -862,11 +904,18 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState("stopping");
     pendingContextRef.current = "";
     setVoiceError(null);
+    voiceRestartReadyAtRef.current = Date.now() + VOICE_RESTART_COOLDOWN_MS;
     try {
-      await conversation.endSession();
+      voiceStopPromiseRef.current = Promise.resolve(conversation.endSession())
+        .catch((err) => {
+          console.warn("endSession failed", err);
+        })
+        .then(() => wait(VOICE_RESTART_COOLDOWN_MS));
+      await voiceStopPromiseRef.current;
     } catch (err) {
       console.warn("endSession failed", err);
     } finally {
+      voiceStopPromiseRef.current = null;
       hasConnectedVoiceRef.current = false;
       voiceUserHasSpokenRef.current = false;
       reconnectAttemptsRef.current = 0;
@@ -876,10 +925,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       setPendingAssistant("");
       setPendingUser(null);
       if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-      // Give the WebRTC transport a tick to fully tear down before the user
-      // can tap again — restarting too fast can leave the previous peer
-      // connection half-open and the new session never connects.
-      await new Promise((r) => setTimeout(r, 250));
       setVoiceState("idle");
     }
   }
