@@ -102,6 +102,61 @@ function CopyButton({ text, className = "" }: { text: string; className?: string
   );
 }
 
+function FeedbackButtons({ messageId }: { messageId: string }) {
+  const [rating, setRating] = useState<"up" | "down" | null>(null);
+  const [saving, setSaving] = useState(false);
+  async function submit(next: "up" | "down") {
+    if (saving) return;
+    setSaving(true);
+    const note =
+      next === "down"
+        ? window.prompt("What was wrong? (optional — helps BPA Bot learn)") ?? ""
+        : "";
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setSaving(false);
+      return;
+    }
+    const { error } = await supabase.from("message_feedback").upsert(
+      {
+        user_id: user.id,
+        message_id: messageId,
+        rating: next,
+        note: note.trim() || null,
+      },
+      { onConflict: "user_id,message_id" },
+    );
+    if (!error) setRating(next);
+    setSaving(false);
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => submit("up")}
+        title="Helpful"
+        className={`inline-flex items-center text-xs transition px-1.5 py-1 rounded hover:text-foreground ${
+          rating === "up" ? "text-primary" : "text-muted-foreground"
+        }`}
+      >
+        <ThumbsUp size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={() => submit("down")}
+        title="Not helpful"
+        className={`inline-flex items-center text-xs transition px-1.5 py-1 rounded hover:text-foreground ${
+          rating === "down" ? "text-destructive" : "text-muted-foreground"
+        }`}
+      >
+        <ThumbsDown size={12} />
+      </button>
+    </>
+  );
+}
+
 type SearchData = {
   threads: Array<{ id: string; title: string; updated_at: string }>;
   messages: Array<{ id: string; thread_id: string; role: string; snippet: string; created_at: string }>;
