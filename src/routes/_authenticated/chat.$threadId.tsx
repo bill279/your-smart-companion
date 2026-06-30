@@ -400,14 +400,14 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (!voiceDesiredRef.current) return;
     clearVoiceReconnectTimeout();
     const sdkStatus = conversationRef.current?.status;
-    const shouldWaitForSdk = sdkStatus === "connecting" || sdkStatus === "connected" || sdkStatus === "disconnecting";
+    const shouldWaitForSdk = sdkStatus === "connecting" || sdkStatus === "connected";
     const attempts = reconnectAttemptsRef.current;
     const backoff = Math.min(8000, delay + attempts * 1200);
     reconnectTimeoutRef.current = window.setTimeout(() => {
       reconnectTimeoutRef.current = null;
       if (!mountedRef.current) return;
       const currentStatus = conversationRef.current?.status;
-      if (currentStatus === "connecting" || currentStatus === "connected" || currentStatus === "disconnecting") {
+      if (currentStatus === "connecting" || currentStatus === "connected") {
         scheduleVoiceReconnect(1200);
         return;
       }
@@ -714,7 +714,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function startVoice(opts: { reconnect?: boolean } = {}) {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
     const sdkStatus = conversationRef.current?.status;
-    if (sdkStatus === "connecting" || sdkStatus === "connected" || sdkStatus === "disconnecting") {
+    if (sdkStatus === "connecting" || sdkStatus === "connected") {
       if (opts.reconnect) scheduleVoiceReconnect(1200);
       return;
     }
