@@ -438,6 +438,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   function scheduleVoiceReconnect(delay = 700) {
     if (!voiceDesiredRef.current) return;
     clearVoiceReconnectTimeout();
+    if (voiceStateRef.current === "idle") {
+      setVoiceState("reconnecting");
+    }
     const sdkStatus = conversationRef.current?.status;
     const shouldWaitForSdk = sdkStatus === "connecting" || sdkStatus === "connected";
     const attempts = reconnectAttemptsRef.current;
@@ -450,7 +453,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         scheduleVoiceReconnect(1200);
         return;
       }
-      if (voiceDesiredRef.current && voiceStateRef.current === "idle") {
+      if (voiceDesiredRef.current && (voiceStateRef.current === "idle" || voiceStateRef.current === "reconnecting")) {
         reconnectAttemptsRef.current += 1;
         void startVoice({ reconnect: true });
       }
