@@ -564,17 +564,9 @@ function ThreadView({ threadId }: { threadId: string }) {
           // emit it as a "user" transcript. If this text closely matches what
           // the assistant just said, ignore it instead of saving a duplicate
           // user-side bubble that mirrors the assistant message.
-          const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
-          const u = norm(text);
-          const a = norm(lastAssistantTextRef.current);
-          if (u && a) {
-            const short = u.length < a.length ? u : a;
-            const long = u.length < a.length ? a : u;
-            if (short.length >= 12 && long.includes(short)) {
-              return;
-            }
-          }
+          if (isNearDuplicateVoiceText(text, lastAssistantTextRef.current)) return;
           voiceUserHasSpokenRef.current = true;
+          lastVoiceUserAtRef.current = Date.now();
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
@@ -583,6 +575,14 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          if (!cleaned) return;
+          const persistKey = voiceMessage.event_id ? `ai:${voiceMessage.event_id}` : `ai:${normalizeVoiceText(cleaned).slice(0, 120)}`;
+          if (persistedVoiceAiEventsRef.current.has(persistKey)) return;
+          if (isNearDuplicateVoiceText(cleaned, lastAssistantTextRef.current)) return;
+          persistedVoiceAiEventsRef.current.add(persistKey);
+          if (persistedVoiceAiEventsRef.current.size > 120) {
+            persistedVoiceAiEventsRef.current = new Set(Array.from(persistedVoiceAiEventsRef.current).slice(-80));
+          }
           lastAssistantTextRef.current = cleaned;
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
