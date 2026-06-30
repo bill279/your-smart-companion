@@ -370,7 +370,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [getAgentToken, quota]);
+  }, [quota?.available, quota?.limit, quota?.remaining]);
 
   function scrollToLatest() {
     const el = scrollRef.current;
