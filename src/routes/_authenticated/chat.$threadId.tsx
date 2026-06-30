@@ -372,6 +372,41 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
   }, []);
 
+  function clearVoiceReconnectTimeout() {
+    if (reconnectTimeoutRef.current !== null) {
+      window.clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+  }
+
+  function scheduleVoiceReconnect(delay = 700) {
+    if (!voiceDesiredRef.current) return;
+    clearVoiceReconnectTimeout();
+    reconnectTimeoutRef.current = window.setTimeout(() => {
+      reconnectTimeoutRef.current = null;
+      if (voiceDesiredRef.current && voiceStateRef.current === "idle") void startVoice(true);
+    }, delay);
+  }
+
+  function resetLiveVoiceAssistant() {
+    liveAssistantRef.current = "";
+    liveTextEventIdRef.current = null;
+    liveTextFromPartsRef.current = false;
+    if (pendingAssistantRafRef.current !== null) {
+      cancelAnimationFrame(pendingAssistantRafRef.current);
+      pendingAssistantRafRef.current = null;
+    }
+  }
+
+  function schedulePendingAssistant(text: string) {
+    const cleaned = cleanAssistantText(text);
+    if (pendingAssistantRafRef.current !== null) cancelAnimationFrame(pendingAssistantRafRef.current);
+    pendingAssistantRafRef.current = requestAnimationFrame(() => {
+      pendingAssistantRafRef.current = null;
+      setPendingAssistant(cleaned);
+    });
+  }
+
   const conversation = useConversation({
     clientTools: {
       web_search: async (params: { query?: string; limit?: number }) => {
