@@ -14,6 +14,7 @@ import {
   createThread,
   deleteThread,
   getElevenLabsAgentToken,
+  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -50,8 +51,8 @@ const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details 
 type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
 const MAX_VOICE_RECONNECT_ATTEMPTS = 6;
 const VOICE_IDLE_MS = 60_000;
-const VOICE_RESTART_COOLDOWN_MS = 4_000;
-const MAX_VOICE_TOKEN_RETRY_ATTEMPTS = 8;
+const VOICE_RESTART_COOLDOWN_MS = 1_500;
+const MAX_VOICE_TOKEN_RETRY_ATTEMPTS = 5;
 const VOICE_CONNECT_TIMEOUT_MS = 15_000;
 
 function wait(ms: number) {
@@ -63,7 +64,7 @@ function isRetryableVoiceStartError(message: string) {
 }
 
 function voiceRetryDelay(attempt: number) {
-  return Math.min(Math.max(VOICE_RESTART_COOLDOWN_MS, 1_500 * 2 ** Math.min(attempt, 3)), 10_000);
+  return Math.min(1_500 + attempt * 1_500, 6_000);
 }
 
 function cleanAssistantText(text: string) {
@@ -276,6 +277,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const getAgentToken = useServerFn(getElevenLabsAgentToken);
+  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -323,7 +325,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastUserSpeechAtRef = useRef<number>(0);
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
-  const prefetchedVoiceTokenRef = useRef<{ token: string; createdAt: number } | null>(null);
   const voiceStopPromiseRef = useRef<Promise<void> | null>(null);
   const voiceRestartReadyAtRef = useRef(0);
   // Tracks whether the current voice turn is already streaming text via
@@ -374,19 +375,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       warnedQuotaRef.current = key;
     }
   }, [quota, quotaTone]);
-
-  useEffect(() => {
-    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) return;
-    let cancelled = false;
-    getAgentToken({})
-      .then(({ token }) => {
-        if (!cancelled) prefetchedVoiceTokenRef.current = { token, createdAt: Date.now() };
-      })
-      .catch((err) => console.warn("voice token prefetch failed", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [quota?.available, quota?.available ? quota.limit : 0, quota?.available ? quota.remaining : 0]);
 
   function scrollToLatest() {
     const el = scrollRef.current;
@@ -747,6 +735,24 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (remaining > 0) await wait(remaining);
   }
 
+  async function endExistingVoiceTransport() {
+    clearVoiceConnectTimeout();
+    clearVoiceReconnectTimer();
+    pendingContextRef.current = "";
+    liveAssistantRef.current = "";
+    chatPartsThisTurnRef.current = false;
+    setPendingAssistant("");
+    setPendingUser(null);
+    if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    try {
+      await Promise.resolve(conversationRef.current?.endSession());
+    } catch (err) {
+      console.warn("voice transport reset failed", err);
+    }
+    voiceRestartReadyAtRef.current = Date.now() + VOICE_RESTART_COOLDOWN_MS;
+    await waitForVoiceTransportReady();
+  }
+
   function scheduleVoiceReconnect(reason?: string) {
     if (!wantsVoiceModeRef.current) return;
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
@@ -836,17 +842,17 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState(options.automaticReconnect ? "reconnecting" : "starting");
     setVoiceError(null);
     try {
-      await waitForVoiceTransportReady();
-      if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
       // Request mic access immediately on a manual tap so browser gesture rules
-      // don't block the SDK after async token fetching. Auto-reconnect relies on
-      // the already-granted permission and avoids prompting again.
+      // don't block the SDK after async cleanup/token fetching.
       if (!options.automaticReconnect) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach((track) => track.stop());
+        await endExistingVoiceTransport();
+      } else {
+        await waitForVoiceTransportReady();
       }
-      const cached = prefetchedVoiceTokenRef.current;
-      let conversationToken = cached && Date.now() - cached.createdAt < 45_000 ? cached.token : "";
+      if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
+      let conversationToken = "";
       if (!conversationToken) {
         let lastError = "Could not start voice";
         for (let i = 0; i < MAX_VOICE_TOKEN_RETRY_ATTEMPTS; i += 1) {
@@ -863,7 +869,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           }
         }
       }
-      prefetchedVoiceTokenRef.current = null;
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
@@ -880,10 +885,22 @@ function ThreadView({ threadId }: { threadId: string }) {
         }
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, VOICE_CONNECT_TIMEOUT_MS);
-      await conversation.startSession({
-        conversationToken,
-        connectionType: "webrtc",
-      });
+      try {
+        await conversation.startSession({
+          conversationToken,
+          connectionType: "webrtc",
+        });
+      } catch (err) {
+        const firstStartError = err instanceof Error ? err.message : String(err || "");
+        if (!isRetryableVoiceStartError(firstStartError)) throw err;
+        await endExistingVoiceTransport();
+        const { signedUrl } = await getAgentSignedUrl({});
+        if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
+        await conversation.startSession({
+          signedUrl,
+          connectionType: "websocket",
+        });
+      }
     } catch (e) {
       clearVoiceConnectTimeout();
       const raw = e instanceof Error ? e.message : "Could not start voice";
@@ -898,10 +915,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceState("idle");
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       } else if (isRetryableVoiceStartError(raw) && wantsVoiceModeRef.current) {
-        console.warn("voice session is still closing; keeping retry loop active", raw);
-        setVoiceState("reconnecting");
-        setVoiceError(null);
-        scheduleVoiceReconnect(raw);
+        console.warn("voice session is still closing", raw);
+        wantsVoiceModeRef.current = false;
+        hasConnectedVoiceRef.current = false;
+        setVoiceState("idle");
+        setVoiceError("Voice is resetting. Tap the mic once more in a few seconds.");
       } else if (options.automaticReconnect && wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
         console.warn("startVoice failed; retrying", raw);
         scheduleVoiceReconnect(raw);
