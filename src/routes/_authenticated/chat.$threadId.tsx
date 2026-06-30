@@ -529,7 +529,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
       // Keep voice mode active until the user explicitly stops it. ElevenLabs
       // may close idle sockets; reconnect silently instead of forcing another tap.
-      if (voiceDesiredRef.current && details?.reason !== "error") {
+      if (voiceDesiredRef.current) {
         scheduleVoiceReconnect(800);
         return;
       }
@@ -728,12 +728,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         conversationToken: token,
         connectionType: "webrtc",
         useWakeLock: true,
+        preferHeadphonesForIosDevices: true,
         overrides: {
           agent: {
             firstMessage: " ",
-          },
-          asr: {
-            keywords: ["BPA", "BP Automation", "PDF", "Outlook", "Gmail"],
           },
         },
       });
