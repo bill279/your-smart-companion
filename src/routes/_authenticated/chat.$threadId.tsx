@@ -848,8 +848,8 @@ function ThreadView({ threadId }: { threadId: string }) {
         wantsVoiceModeRef.current = false;
         hasConnectedVoiceRef.current = false;
         setVoiceState("idle");
-        console.warn("startVoice failed", raw);
-        setVoiceError("Voice failed to connect. Tap the mic once to try again.");
+        console.warn("startVoice failed", raw, e);
+        setVoiceError(raw ? `Voice failed to connect: ${raw}` : "Voice failed to connect. Tap the mic once to try again.");
       }
     }
   }
