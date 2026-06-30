@@ -1639,6 +1639,60 @@ function ThinkingShimmer() {
   );
 }
 
+function ToolActivityList({
+  items,
+}: {
+  items: { id: string; name: string; label: string; status: "running" | "done" }[];
+}) {
+  const iconFor = (name: string) => {
+    switch (name) {
+      case "web_search":
+      case "product_search":
+      case "search_knowledge_base":
+        return <Search size={12} />;
+      case "web_scrape":
+        return <FileText size={12} />;
+      case "send_email":
+        return <Mail size={12} />;
+      case "list_calendar_events":
+      case "create_calendar_event":
+        return <Sparkles size={12} />;
+      case "list_contacts":
+      case "save_contact":
+        return <Users size={12} />;
+      case "recall_facts":
+      case "remember_fact":
+      case "forget_fact":
+        return <BookOpen size={12} />;
+      default:
+        return <Sparkles size={12} />;
+    }
+  };
+  return (
+    <div className="flex gap-3 justify-start">
+      <div className="w-8 h-8 shrink-0" aria-hidden />
+      <div className="flex flex-wrap gap-1.5 max-w-[80%]">
+        {items.map((a) => (
+          <span
+            key={a.id}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
+              a.status === "running"
+                ? "border-primary/40 bg-primary/5 text-foreground"
+                : "border-border bg-muted/40 text-muted-foreground"
+            }`}
+            title={a.label}
+          >
+            <span className={a.status === "running" ? "animate-pulse" : ""}>
+              {a.status === "done" ? <Check size={12} /> : iconFor(a.name)}
+            </span>
+            <span className="max-w-[260px] truncate">{a.label}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const STARTER_PROMPTS: Array<{ icon: React.ReactNode; title: string; prompt: string }> = [
   { icon: <Mail size={16} />, title: "Draft an email", prompt: "Help me draft a professional email. Ask me who it's to and what about." },
   { icon: <Search size={16} />, title: "Research a company", prompt: "Research a company for me and give me an executive brief. Ask which company." },
