@@ -396,6 +396,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       clearVoiceConnectTimeout();
       clearVoiceReconnectTimeout();
+      stopVoiceKeepAlive();
       resetLiveVoiceAssistant();
       try {
         conversationRef.current?.endSession();
@@ -410,6 +411,28 @@ function ThreadView({ threadId }: { threadId: string }) {
       window.clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+  }
+
+  function stopVoiceKeepAlive() {
+    if (keepAliveIntervalRef.current !== null) {
+      window.clearInterval(keepAliveIntervalRef.current);
+      keepAliveIntervalRef.current = null;
+    }
+  }
+
+  function startVoiceKeepAlive() {
+    stopVoiceKeepAlive();
+    lastVoiceActivityAtRef.current = Date.now();
+    keepAliveIntervalRef.current = window.setInterval(() => {
+      if (!voiceDesiredRef.current || voiceStateRef.current !== "connected") return;
+      try {
+        // ElevenLabs sockets can close during silence. This lightweight activity
+        // ping keeps the session alive without prompting the agent to speak.
+        conversationRef.current?.sendUserActivity();
+      } catch (err) {
+        console.warn("voice keepalive failed", err);
+      }
+    }, 15_000);
   }
 
   function scheduleVoiceReconnect(delay = 700) {
