@@ -252,6 +252,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const startAttemptRef = useRef(0);
   const connectTimeoutRef = useRef<number | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const pendingAssistantRafRef = useRef<number | null>(null);
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
@@ -398,11 +399,23 @@ function ThreadView({ threadId }: { threadId: string }) {
   function scheduleVoiceReconnect(delay = 700) {
     if (!voiceDesiredRef.current) return;
     clearVoiceReconnectTimeout();
+    const sdkStatus = conversationRef.current?.status;
+    const shouldWaitForSdk = sdkStatus === "connecting" || sdkStatus === "connected" || sdkStatus === "disconnecting";
+    const attempts = reconnectAttemptsRef.current;
+    const backoff = Math.min(8000, delay + attempts * 1200);
     reconnectTimeoutRef.current = window.setTimeout(() => {
       reconnectTimeoutRef.current = null;
       if (!mountedRef.current) return;
-      if (voiceDesiredRef.current && voiceStateRef.current === "idle") void startVoice({ reconnect: true });
-    }, delay);
+      const currentStatus = conversationRef.current?.status;
+      if (currentStatus === "connecting" || currentStatus === "connected" || currentStatus === "disconnecting") {
+        scheduleVoiceReconnect(1200);
+        return;
+      }
+      if (voiceDesiredRef.current && voiceStateRef.current === "idle") {
+        reconnectAttemptsRef.current += 1;
+        void startVoice({ reconnect: true });
+      }
+    }, shouldWaitForSdk ? Math.max(backoff, 1500) : backoff);
   }
 
   function resetLiveVoiceAssistant() {
@@ -499,6 +512,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (!mountedRef.current) return;
       clearVoiceConnectTimeout();
       clearVoiceReconnectTimeout();
+      reconnectAttemptsRef.current = 0;
       hasConnectedVoiceRef.current = true;
       voiceDesiredRef.current = true;
       voiceStateRef.current = "connected";
@@ -510,6 +524,10 @@ function ThreadView({ threadId }: { threadId: string }) {
       pendingContextRef.current = "";
       if (ctx) {
         try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
+        window.setTimeout(() => {
+          if (!mountedRef.current || !voiceDesiredRef.current || voiceStateRef.current !== "connected") return;
+          try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
+        }, 350);
       }
     },
     onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
@@ -559,6 +577,15 @@ function ThreadView({ threadId }: { threadId: string }) {
         return;
       }
       setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
+    },
+    onInterruption: () => {
+      if (!mountedRef.current) return;
+      resetLiveVoiceAssistant();
+      setPendingAssistant("");
+    },
+    onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => {
+      if (!mountedRef.current) return;
+      if (mode === "listening") resetLiveVoiceAssistant();
     },
     onMessage: async (message: { source?: string; message?: string }) => {
       if (!mountedRef.current) return;
@@ -686,6 +713,11 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function startVoice(opts: { reconnect?: boolean } = {}) {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    const sdkStatus = conversationRef.current?.status;
+    if (sdkStatus === "connecting" || sdkStatus === "connected" || sdkStatus === "disconnecting") {
+      if (opts.reconnect) scheduleVoiceReconnect(1200);
+      return;
+    }
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
       toast.error("Voice quota exhausted — text chat still works.");
       setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
