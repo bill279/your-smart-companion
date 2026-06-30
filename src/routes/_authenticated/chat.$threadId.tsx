@@ -496,10 +496,15 @@ function ThreadView({ threadId }: { threadId: string }) {
       // reason (typically ElevenLabs idle timeout), silently reconnect so the
       // user stays in voice mode until they explicitly tap to stop.
       if (hasConnectedVoiceRef.current && details?.reason !== "error") {
-        setTimeout(() => {
-          if (voiceStateRef.current === "idle") void startVoice();
-        }, 300);
-        return;
+        // Only auto-reconnect if the user actually spoke in the last 60s.
+        // Otherwise the session was idle and we'd just burn ElevenLabs credits.
+        const recentlyActive = Date.now() - lastUserSpeechAtRef.current < 60_000;
+        if (recentlyActive) {
+          setTimeout(() => {
+            if (voiceStateRef.current === "idle") void startVoice();
+          }, 300);
+          return;
+        }
       }
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
