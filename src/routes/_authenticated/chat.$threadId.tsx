@@ -490,6 +490,10 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (kind === "start") {
         liveAssistantRef.current = chunk;
         chatPartsThisTurnRef.current = true;
+        // New assistant turn: clear any leftover text from the previous turn
+        // so the old response doesn't flash before the new one streams in.
+        setPendingAssistant(chunk ? cleanAssistantText(chunk) : "");
+        return;
       } else if (kind === "delta") {
         liveAssistantRef.current += chunk;
         chatPartsThisTurnRef.current = true;
@@ -618,6 +622,9 @@ function ThreadView({ threadId }: { threadId: string }) {
           // and audio alignment without leftover state from the prior turn.
           chatPartsThisTurnRef.current = false;
           liveAssistantRef.current = "";
+          // Also clear any lingering assistant bubble from the prior turn so
+          // it doesn't flash above the user's new message while the agent thinks.
+          setPendingAssistant("");
           // Mute assistant output at the start of each turn; stable response
           // streaming callbacks below unmute it immediately when content looks sane.
           // Live update: show the user's spoken turn immediately.
