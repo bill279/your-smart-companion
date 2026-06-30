@@ -1179,23 +1179,37 @@ function ThreadView({ threadId }: { threadId: string }) {
         {/* Messages */}
         <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y px-4 md:px-10 pt-16 md:pt-6 pb-6 space-y-6">
           {messages.length === 0 && !pendingUser && (
-            <div className="text-center text-muted-foreground text-sm pt-12">
-              How can I help you today?
-            </div>
+            <StarterPrompts onPick={(p) => sendQuickAction(p)} />
           )}
-          {messages.map((m) => {
+          {messages.map((m, idx) => {
             const att = (m as unknown as { attachments?: Attachment[] | null }).attachments;
+            const isLastAssistant =
+              m.role === "assistant" &&
+              idx === messages.length - 1 &&
+              !pendingAssistant &&
+              !addMut.isPending;
             return (
               <Bubble
                 key={m.id}
                 role={m.role}
                 content={m.content}
                 attachments={Array.isArray(att) ? att : []}
+                onEdit={m.role === "user" ? () => editUserMessage(m.content) : undefined}
+                onRegenerate={isLastAssistant ? regenerate : undefined}
               />
             );
           })}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
-          {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} />}
+          {pendingAssistant ? (
+            <Bubble role="assistant" content={pendingAssistant} />
+          ) : addMut.isPending && pendingUser === null ? null : addMut.isPending ? (
+            <ThinkingShimmer />
+          ) : null}
+          {/* Follow-up quick actions after the latest assistant reply */}
+          {!addMut.isPending && !isConnected && messages.length > 0 &&
+            messages[messages.length - 1].role === "assistant" && (
+              <FollowUpActions onPick={(p) => sendQuickAction(p)} />
+            )}
           <div ref={latestMessageRef} aria-hidden="true" />
         </div>
 
