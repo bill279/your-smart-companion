@@ -1238,6 +1238,9 @@ function ThreadView({ threadId }: { threadId: string }) {
             );
           })}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
+          {(toolActivity.length > 0) && (
+            <ToolActivityList items={toolActivity} />
+          )}
           {pendingAssistant ? (
             <Bubble role="assistant" content={pendingAssistant} />
           ) : addMut.isPending && pendingUser === null ? null : addMut.isPending ? (
