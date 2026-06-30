@@ -195,6 +195,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  type ToolActivity = { id: string; name: string; label: string; status: "running" | "done" };
+  const [toolActivity, setToolActivity] = useState<ToolActivity[]>([]);
   type Attachment = { path: string; name: string; mimeType: string; size: number };
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -730,17 +732,53 @@ function ThreadView({ threadId }: { threadId: string }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
+      let buf = "";
+      setToolActivity([]);
       try {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          acc += decoder.decode(value, { stream: true });
+          buf += decoder.decode(value, { stream: true });
+          // Parse sentinel-wrapped tool events: \u0000{...}\u0000
+          while (true) {
+            const start = buf.indexOf("\u0000");
+            if (start === -1) {
+              acc += buf;
+              buf = "";
+              break;
+            }
+            // text before the sentinel is plain content
+            if (start > 0) {
+              acc += buf.slice(0, start);
+            }
+            const end = buf.indexOf("\u0000", start + 1);
+            if (end === -1) {
+              // sentinel opened but not yet closed; wait for more bytes
+              buf = buf.slice(start);
+              break;
+            }
+            const json = buf.slice(start + 1, end);
+            buf = buf.slice(end + 1);
+            try {
+              const evt = JSON.parse(json) as { t: string; id?: string; name?: string; label?: string };
+              if (evt.t === "tool-start" && evt.id && evt.name) {
+                const id = evt.id;
+                const name = evt.name;
+                const label = evt.label ?? name;
+                setToolActivity((prev) => [...prev, { id, name, label, status: "running" }]);
+              } else if (evt.t === "tool-end" && evt.id) {
+                const id = evt.id;
+                setToolActivity((prev) => prev.map((a) => (a.id === id ? { ...a, status: "done" } : a)));
+              }
+            } catch { /* ignore malformed event */ }
+          }
           setPendingAssistant(cleanAssistantText(acc));
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") throw err;
       }
       setPendingAssistant("");
+      setToolActivity([]);
       abortRef.current = null;
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
@@ -1200,6 +1238,9 @@ function ThreadView({ threadId }: { threadId: string }) {
             );
           })}
           {pendingUser && <Bubble role="user" content={pendingUser} />}
+          {(toolActivity.length > 0) && (
+            <ToolActivityList items={toolActivity} />
+          )}
           {pendingAssistant ? (
             <Bubble role="assistant" content={pendingAssistant} />
           ) : addMut.isPending && pendingUser === null ? null : addMut.isPending ? (
@@ -1593,6 +1634,60 @@ function ThinkingShimmer() {
           <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "300ms" }} />
           <span className="ml-2 text-xs text-muted-foreground">Thinking…</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ToolActivityList({
+  items,
+}: {
+  items: { id: string; name: string; label: string; status: "running" | "done" }[];
+}) {
+  const iconFor = (name: string) => {
+    switch (name) {
+      case "web_search":
+      case "product_search":
+      case "search_knowledge_base":
+        return <Search size={12} />;
+      case "web_scrape":
+        return <FileText size={12} />;
+      case "send_email":
+        return <Mail size={12} />;
+      case "list_calendar_events":
+      case "create_calendar_event":
+        return <Sparkles size={12} />;
+      case "list_contacts":
+      case "save_contact":
+        return <Users size={12} />;
+      case "recall_facts":
+      case "remember_fact":
+      case "forget_fact":
+        return <BookOpen size={12} />;
+      default:
+        return <Sparkles size={12} />;
+    }
+  };
+  return (
+    <div className="flex gap-3 justify-start">
+      <div className="w-8 h-8 shrink-0" aria-hidden />
+      <div className="flex flex-wrap gap-1.5 max-w-[80%]">
+        {items.map((a) => (
+          <span
+            key={a.id}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
+              a.status === "running"
+                ? "border-primary/40 bg-primary/5 text-foreground"
+                : "border-border bg-muted/40 text-muted-foreground"
+            }`}
+            title={a.label}
+          >
+            <span className={a.status === "running" ? "animate-pulse" : ""}>
+              {a.status === "done" ? <Check size={12} /> : iconFor(a.name)}
+            </span>
+            <span className="max-w-[260px] truncate">{a.label}</span>
+          </span>
+        ))}
       </div>
     </div>
   );
