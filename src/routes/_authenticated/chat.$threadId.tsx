@@ -699,7 +699,11 @@ function ThreadView({ threadId }: { threadId: string }) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
-      const { signedUrl } = await getAgentSignedUrl({});
+      const cached = prefetchedVoiceTokenRef.current;
+      const token = cached && Date.now() - cached.createdAt < 45_000
+        ? cached.token
+        : (await getAgentToken({})).token;
+      prefetchedVoiceTokenRef.current = null;
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
@@ -709,10 +713,24 @@ function ThreadView({ threadId }: { threadId: string }) {
         pendingContextRef.current = "";
         setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
-      }, 20000);
+      }, 10000);
       conversation.startSession({
-        signedUrl,
-        connectionType: "websocket",
+        conversationToken: token,
+        connectionType: "webrtc",
+        overrides: {
+          agent: {
+            firstMessage: " ",
+            prompt: { prompt: VOICE_SESSION_PROMPT },
+          },
+          tts: {
+            stability: 0.72,
+            speed: 1.08,
+          },
+          asr: {
+            keywords: ["BPA Bot", "BP Automation", "Claude", "Codex", "ChatGPT", "Gemini", "Outlook", "Gmail"],
+          },
+        },
+        inputChunkDurationMs: 15,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
