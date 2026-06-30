@@ -1218,8 +1218,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceActive = voiceUiState === "connected" || (voiceUiState === "starting" && conversation.status !== "error");
-  const voiceConnecting = voiceUiState === "starting";
+  const voiceActive = voiceUiState === "connected" || voiceUiState === "reconnecting" || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceConnecting = voiceUiState === "starting" || voiceUiState === "reconnecting";
 
   return (
     <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
