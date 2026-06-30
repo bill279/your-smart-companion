@@ -13,7 +13,7 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentSignedUrl,
+  getElevenLabsAgentToken,
   getThreadMessages,
   listThreads,
   renameThread,
@@ -265,7 +265,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const getAgentToken = useServerFn(getElevenLabsAgentToken);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -313,7 +313,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastUserSpeechAtRef = useRef<number>(0);
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
-  const prefetchedVoiceUrlRef = useRef<{ signedUrl: string; createdAt: number } | null>(null);
+  const prefetchedVoiceTokenRef = useRef<{ token: string; createdAt: number } | null>(null);
   // Tracks whether the current voice turn is already streaming text via
   // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
   // bubble doesn't get doubled (chat parts + per-character audio chars),
@@ -366,9 +366,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   useEffect(() => {
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) return;
     let cancelled = false;
-    getAgentSignedUrl({})
-      .then(({ signedUrl }) => {
-        if (!cancelled) prefetchedVoiceUrlRef.current = { signedUrl, createdAt: Date.now() };
+    getAgentToken({})
+      .then(({ token }) => {
+        if (!cancelled) prefetchedVoiceTokenRef.current = { token, createdAt: Date.now() };
       })
       .catch((err) => console.warn("voice token prefetch failed", err));
     return () => {
@@ -502,11 +502,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       } else if (kind === "stop") {
         if (chunk) liveAssistantRef.current += chunk;
       }
-      if (looksUnstableVoiceText(liveAssistantRef.current)) {
-        try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
-        return;
-      }
-      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAudioAlignment: (props: { chars?: string[] }) => {
@@ -517,18 +513,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       const chars = props?.chars;
       if (!chars || chars.length === 0) return;
       liveAssistantRef.current += chars.join("");
-      if (looksUnstableVoiceText(liveAssistantRef.current)) {
-        try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
-        return;
-      }
-      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
     onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
       const corrected = props?.corrected_agent_response;
       if (!corrected) return;
       if (looksUnstableVoiceText(corrected)) return;
-      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       liveAssistantRef.current = corrected;
       setPendingAssistant(cleanAssistantText(corrected));
     },
@@ -552,9 +543,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       wantsVoiceModeRef.current = true;
       setVoiceState("connected");
       setVoiceError(null);
-      // Keep output muted until the first stable assistant text/audio chunk for
-      // the turn arrives; this prevents transient/gibberish audio from leaking.
-      try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
+      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
       const ctx = pendingContextRef.current;
       pendingContextRef.current = "";
       if (ctx) {
@@ -637,7 +626,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           liveAssistantRef.current = "";
           // Mute assistant output at the start of each turn; stable response
           // streaming callbacks below unmute it immediately when content looks sane.
-          try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
           await add({ data: { threadId, role: "user", content: text } });
@@ -646,14 +634,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
           if (looksUnstableVoiceText(cleaned)) {
-            try { conversationRef.current?.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
             setPendingAssistant("");
             liveAssistantRef.current = "";
             chatPartsThisTurnRef.current = false;
             return;
           }
           // Live update: show assistant turn the moment the transcript arrives.
-          try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
           await add({ data: { threadId, role: "assistant", content: cleaned } });
@@ -792,11 +778,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach((track) => track.stop());
       }
-      const cached = prefetchedVoiceUrlRef.current;
-      const signedUrl = cached && Date.now() - cached.createdAt < 45_000
-        ? cached.signedUrl
-        : (await getAgentSignedUrl({})).signedUrl;
-      prefetchedVoiceUrlRef.current = null;
+      const cached = prefetchedVoiceTokenRef.current;
+      const conversationToken = cached && Date.now() - cached.createdAt < 45_000
+        ? cached.token
+        : (await getAgentToken({})).token;
+      prefetchedVoiceTokenRef.current = null;
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
@@ -814,10 +800,8 @@ function ThreadView({ threadId }: { threadId: string }) {
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 10000);
       await conversation.startSession({
-        signedUrl,
-        connectionType: "websocket",
-        inputChunkDurationMs: 15,
-        connectionDelay: { default: 0, android: 0, ios: 0 },
+        conversationToken,
+        connectionType: "webrtc",
       });
     } catch (e) {
       clearVoiceConnectTimeout();
@@ -872,7 +856,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       // If voice is connected, route through ElevenLabs instead.
       if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
-        try { conversation.setVolume({ volume: 0 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
         conversation.sendUserMessage(content);
         setPendingUser(null);
