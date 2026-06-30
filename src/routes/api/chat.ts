@@ -367,7 +367,7 @@ export const Route = createFileRoute("/api/chat")({
           model: gateway("google/gemini-3.5-flash"),
           system: systemWithUser,
           messages: baseMessages,
-          stopWhen: stepCountIs(50),
+          stopWhen: stepCountIs(12),
           tools: {
             web_search: tool({
               description:
