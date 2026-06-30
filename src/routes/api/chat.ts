@@ -801,6 +801,53 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 }
               },
             }),
+            generate_document: tool({
+              description:
+                "Generate a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown and return a signed download URL. Use whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc.",
+              inputSchema: z.object({
+                format: z.enum(["pdf", "docx", "xlsx", "csv", "txt"]),
+                filename: z.string().min(1).max(120).describe("Base filename without extension"),
+                title: z.string().min(1).max(200),
+                markdown: z
+                  .string()
+                  .min(1)
+                  .max(200000)
+                  .describe("Full document body as Markdown. For xlsx/csv, include GitHub-flavored Markdown tables."),
+              }),
+              execute: async ({ format, filename, title, markdown }) => {
+                try {
+                  const { generateDocument } = await import("@/lib/document-generator.server");
+                  const { bytes, mimeType, extension } = await generateDocument({
+                    format,
+                    title,
+                    markdown,
+                  });
+                  const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
+                  const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
+                  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+                  const up = await supabaseAdmin.storage
+                    .from("chat-uploads")
+                    .upload(path, bytes, { contentType: mimeType, upsert: false });
+                  if (up.error) return { error: up.error.message };
+                  const signed = await supabaseAdmin.storage
+                    .from("chat-uploads")
+                    .createSignedUrl(path, 60 * 60 * 24 * 7);
+                  if (signed.error) return { error: signed.error.message };
+                  await logAction("generate_document", `Generated ${extension.toUpperCase()} "${safeName}"`, {
+                    format,
+                    filename: `${safeName}.${extension}`,
+                  });
+                  return {
+                    ok: true,
+                    url: signed.data.signedUrl,
+                    filename: `${safeName}.${extension}`,
+                    mimeType,
+                  };
+                } catch (e) {
+                  return { error: e instanceof Error ? e.message : String(e) };
+                }
+              },
+            }),
           },
           onFinish: async ({ text }) => {
             await supabase.from("messages").insert({
