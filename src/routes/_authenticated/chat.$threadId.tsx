@@ -732,17 +732,53 @@ function ThreadView({ threadId }: { threadId: string }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
+      let buf = "";
+      setToolActivity([]);
       try {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          acc += decoder.decode(value, { stream: true });
+          buf += decoder.decode(value, { stream: true });
+          // Parse sentinel-wrapped tool events: \u0000{...}\u0000
+          while (true) {
+            const start = buf.indexOf("\u0000");
+            if (start === -1) {
+              acc += buf;
+              buf = "";
+              break;
+            }
+            // text before the sentinel is plain content
+            if (start > 0) {
+              acc += buf.slice(0, start);
+            }
+            const end = buf.indexOf("\u0000", start + 1);
+            if (end === -1) {
+              // sentinel opened but not yet closed; wait for more bytes
+              buf = buf.slice(start);
+              break;
+            }
+            const json = buf.slice(start + 1, end);
+            buf = buf.slice(end + 1);
+            try {
+              const evt = JSON.parse(json) as { t: string; id?: string; name?: string; label?: string };
+              if (evt.t === "tool-start" && evt.id && evt.name) {
+                const id = evt.id;
+                const name = evt.name;
+                const label = evt.label ?? name;
+                setToolActivity((prev) => [...prev, { id, name, label, status: "running" }]);
+              } else if (evt.t === "tool-end" && evt.id) {
+                const id = evt.id;
+                setToolActivity((prev) => prev.map((a) => (a.id === id ? { ...a, status: "done" } : a)));
+              }
+            } catch { /* ignore malformed event */ }
+          }
           setPendingAssistant(cleanAssistantText(acc));
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") throw err;
       }
       setPendingAssistant("");
+      setToolActivity([]);
       abortRef.current = null;
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
