@@ -619,6 +619,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           lastUserSpeechAtRef.current = Date.now();
+          scheduleVoiceIdleClose();
           // New user turn — reset the per-turn streaming source flag so
           // the next assistant turn can correctly pick between chat parts
           // and audio alignment without leftover state from the prior turn.
@@ -636,6 +637,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUser(null);
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          scheduleVoiceIdleClose();
           if (looksUnstableVoiceText(cleaned)) {
             setPendingAssistant("");
             liveAssistantRef.current = "";
