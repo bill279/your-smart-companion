@@ -589,52 +589,57 @@ function ThreadView({ threadId }: { threadId: string }) {
       stopVoiceKeepAlive();
       sessionStartingRef.current = false;
       const wasStopping = voiceStateRef.current === "stopping" || stopRequestedRef.current;
-      voiceStateRef.current = "idle";
-      setVoiceUiState("idle");
       pendingContextRef.current = "";
       // Keep the live caption visible if the socket drops mid-answer; it will
       // be replaced by the persisted message or the reconnected stream.
-      if (wasStopping) return;
+      if (wasStopping) {
+        setVoiceState("idle");
+        return;
+      }
       const closeText = details?.closeReason || details?.message || "";
       if (/quota/i.test(closeText)) {
         voiceDesiredRef.current = false;
+        setVoiceState("idle");
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
       // Keep voice mode active until the user explicitly stops it. ElevenLabs
       // may close idle sockets; reconnect silently instead of forcing another tap.
       if (voiceDesiredRef.current) {
-        scheduleVoiceReconnect(800);
+        setVoiceState("reconnecting");
+        scheduleVoiceReconnect(500);
         return;
       }
+      setVoiceState("idle");
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
     },
-    onError: (e) => {
+    onError: (e: unknown, context?: unknown) => {
       if (!mountedRef.current) return;
-      const msg = String(e || "");
+      const msg = typeof e === "string" ? e : e instanceof Error ? e.message : String(e || "");
       if (msg.includes("error_event") || msg.includes("error_type")) return;
-      console.warn("voice error", msg);
+      console.warn("voice error", msg, context);
       clearVoiceConnectTimeout();
       stopVoiceKeepAlive();
       sessionStartingRef.current = false;
-      voiceStateRef.current = "idle";
-      setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
       // Do not wipe the live caption here; a transient socket error should not
       // make the answer disappear from the chat.
       if (/quota/i.test(msg)) {
         voiceDesiredRef.current = false;
+        setVoiceState("idle");
         setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
         return;
       }
       // Silent auto-reconnect if the user still wants voice mode on.
       if (voiceDesiredRef.current) {
-        scheduleVoiceReconnect(1000);
+        setVoiceState("reconnecting");
+        scheduleVoiceReconnect(800);
         return;
       }
+      setVoiceState("idle");
       setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
     },
     onInterruption: () => {
@@ -645,13 +650,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => {
       if (!mountedRef.current) return;
       lastVoiceActivityAtRef.current = Date.now();
-      // Don't wipe the live caption when the bot stops talking — keep it on
-      // screen so the user can read it. It clears naturally when the
-      // persisted message arrives in the next refetch.
-      if (mode === "speaking") {
-        // New utterance starting — reset the streaming buffer.
-        resetLiveVoiceAssistant();
-      }
+      // Do not reset the live caption here. ElevenLabs can emit text response
+      // parts before audio playback begins; clearing on `speaking` made the
+      // chat look frozen until the final transcript arrived.
     },
     onMessage: async (message: { source?: string; role?: "user" | "agent"; message?: string; event_id?: number }) => {
       if (!mountedRef.current) return;
@@ -675,6 +676,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           if (isNearDuplicateVoiceText(text, lastAssistantTextRef.current)) return;
           voiceUserHasSpokenRef.current = true;
           lastVoiceUserAtRef.current = Date.now();
+          resetLiveVoiceAssistant();
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
