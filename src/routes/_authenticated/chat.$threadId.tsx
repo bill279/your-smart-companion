@@ -1652,3 +1652,78 @@ function FollowUpActions({ onPick }: { onPick: (prompt: string) => void }) {
     </div>
   );
 }
+
+// ---------- Product cards ----------
+type Product = {
+  title: string;
+  url: string;
+  image?: string;
+  price?: string;
+  source?: string;
+  snippet?: string;
+};
+
+type Segment =
+  | { kind: "md"; text: string }
+  | { kind: "products"; products: Product[] };
+
+function splitProductBlocks(text: string): Segment[] {
+  if (!text) return [{ kind: "md", text: "" }];
+  const re = /:::products\s*([\s\S]*?):::/g;
+  const out: Segment[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push({ kind: "md", text: text.slice(last, m.index) });
+    let products: Product[] = [];
+    try {
+      const parsed = JSON.parse(m[1].trim());
+      if (Array.isArray(parsed)) products = parsed.filter((p) => p && p.title && p.url);
+    } catch {
+      // partial/streaming — skip until valid
+    }
+    if (products.length) out.push({ kind: "products", products });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ kind: "md", text: text.slice(last) });
+  if (out.length === 0) out.push({ kind: "md", text });
+  return out;
+}
+
+function ProductCards({ products }: { products: Product[] }) {
+  return (
+    <div className="not-prose my-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {products.map((p, i) => (
+        <a
+          key={i}
+          href={p.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex flex-col rounded-xl border border-border bg-card overflow-hidden hover:border-accent hover:shadow-md transition"
+        >
+          {p.image ? (
+            <div className="aspect-square w-full bg-secondary overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={p.image}
+                alt={p.title}
+                loading="lazy"
+                className="w-full h-full object-contain group-hover:scale-[1.02] transition"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+            </div>
+          ) : (
+            <div className="aspect-square w-full bg-secondary" />
+          )}
+          <div className="p-2.5 flex flex-col gap-1">
+            <div className="text-[13px] font-medium text-foreground line-clamp-2 leading-snug">{p.title}</div>
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              {p.price ? <span className="font-semibold text-foreground">{p.price}</span> : <span />}
+              {p.source && <span className="truncate ml-2">{p.source}</span>}
+            </div>
+          </div>
+        </a>
+      ))}
+    </div>
+  );
+}
