@@ -742,7 +742,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         },
       });
       stream.getTracks().forEach((t) => t.stop());
-      const { token } = await getAgentToken({});
+      const { signedUrl } = await getAgentSignedUrl({});
       if (startAttemptRef.current !== attemptId) return;
       pendingContextRef.current = buildVoiceContext();
       clearVoiceConnectTimeout();
@@ -755,8 +755,8 @@ function ThreadView({ threadId }: { threadId: string }) {
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
       conversation.startSession({
-        conversationToken: token,
-        connectionType: "webrtc",
+        signedUrl,
+        connectionType: "websocket",
         useWakeLock: true,
         preferHeadphonesForIosDevices: true,
       });
