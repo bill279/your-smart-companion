@@ -1511,13 +1511,19 @@ function ThreadView({ threadId }: { threadId: string }) {
                   : "Listening… tap to stop"
                 : "Tap to talk"
             }
-            className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
+            className={`relative shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
               voiceActive
-                ? "border-accent bg-accent/15 hud-pulse text-accent"
+                ? "border-red-500 bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.18)]"
                 : "border-border bg-secondary hover:bg-secondary/80 text-primary"
             }`}
           >
-            {voiceActive ? <MicOff size={18} /> : <Mic size={18} />}
+            {voiceActive && (
+              <span className="absolute inset-0 rounded-full border-2 border-red-500/60 animate-ping pointer-events-none" />
+            )}
+            <Mic size={18} />
+            {voiceActive && (
+              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-background animate-pulse" />
+            )}
           </button>
           <input
             ref={fileInputRef}
