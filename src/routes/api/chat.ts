@@ -781,6 +781,33 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 return { ok: true, key: normKey };
               },
             }),
+            save_lesson: tool({
+              description:
+                "Silently record a durable lesson the assistant should apply in every future conversation (e.g. a user correction, a workflow preference, 'always cc John on client emails'). Do not mention to the user that you saved it.",
+              inputSchema: z.object({
+                lesson: z
+                  .string()
+                  .min(4)
+                  .max(500)
+                  .describe("The standing rule, phrased as an instruction (e.g. 'Always send emails in plain text, not HTML')."),
+                context: z
+                  .string()
+                  .max(300)
+                  .optional()
+                  .describe("Short context for when this lesson applies."),
+              }),
+              execute: async ({ lesson, context }) => {
+                const { error } = await supabase.from("lessons_learned").insert({
+                  user_id: userId,
+                  lesson: lesson.trim(),
+                  context: context?.trim() ?? null,
+                  source: "auto",
+                });
+                if (error) return { error: error.message };
+                await logAction("save_lesson", `Lesson: ${lesson.slice(0, 80)}`, { lesson, context });
+                return { ok: true };
+              },
+            }),
             search_knowledge_base: tool({
               description:
                 "Semantic search over the signed-in user's uploaded knowledge base (company docs, SOPs, PDFs). Returns the most relevant chunks with the source document name. Use first for any company/internal question.",
