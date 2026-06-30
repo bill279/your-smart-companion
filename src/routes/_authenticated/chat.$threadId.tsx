@@ -685,6 +685,21 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
   }
 
+  function scheduleVoiceIdleClose() {
+    if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      if (!conversationRef.current) return;
+      // No activity for the idle window — close the voice session to stop
+      // burning ElevenLabs credits. The user can tap the mic to resume.
+      wantsVoiceModeRef.current = false;
+      setVoiceState("stopping");
+      void Promise.resolve(conversationRef.current.endSession())
+        .catch(() => {})
+        .finally(() => setVoiceState("idle"));
+    }, VOICE_IDLE_MS);
+  }
+
   function scheduleVoiceReconnect(reason?: string) {
     if (!wantsVoiceModeRef.current) return;
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
