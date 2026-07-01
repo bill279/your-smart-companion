@@ -873,6 +873,13 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState("starting");
     wantsVoiceModeRef.current = true;
     let assistantBuf = "";
+    // Document-intent loop guards, scoped to this voice session.
+    let docInFlight = false;
+    let lastDocIntentKey = "";
+    let lastDocIntentAt = 0;
+    const DOC_INTENT_TTL_MS = 30_000;
+    const normalizeIntent = (t: string) =>
+      t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
     try {
       const session = await startOpenAiRealtimeSession({ context: buildVoiceContext() });
       openAiSessionRef.current = session;
@@ -884,16 +891,29 @@ function ThreadView({ threadId }: { threadId: string }) {
       session.onError((message) => {
         toast.error(message);
         setVoiceError(message);
+        if (docInFlight) docInFlight = false;
       });
       session.onToolCall((name, _args, result) => {
         if (name !== "generate_document") return;
         const r = result as { ok?: boolean; artifact?: Record<string, unknown> } | null;
-        if (!r?.ok || !r.artifact) return;
+        docInFlight = false;
+        if (!r?.ok || !r.artifact) {
+          const errMsg =
+            (r && typeof (r as { error?: unknown }).error === "string"
+              ? ((r as { error?: string }).error as string)
+              : null) ?? "Document generation failed.";
+          toast.error(errMsg);
+          // Clear the pending intent so the user can retry with a fresh utterance.
+          lastDocIntentKey = "";
+          return;
+        }
         const block = "```bpa-artifact\n" + JSON.stringify(r.artifact) + "\n```";
         const content = `Generated ${(r.artifact.filename as string) ?? "document"}.\n\n${block}`;
         void add({ data: { threadId, role: "assistant", content } }).then(() => {
           qc.invalidateQueries({ queryKey: ["messages", threadId] });
         });
+        // Keep lastDocIntentKey set so partial/repeat transcripts of the
+        // same utterance don't re-trigger. It naturally expires via TTL.
       });
       session.onTranscript((role, text, done) => {
         if (role === "assistant") {
@@ -911,9 +931,31 @@ function ThreadView({ threadId }: { threadId: string }) {
             qc.invalidateQueries({ queryKey: ["messages", threadId] });
           });
           if (looksLikeDocumentIntent(text)) {
-            const forced = session.forceGenerateDocument(text);
-            if (forced) {
-              console.log("[realtime] doc-intent detected, forcing generate_document:", text);
+            const key = normalizeIntent(text);
+            const now = Date.now();
+            const isDuplicate =
+              key === lastDocIntentKey && now - lastDocIntentAt < DOC_INTENT_TTL_MS;
+            if (docInFlight) {
+              console.log("[realtime] doc-intent ignored — generation already in flight");
+            } else if (isDuplicate) {
+              console.log("[realtime] doc-intent ignored — duplicate of recent utterance");
+            } else {
+              lastDocIntentKey = key;
+              lastDocIntentAt = now;
+              docInFlight = true;
+              const forced = session.forceGenerateDocument(text);
+              if (forced) {
+                console.log("[realtime] doc-intent detected, forcing generate_document:", text);
+              } else {
+                docInFlight = false;
+              }
+              // Safety: if the tool call never resolves, release the lock.
+              setTimeout(() => {
+                if (docInFlight) {
+                  console.warn("[realtime] doc-intent lock released by timeout");
+                  docInFlight = false;
+                }
+              }, 45_000);
             }
           }
         }
