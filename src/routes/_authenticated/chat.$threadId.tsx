@@ -834,6 +834,14 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function startVoice(options: { automaticReconnect?: boolean } = {}) {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    if (voiceProvider === "openai_realtime") {
+      await startOpenAiVoice();
+      return;
+    }
+    if (voiceProvider === "none") {
+      toast.error("Voice is disabled in settings.");
+      return;
+    }
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
       wantsVoiceModeRef.current = false;
       toast.error("Voice quota exhausted — text chat still works.");
