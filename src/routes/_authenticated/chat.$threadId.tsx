@@ -832,6 +832,59 @@ function ThreadView({ threadId }: { threadId: string }) {
       : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
+  async function startOpenAiVoice() {
+    if (openAiSessionRef.current) return;
+    setVoiceError(null);
+    setVoiceState("starting");
+    wantsVoiceModeRef.current = true;
+    let assistantBuf = "";
+    try {
+      const session = await startOpenAiRealtimeSession();
+      openAiSessionRef.current = session;
+      session.onOpen(() => setVoiceState("connected"));
+      session.onClose(() => {
+        openAiSessionRef.current = null;
+        setVoiceState("idle");
+      });
+      session.onError((message) => {
+        toast.error(message);
+        setVoiceError(message);
+      });
+      session.onTranscript((role, text, done) => {
+        if (role === "assistant") {
+          assistantBuf = text;
+          setPendingAssistant(text);
+          if (done && text.trim()) {
+            void add({ data: { threadId, role: "assistant", content: text } }).then(() => {
+              qc.invalidateQueries({ queryKey: ["messages", threadId] });
+            });
+            setPendingAssistant("");
+            assistantBuf = "";
+          }
+        } else if (role === "user" && done && text.trim()) {
+          void add({ data: { threadId, role: "user", content: text } }).then(() => {
+            qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          });
+        }
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "OpenAI voice failed to start.";
+      setVoiceError(msg);
+      toast.error(msg);
+      setVoiceState("idle");
+      openAiSessionRef.current = null;
+    }
+  }
+
+  async function stopOpenAiVoice() {
+    const s = openAiSessionRef.current;
+    openAiSessionRef.current = null;
+    setVoiceState("stopping");
+    try { await s?.stop(); } catch (err) { console.warn(err); }
+    setPendingAssistant("");
+    setVoiceState("idle");
+  }
+
   async function startVoice(options: { automaticReconnect?: boolean } = {}) {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
     if (voiceProvider === "openai_realtime") {
