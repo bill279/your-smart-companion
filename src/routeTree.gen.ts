@@ -18,6 +18,7 @@ import { Route as AuthenticatedKnowledgeRouteImport } from './routes/_authentica
 import { Route as AuthenticatedContactsRouteImport } from './routes/_authenticated/contacts'
 import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
 import { Route as AuthenticatedChatIndexRouteImport } from './routes/_authenticated/chat.index'
+import { Route as ApiRealtimeToolRouteImport } from './routes/api/realtime/tool'
 import { Route as ApiRealtimeSessionRouteImport } from './routes/api/realtime/session'
 import { Route as ApiPublicWebSearchRouteImport } from './routes/api/public/web-search'
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
@@ -70,6 +71,11 @@ const AuthenticatedChatIndexRoute = AuthenticatedChatIndexRouteImport.update({
   id: '/chat/',
   path: '/chat/',
   getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const ApiRealtimeToolRoute = ApiRealtimeToolRouteImport.update({
+  id: '/api/realtime/tool',
+  path: '/api/realtime/tool',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiRealtimeSessionRoute = ApiRealtimeSessionRouteImport.update({
   id: '/api/realtime/session',
@@ -129,6 +135,7 @@ export interface FileRoutesByFullPath {
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/api/realtime/session': typeof ApiRealtimeSessionRoute
+  '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/chat/': typeof AuthenticatedChatIndexRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
@@ -147,6 +154,7 @@ export interface FileRoutesByTo {
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/api/realtime/session': typeof ApiRealtimeSessionRoute
+  '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/chat': typeof AuthenticatedChatIndexRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/api/realtime/session': typeof ApiRealtimeSessionRoute
+  '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/_authenticated/chat/': typeof AuthenticatedChatIndexRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/chat/$threadId'
     | '/api/public/web-search'
     | '/api/realtime/session'
+    | '/api/realtime/tool'
     | '/chat/'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
@@ -205,6 +215,7 @@ export interface FileRouteTypes {
     | '/chat/$threadId'
     | '/api/public/web-search'
     | '/api/realtime/session'
+    | '/api/realtime/tool'
     | '/chat'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
@@ -224,6 +235,7 @@ export interface FileRouteTypes {
     | '/_authenticated/chat/$threadId'
     | '/api/public/web-search'
     | '/api/realtime/session'
+    | '/api/realtime/tool'
     | '/_authenticated/chat/'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
@@ -239,6 +251,7 @@ export interface RootRouteChildren {
   ApiChatRoute: typeof ApiChatRoute
   ApiPublicWebSearchRoute: typeof ApiPublicWebSearchRoute
   ApiRealtimeSessionRoute: typeof ApiRealtimeSessionRoute
+  ApiRealtimeToolRoute: typeof ApiRealtimeToolRoute
   ApiPublicJarvisToolsRead_calendarRoute: typeof ApiPublicJarvisToolsRead_calendarRoute
   ApiPublicJarvisToolsSearch_webRoute: typeof ApiPublicJarvisToolsSearch_webRoute
   ApiPublicJarvisToolsSend_emailRoute: typeof ApiPublicJarvisToolsSend_emailRoute
@@ -310,6 +323,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/chat/'
       preLoaderRoute: typeof AuthenticatedChatIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/realtime/tool': {
+      id: '/api/realtime/tool'
+      path: '/api/realtime/tool'
+      fullPath: '/api/realtime/tool'
+      preLoaderRoute: typeof ApiRealtimeToolRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/realtime/session': {
       id: '/api/realtime/session'
@@ -398,6 +418,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiChatRoute: ApiChatRoute,
   ApiPublicWebSearchRoute: ApiPublicWebSearchRoute,
   ApiRealtimeSessionRoute: ApiRealtimeSessionRoute,
+  ApiRealtimeToolRoute: ApiRealtimeToolRoute,
   ApiPublicJarvisToolsRead_calendarRoute:
     ApiPublicJarvisToolsRead_calendarRoute,
   ApiPublicJarvisToolsSearch_webRoute: ApiPublicJarvisToolsSearch_webRoute,

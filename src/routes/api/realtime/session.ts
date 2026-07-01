@@ -22,11 +22,55 @@ function buildInstructions(costMode: string, maxSeconds: number, userEmail: stri
     "Never read tables, lists, code, or long drafts aloud. If the answer is a table/list/draft, give a one-sentence executive summary and tell the user the details are on screen. Do not speak column headers, pipes, dashes, or row-by-row cell values.",
     "Never think out loud, narrate tool use, or fill silence. If unsure, ask one short clarifying question.",
     "Before any irreversible external action (sending email, creating an event, purchases), present a short draft and wait for explicit user approval.",
+    "You have tools: web_search (live web results), web_scrape (fetch a specific URL as markdown), and send_email (send from the user's connected Outlook/Gmail account). Use them silently when needed — never narrate 'let me search'. For send_email you MUST first speak a brief draft (recipient, subject, one-line body summary) and wait for explicit approval ('send it', 'yes') before calling the tool.",
     userEmail
       ? `The signed-in user's email is ${userEmail}. When they say "email me", use exactly this address.`
       : "You do not know the signed-in user's email. If they say 'email me', ask for the address.",
   ].join(" ");
 }
+
+const REALTIME_TOOLS = [
+  {
+    type: "function",
+    name: "web_search",
+    description:
+      "Search the live web for current information (news, prices, companies, people, products). Returns titles, urls, and snippets.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The search query" },
+        limit: { type: "integer", minimum: 1, maximum: 6 },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "web_scrape",
+    description: "Fetch the readable markdown content of a specific URL.",
+    parameters: {
+      type: "object",
+      properties: { url: { type: "string", description: "The absolute URL to fetch" } },
+      required: ["url"],
+    },
+  },
+  {
+    type: "function",
+    name: "send_email",
+    description:
+      "Send an email from the user's connected Outlook/Gmail account. Only call after the user has verbally approved the draft.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Recipient email address" },
+        subject: { type: "string" },
+        body: { type: "string", description: "Email body in Markdown" },
+        cc: { type: "string", description: "Optional Cc email address" },
+      },
+      required: ["to", "subject", "body"],
+    },
+  },
+] as const;
 
 export const Route = createFileRoute("/api/realtime/session")({
   server: {
@@ -81,6 +125,8 @@ export const Route = createFileRoute("/api/realtime/session")({
             modalities: ["audio", "text"],
             instructions: buildInstructions(costMode, maxSeconds, userEmail),
             turn_detection: { type: "server_vad" },
+            tools: REALTIME_TOOLS,
+            tool_choice: "auto",
           }),
         });
 

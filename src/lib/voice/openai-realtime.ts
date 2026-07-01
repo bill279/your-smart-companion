@@ -10,6 +10,7 @@ export type RealtimeSession = {
   onError: (cb: (message: string) => void) => void;
   onOpen: (cb: () => void) => void;
   onClose: (cb: () => void) => void;
+  onToolCall: (cb: (name: string, args: Record<string, unknown>, result: unknown) => void) => void;
 };
 
 export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
@@ -50,12 +51,61 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
   let onErrorCb: ((message: string) => void) | null = null;
   let onOpenCb: (() => void) | null = null;
   let onCloseCb: (() => void) | null = null;
+  let onToolCallCb: ((name: string, args: Record<string, unknown>, result: unknown) => void) | null = null;
+
+  // Track streaming function-call argument deltas keyed by call_id.
+  const pendingCalls = new Map<string, { name: string; args: string }>();
+  const dispatchedCalls = new Set<string>();
+
+  async function runTool(name: string, argsJson: string, callId: string) {
+    let args: Record<string, unknown> = {};
+    try { args = JSON.parse(argsJson || "{}"); } catch { /* leave empty */ }
+    let result: unknown;
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      const jwt2 = s?.access_token;
+      const resp = await fetch("/api/realtime/tool", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(jwt2 ? { Authorization: `Bearer ${jwt2}` } : {}),
+        },
+        body: JSON.stringify({ name, arguments: args }),
+      });
+      result = await resp.json().catch(() => ({ error: `tool http ${resp.status}` }));
+    } catch (err) {
+      result = { error: err instanceof Error ? err.message : "tool call failed" };
+    }
+    onToolCallCb?.(name, args, result);
+    try {
+      dc.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: JSON.stringify(result),
+        },
+      }));
+      dc.send(JSON.stringify({ type: "response.create" }));
+    } catch (err) {
+      console.warn("realtime tool response send failed", err);
+    }
+  }
 
   let assistantBuf = "";
   dc.addEventListener("open", () => onOpenCb?.());
   dc.addEventListener("message", (evt) => {
     try {
-      const msg = JSON.parse(evt.data as string) as { type: string; delta?: string; transcript?: string; error?: { message?: string } };
+      const msg = JSON.parse(evt.data as string) as {
+        type: string;
+        delta?: string;
+        transcript?: string;
+        error?: { message?: string };
+        call_id?: string;
+        name?: string;
+        arguments?: string;
+        item?: { type?: string; call_id?: string; name?: string; arguments?: string };
+      };
       switch (msg.type) {
         case "response.audio_transcript.delta":
           assistantBuf += msg.delta ?? "";
@@ -68,6 +118,34 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
         case "conversation.item.input_audio_transcription.completed":
           if (msg.transcript) onTranscriptCb?.("user", msg.transcript, true);
           break;
+        case "response.function_call_arguments.delta": {
+          const id = msg.call_id ?? "";
+          const existing = pendingCalls.get(id) ?? { name: msg.name ?? "", args: "" };
+          existing.args += msg.delta ?? "";
+          if (msg.name && !existing.name) existing.name = msg.name;
+          pendingCalls.set(id, existing);
+          break;
+        }
+        case "response.function_call_arguments.done": {
+          const id = msg.call_id ?? "";
+          const buf = pendingCalls.get(id);
+          const name = msg.name ?? buf?.name ?? "";
+          const argsJson = msg.arguments ?? buf?.args ?? "";
+          pendingCalls.delete(id);
+          if (name && id && !dispatchedCalls.has(id)) {
+            dispatchedCalls.add(id);
+            void runTool(name, argsJson, id);
+          }
+          break;
+        }
+        case "response.output_item.done": {
+          const item = msg.item;
+          if (item?.type === "function_call" && item.call_id && item.name && !dispatchedCalls.has(item.call_id)) {
+            dispatchedCalls.add(item.call_id);
+            void runTool(item.name, item.arguments ?? "", item.call_id);
+          }
+          break;
+        }
         case "error":
           onErrorCb?.(msg.error?.message ?? "OpenAI Realtime error");
           break;
@@ -109,5 +187,6 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
     onError: (cb) => { onErrorCb = cb; },
     onOpen: (cb) => { onOpenCb = cb; },
     onClose: (cb) => { onCloseCb = cb; },
+    onToolCall: (cb) => { onToolCallCb = cb; },
   };
 }
