@@ -282,6 +282,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
+  const getSettings = useServerFn(getAssistantSettings);
+  const settingsQ = useQuery({ queryKey: ["assistant-settings"], queryFn: () => getSettings({}) });
+  const voiceProvider = settingsQ.data?.voice_provider ?? "elevenlabs";
+  const openAiSessionRef = useRef<RealtimeSession | null>(null);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
