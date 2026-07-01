@@ -68,8 +68,6 @@ function looksLikeDocumentIntent(text: string): boolean {
   if (!text) return false;
   return DOCUMENT_INTENT_REGEX.test(text);
 }
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
 
 function isRetryableVoiceStartError(message: string) {
   return /VOICE_RETRYABLE_CLOSING|still closing|closing another|another session|concurrent|capacity|rate|too many|429|active.*conversation|conversation.*active|already.*conversation|already.*session/i.test(message);
