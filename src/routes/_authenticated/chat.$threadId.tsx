@@ -285,6 +285,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getSettings = useServerFn(getAssistantSettings);
   const settingsQ = useQuery({ queryKey: ["assistant-settings"], queryFn: () => getSettings({}) });
   const voiceProvider = settingsQ.data?.voice_provider ?? "elevenlabs";
+  const costMode = settingsQ.data?.cost_mode ?? "balanced";
   const openAiSessionRef = useRef<RealtimeSession | null>(null);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
@@ -357,8 +358,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     queryFn: () => voiceQuotaFn(),
     staleTime: 60_000,
     refetchInterval: 5 * 60_000,
+    enabled: voiceProvider === "elevenlabs",
   });
-  const quota = voiceQuotaQ.data;
+  const quota = voiceProvider === "elevenlabs" ? voiceQuotaQ.data : undefined;
   const quotaTone =
     quota && quota.available
       ? quota.percentUsed >= 95
@@ -367,6 +369,30 @@ function ThreadView({ threadId }: { threadId: string }) {
         ? "warn"
         : "ok"
       : "unknown";
+  // Live voice session timer (used for OpenAI Realtime widget where we don't
+  // have a server-reported usage percent to show).
+  const [voiceSessionStart, setVoiceSessionStart] = useState<number | null>(null);
+  const [voiceElapsed, setVoiceElapsed] = useState(0);
+  useEffect(() => {
+    if (voiceUiState === "connected") {
+      setVoiceSessionStart((s) => s ?? Date.now());
+    } else if (voiceUiState === "idle") {
+      setVoiceSessionStart(null);
+      setVoiceElapsed(0);
+    }
+  }, [voiceUiState]);
+  useEffect(() => {
+    if (!voiceSessionStart) return;
+    const id = window.setInterval(() => {
+      setVoiceElapsed(Math.floor((Date.now() - voiceSessionStart) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [voiceSessionStart]);
+  const fmtElapsed = (s: number) => {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${r.toString().padStart(2, "0")}`;
+  };
   const warnedQuotaRef = useRef<string | null>(null);
   useEffect(() => {
     if (!quota || !quota.available || quota.limit <= 0) return;
@@ -1433,10 +1459,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <SettingsIcon size={12} /> Assistant settings
         </Link>
-        {quota && quota.available && quota.limit > 0 && (
+        {voiceProvider === "elevenlabs" && quota && quota.available && quota.limit > 0 && (
           <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
             <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="font-medium text-foreground">Voice quota</span>
+              <span className="font-medium text-foreground">ElevenLabs</span>
               <span
                 className={
                   quotaTone === "danger"
@@ -1467,6 +1493,26 @@ function ThreadView({ threadId }: { threadId: string }) {
                 ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
                 : ""}
             </div>
+          </div>
+        )}
+        {voiceProvider === "openai_realtime" && (
+          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
+            <div className="flex items-center justify-between text-[11px] mb-1">
+              <span className="font-medium text-foreground">OpenAI Voice</span>
+              <span className={voiceActive ? "text-primary font-semibold" : "text-muted-foreground"}>
+                {voiceActive ? (voiceUiState === "connected" ? "Live" : voiceUiState) : "Idle"}
+              </span>
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              {voiceActive && voiceSessionStart
+                ? `Session ${fmtElapsed(voiceElapsed)} · ${costMode}`
+                : `Mode: ${costMode} · usage billed to OpenAI`}
+            </div>
+          </div>
+        )}
+        {voiceProvider === "none" && (
+          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5 text-[11px] text-muted-foreground">
+            Voice off · text only
           </div>
         )}
         <button
@@ -1503,9 +1549,9 @@ function ThreadView({ threadId }: { threadId: string }) {
             <Menu size={20} />
           </button>
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
-          {quota && quota.available && quota.limit > 0 && (
+          {voiceProvider === "elevenlabs" && quota && quota.available && quota.limit > 0 ? (
             <span
-              title={`Voice quota: ${quota.percentUsed}% used`}
+              title={`ElevenLabs: ${quota.percentUsed}% used`}
               className={
                 "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
                 (quotaTone === "danger"
@@ -1515,10 +1561,24 @@ function ThreadView({ threadId }: { threadId: string }) {
                   : "bg-secondary text-muted-foreground")
               }
             >
-              🎙 {quota.percentUsed}%
+              🎙 EL {quota.percentUsed}%
+            </span>
+          ) : voiceProvider === "openai_realtime" ? (
+            <span
+              title={voiceActive ? `OpenAI Voice live · ${fmtElapsed(voiceElapsed)}` : `OpenAI Voice idle · ${costMode}`}
+              className={
+                "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
+                (voiceActive ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground")
+              }
+            >
+              🎙 {voiceActive ? fmtElapsed(voiceElapsed) : costMode}
+            </span>
+          ) : (
+            <span className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
+              Voice off
             </span>
           )}
-          <div className={`relative ${quota && quota.available && quota.limit > 0 ? "ml-1" : "ml-auto"}`}>
+          <div className="relative ml-1">
             <button
               onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
               className="p-2 rounded-md hover:bg-secondary text-foreground"
