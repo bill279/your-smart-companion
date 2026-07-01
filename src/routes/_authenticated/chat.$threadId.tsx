@@ -877,13 +877,23 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceState("starting");
     wantsVoiceModeRef.current = true;
     let assistantBuf = "";
-    // Document-intent loop guards, scoped to this voice session.
-    let docInFlight = false;
-    let lastDocIntentKey = "";
-    let lastDocIntentAt = 0;
-    const DOC_INTENT_TTL_MS = 30_000;
+    // Document-intent loop guards use refs so repeated transcript fragments
+    // and re-renders can't bypass the dedupe. Key = normalized text + format.
+    const DOC_INTENT_COMPLETED_TTL_MS = 60_000;
+    const detectFormat = (t: string): string => {
+      const s = t.toLowerCase();
+      if (/\bpdf\b/.test(s)) return "pdf";
+      if (/\b(docx|word)\b/.test(s)) return "docx";
+      if (/\b(xlsx|excel|spreadsheet)\b/.test(s)) return "xlsx";
+      if (/\bcsv\b/.test(s)) return "csv";
+      if (/\bmarkdown|\bmd\b/.test(s)) return "md";
+      if (/\btxt|text file\b/.test(s)) return "txt";
+      return "auto";
+    };
     const normalizeIntent = (t: string) =>
-      t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
+      t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200) +
+      "|" +
+      detectFormat(t);
     try {
       const session = await startOpenAiRealtimeSession({ context: buildVoiceContext() });
       openAiSessionRef.current = session;
@@ -895,20 +905,24 @@ function ThreadView({ threadId }: { threadId: string }) {
       session.onError((message) => {
         toast.error(message);
         setVoiceError(message);
-        if (docInFlight) docInFlight = false;
+        if (docInFlightRef.current) {
+          docInFlightRef.current = false;
+          lastDocumentIntentCompletedAtRef.current = Date.now();
+        }
       });
       session.onToolCall((name, _args, result) => {
         if (name !== "generate_document") return;
         const r = result as { ok?: boolean; artifact?: Record<string, unknown> } | null;
-        docInFlight = false;
+        docInFlightRef.current = false;
+        lastDocumentIntentCompletedAtRef.current = Date.now();
         if (!r?.ok || !r.artifact) {
           const errMsg =
             (r && typeof (r as { error?: unknown }).error === "string"
               ? ((r as { error?: string }).error as string)
               : null) ?? "Document generation failed.";
           toast.error(errMsg);
-          // Clear the pending intent so the user can retry with a fresh utterance.
-          lastDocIntentKey = "";
+          // Clear the key so the user can retry with the same utterance.
+          lastDocumentIntentKeyRef.current = "";
           return;
         }
         const block = "```bpa-artifact\n" + JSON.stringify(r.artifact) + "\n```";
@@ -916,8 +930,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         void add({ data: { threadId, role: "assistant", content } }).then(() => {
           qc.invalidateQueries({ queryKey: ["messages", threadId] });
         });
-        // Keep lastDocIntentKey set so partial/repeat transcripts of the
-        // same utterance don't re-trigger. It naturally expires via TTL.
+        // Keep lastDocumentIntentKey set; completed-TTL blocks repeats for 60s.
       });
       session.onTranscript((role, text, done) => {
         if (role === "assistant") {
@@ -937,27 +950,29 @@ function ThreadView({ threadId }: { threadId: string }) {
           if (looksLikeDocumentIntent(text)) {
             const key = normalizeIntent(text);
             const now = Date.now();
-            const isDuplicate =
-              key === lastDocIntentKey && now - lastDocIntentAt < DOC_INTENT_TTL_MS;
-            if (docInFlight) {
+            const completedRecently =
+              key === lastDocumentIntentKeyRef.current &&
+              now - lastDocumentIntentCompletedAtRef.current <
+                DOC_INTENT_COMPLETED_TTL_MS;
+            if (docInFlightRef.current) {
               console.log("[realtime] doc-intent ignored — generation already in flight");
-            } else if (isDuplicate) {
-              console.log("[realtime] doc-intent ignored — duplicate of recent utterance");
+            } else if (completedRecently) {
+              console.log("[realtime] doc-intent ignored — same intent completed within 60s");
             } else {
-              lastDocIntentKey = key;
-              lastDocIntentAt = now;
-              docInFlight = true;
+              lastDocumentIntentKeyRef.current = key;
+              docInFlightRef.current = true;
               const forced = session.forceGenerateDocument(text);
               if (forced) {
                 console.log("[realtime] doc-intent detected, forcing generate_document:", text);
               } else {
-                docInFlight = false;
+                docInFlightRef.current = false;
               }
               // Safety: if the tool call never resolves, release the lock.
               setTimeout(() => {
-                if (docInFlight) {
+                if (docInFlightRef.current) {
                   console.warn("[realtime] doc-intent lock released by timeout");
-                  docInFlight = false;
+                  docInFlightRef.current = false;
+                  lastDocumentIntentCompletedAtRef.current = Date.now();
                 }
               }, 45_000);
             }
