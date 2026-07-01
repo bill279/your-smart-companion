@@ -11,6 +11,8 @@ export type RealtimeSession = {
   onOpen: (cb: () => void) => void;
   onClose: (cb: () => void) => void;
   onToolCall: (cb: (name: string, args: Record<string, unknown>, result: unknown) => void) => void;
+  sendEvent: (event: Record<string, unknown>) => boolean;
+  forceGenerateDocument: (hint?: string) => boolean;
 };
 
 export async function startOpenAiRealtimeSession(options: { context?: string } = {}): Promise<RealtimeSession> {
@@ -246,5 +248,42 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
     onOpen: (cb) => { onOpenCb = cb; },
     onClose: (cb) => { onCloseCb = cb; },
     onToolCall: (cb) => { onToolCallCb = cb; },
+    sendEvent: (event) => {
+      try {
+        if (dc.readyState !== "open") return false;
+        dc.send(JSON.stringify(event));
+        return true;
+      } catch (err) {
+        console.warn("[realtime] sendEvent failed", err);
+        return false;
+      }
+    },
+    forceGenerateDocument: (hint) => {
+      try {
+        if (dc.readyState !== "open") return false;
+        const instructions = [
+          "The user requested a downloadable document. You MUST call the generate_document tool now.",
+          "Do NOT reply with the document body as text. Do NOT ask for confirmation.",
+          "Pick an appropriate format (default pdf if unspecified), a concise title and filename, and put the full document body in the markdown field, using the most recent relevant assistant answer and conversation context.",
+          "After the tool result returns, speak exactly one short sentence such as: 'I generated the PDF — it's on screen.' Never read the document contents aloud.",
+          hint ? `User request: ${hint}` : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        dc.send(
+          JSON.stringify({
+            type: "response.create",
+            response: {
+              tool_choice: { type: "function", name: "generate_document" },
+              instructions,
+            },
+          }),
+        );
+        return true;
+      } catch (err) {
+        console.warn("[realtime] forceGenerateDocument failed", err);
+        return false;
+      }
+    },
   };
 }
