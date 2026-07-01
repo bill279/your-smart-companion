@@ -295,6 +295,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const voiceProvider = settingsQ.data?.voice_provider ?? "elevenlabs";
   const costMode = settingsQ.data?.cost_mode ?? "balanced";
   const openAiSessionRef = useRef<RealtimeSession | null>(null);
+  // Voice document-intent dedupe guards (survive re-renders across a session).
+  const docInFlightRef = useRef(false);
+  const lastDocumentIntentKeyRef = useRef<string>("");
+  const lastDocumentIntentCompletedAtRef = useRef<number>(0);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
