@@ -1989,3 +1989,59 @@ function Bubble({
     </div>
   );
 }
+
+function ArtifactCard({
+  data,
+}: {
+  data: { title?: string; format?: string; filename?: string; url?: string; createdAt?: string };
+}) {
+  const fmt = (data.format ?? "").toUpperCase();
+  const created = data.createdAt ? new Date(data.createdAt) : null;
+  const createdLabel = created
+    ? created.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : null;
+  const Icon =
+    fmt === "PDF"
+      ? FileType2
+      : fmt === "DOCX"
+        ? FileText
+        : fmt === "XLSX" || fmt === "CSV"
+          ? FileSpreadsheet
+          : FileText;
+  return (
+    <div className="not-prose my-3 flex items-center gap-3 rounded-lg border border-border bg-card p-3 shadow-sm">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <Icon size={20} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-foreground">
+          {data.title || data.filename || "Document"}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+          {fmt && <span className="rounded bg-secondary px-1.5 py-0.5 font-medium">{fmt}</span>}
+          {data.filename && <span className="truncate">{data.filename}</span>}
+          {createdLabel && <span>· {createdLabel}</span>}
+        </div>
+      </div>
+      {data.url && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          <a
+            href={data.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80"
+          >
+            Open
+          </a>
+          <a
+            href={data.url}
+            download={data.filename}
+            className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Download size={12} /> Download
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
