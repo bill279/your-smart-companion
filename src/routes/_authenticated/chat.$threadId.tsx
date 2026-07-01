@@ -23,6 +23,8 @@ import {
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { getAssistantSettings } from "@/lib/assistant/settings.functions";
+import { startOpenAiRealtimeSession, type RealtimeSession } from "@/lib/voice/openai-realtime";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
@@ -280,6 +282,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
+  const getSettings = useServerFn(getAssistantSettings);
+  const settingsQ = useQuery({ queryKey: ["assistant-settings"], queryFn: () => getSettings({}) });
+  const voiceProvider = settingsQ.data?.voice_provider ?? "elevenlabs";
+  const openAiSessionRef = useRef<RealtimeSession | null>(null);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -826,8 +832,69 @@ function ThreadView({ threadId }: { threadId: string }) {
       : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
+  async function startOpenAiVoice() {
+    if (openAiSessionRef.current) return;
+    setVoiceError(null);
+    setVoiceState("starting");
+    wantsVoiceModeRef.current = true;
+    let assistantBuf = "";
+    try {
+      const session = await startOpenAiRealtimeSession();
+      openAiSessionRef.current = session;
+      session.onOpen(() => setVoiceState("connected"));
+      session.onClose(() => {
+        openAiSessionRef.current = null;
+        setVoiceState("idle");
+      });
+      session.onError((message) => {
+        toast.error(message);
+        setVoiceError(message);
+      });
+      session.onTranscript((role, text, done) => {
+        if (role === "assistant") {
+          assistantBuf = text;
+          setPendingAssistant(text);
+          if (done && text.trim()) {
+            void add({ data: { threadId, role: "assistant", content: text } }).then(() => {
+              qc.invalidateQueries({ queryKey: ["messages", threadId] });
+            });
+            setPendingAssistant("");
+            assistantBuf = "";
+          }
+        } else if (role === "user" && done && text.trim()) {
+          void add({ data: { threadId, role: "user", content: text } }).then(() => {
+            qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          });
+        }
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "OpenAI voice failed to start.";
+      setVoiceError(msg);
+      toast.error(msg);
+      setVoiceState("idle");
+      openAiSessionRef.current = null;
+    }
+  }
+
+  async function stopOpenAiVoice() {
+    const s = openAiSessionRef.current;
+    openAiSessionRef.current = null;
+    setVoiceState("stopping");
+    try { await s?.stop(); } catch (err) { console.warn(err); }
+    setPendingAssistant("");
+    setVoiceState("idle");
+  }
+
   async function startVoice(options: { automaticReconnect?: boolean } = {}) {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    if (voiceProvider === "openai_realtime") {
+      await startOpenAiVoice();
+      return;
+    }
+    if (voiceProvider === "none") {
+      toast.error("Voice is disabled in settings.");
+      return;
+    }
     if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
       wantsVoiceModeRef.current = false;
       toast.error("Voice quota exhausted — text chat still works.");
@@ -938,6 +1005,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   async function stopVoice() {
+    if (openAiSessionRef.current) {
+      await stopOpenAiVoice();
+      return;
+    }
     wantsVoiceModeRef.current = false;
     clearVoiceReconnectTimer();
     startAttemptRef.current += 1;
