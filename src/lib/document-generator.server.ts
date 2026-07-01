@@ -12,7 +12,7 @@ import {
 } from "docx";
 import * as XLSX from "xlsx";
 
-export type DocFormat = "pdf" | "docx" | "xlsx" | "csv" | "txt";
+export type DocFormat = "pdf" | "docx" | "xlsx" | "csv" | "txt" | "md";
 
 function parseMarkdownTables(md: string): string[][][] {
   const tables: string[][][] = [];
@@ -60,6 +60,12 @@ export async function generateDocument(opts: {
   if (format === "txt") {
     const bytes = new TextEncoder().encode(stripMarkdown(markdown));
     return { bytes, mimeType: "text/plain", extension: "txt" };
+  }
+
+  if (format === "md") {
+    const header = `# ${title}\n\n_Generated ${new Date().toISOString().slice(0, 10)}_\n\n`;
+    const bytes = new TextEncoder().encode(header + markdown);
+    return { bytes, mimeType: "text/markdown", extension: "md" };
   }
 
   if (format === "csv") {
