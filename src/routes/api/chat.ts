@@ -530,7 +530,29 @@ export const Route = createFileRoute("/api/chat")({
               { userText, intent: docIntent },
               "error",
             );
-            // Fall through to the normal LLM path so the user still gets a reply.
+            // HARD FAIL for document intents. Never fall through to normal LLM
+            // prose — the model tends to answer with the would-be document body
+            // as chat text, which defeats the deterministic artifact path.
+            const failText =
+              `⚠️ I couldn't generate the ${docIntent.format.toUpperCase()} file right now (${msg}). Please try again in a moment — I won't paste the document as chat text.`;
+            try {
+              await supabase.from("messages").insert({
+                thread_id: body.threadId!,
+                user_id: userId,
+                role: "assistant",
+                content: failText,
+              });
+              await supabase
+                .from("threads")
+                .update({ updated_at: new Date().toISOString() })
+                .eq("id", body.threadId!);
+            } catch (persistErr) {
+              console.error("[chat] failed to persist doc-intent failure:", persistErr);
+            }
+            return new Response(failText, {
+              status: 200,
+              headers: { "Content-Type": "text/plain; charset=utf-8" },
+            });
           }
         }
 
