@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Settings as SettingsIcon } from "lucide-react";
 import { exportToPdf, exportToDocx, exportToXlsx, exportToCsv } from "@/lib/chat-export";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
@@ -1355,6 +1355,13 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <Sparkles size={12} /> Activity & memory
         </Link>
+        <Link
+          to="/settings"
+          onClick={() => setSidebarOpen(false)}
+          className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          <SettingsIcon size={12} /> Assistant settings
+        </Link>
         {quota && quota.available && quota.limit > 0 && (
           <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
             <div className="flex items-center justify-between text-[11px] mb-1.5">
@@ -1460,8 +1467,8 @@ function ThreadView({ threadId }: { threadId: string }) {
                 <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
                   BP
                 </div>
-                <h2 className="text-xl md:text-2xl font-semibold text-foreground">How can I help today?</h2>
-                <p className="text-sm text-muted-foreground mt-1">Ask anything, draft an email, search the web, or generate a document.</p>
+                <h2 className="text-xl md:text-2xl font-semibold text-foreground">Hey, I'm BPA Bot.</h2>
+                <p className="text-sm text-muted-foreground mt-1">I can research, compare options, draft emails, create files, and help you get work done. What do you want to tackle?</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-6 w-full max-w-xl">
                   {[
                     { title: "Draft an email", body: "Draft a professional email to a client following up on our last meeting." },
