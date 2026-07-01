@@ -172,6 +172,7 @@ export const Route = createFileRoute("/api/realtime/session")({
         }
         const session = JSON.parse(bodyText) as {
           client_secret?: { value?: string; expires_at?: number };
+          tools?: Array<{ name?: string }>;
         };
         if (!session.client_secret?.value) {
           return Response.json(
@@ -179,11 +180,25 @@ export const Route = createFileRoute("/api/realtime/session")({
             { status: 502 },
           );
         }
+        const registeredToolNames = Array.isArray(session.tools)
+          ? session.tools.map((t) => t?.name).filter(Boolean)
+          : REALTIME_TOOLS.map((t) => t.name);
+        console.log(
+          "[realtime session] created; tools registered:",
+          registeredToolNames.join(", ") || "(none)",
+        );
+        if (!registeredToolNames.includes("generate_document")) {
+          console.warn(
+            "[realtime session] generate_document missing from OpenAI-echoed tools; client will re-register via session.update",
+          );
+        }
         return Response.json({
           clientSecret: session.client_secret.value,
           expiresAt: session.client_secret.expires_at ?? null,
           model: REALTIME_MODEL,
           voice: REALTIME_VOICE,
+          tools: REALTIME_TOOLS,
+          registeredToolNames,
         });
       },
     },
