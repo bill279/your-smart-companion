@@ -30,13 +30,22 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
     } catch { /* ignore */ }
     throw new Error(msg);
   }
-  const { clientSecret, model, tools, registeredToolNames } = (await resp.json()) as {
+  const { clientSecret, model, tools, registeredToolNames, documentToolRegistered } = (await resp.json()) as {
     clientSecret: string;
     model: string;
     tools?: unknown[];
     registeredToolNames?: string[];
+    documentToolRegistered?: boolean;
   };
-  if (registeredToolNames && !registeredToolNames.includes("generate_document")) {
+  const localToolNames = Array.isArray(tools)
+    ? tools
+        .map((tool) => (tool && typeof tool === "object" && "name" in tool ? String(tool.name) : ""))
+        .filter(Boolean)
+    : [];
+  if (!localToolNames.includes("generate_document")) {
+    throw new Error("Voice session is missing generate_document locally. PDF/DOCX generation cannot start.");
+  }
+  if (documentToolRegistered === false || (registeredToolNames && !registeredToolNames.includes("generate_document"))) {
     console.warn(
       "[realtime] server session missing generate_document — will re-register client-side",
       registeredToolNames,
@@ -107,10 +116,16 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
     // dropped upstream.
     if (Array.isArray(tools) && tools.length) {
       try {
+        console.log("[realtime] registering client-side tools:", localToolNames.join(", "));
         dc.send(
           JSON.stringify({
             type: "session.update",
-            session: { tools, tool_choice: "auto" },
+            session: {
+              tools,
+              tool_choice: "auto",
+              instructions:
+                "You can create downloadable PDFs, DOCX Word documents, Markdown files, spreadsheets, CSV, and TXT files with generate_document. For any create/export PDF, Word, Markdown, report, download, or attachment request, call generate_document immediately. Never say you cannot create files or PDFs; briefly confirm after the artifact is generated and do not read the full document aloud.",
+            },
           }),
         );
       } catch (err) {
@@ -137,7 +152,8 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
           const s = (msg as unknown as { session?: { tools?: Array<{ name?: string }> } }).session;
           const names = s?.tools?.map((t) => t?.name).filter(Boolean) ?? [];
           console.log("[realtime] session tools:", names.join(", ") || "(none)");
-          if (names.length && !names.includes("generate_document")) {
+          if (msg.type === "session.updated" && !names.includes("generate_document")) {
+            console.warn("[realtime] generate_document missing after session.update", names);
             onErrorCb?.(
               "Voice session is missing the document tool — PDF/DOCX generation unavailable until you restart the mic.",
             );
