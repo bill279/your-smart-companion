@@ -5,8 +5,20 @@
 export type DocFormat = "pdf" | "docx" | "xlsx" | "csv" | "md" | "txt";
 
 // Trigger verbs / phrasing that clearly signal the user wants a downloadable file.
-const DOCUMENT_INTENT_REGEX =
-  /\b(?:(?:create|generate|make|build|export|send|give|produce|prepare|draft|save|download|attach|turn (?:it|that|this) into)\s+(?:me\s+)?(?:a|an|the)?\s*(?:pdf|word\s*doc(?:ument)?|docx|doc|excel|xlsx|spreadsheet|csv|markdown|md\s*file|report|summary\s*file|attachment|download(?:able)?\s*(?:file|document)?|file\s+(?:of|from|with)))|\b(?:as|to|into)\s+(?:a\s+)?(?:pdf|word\s*doc(?:ument)?|docx|excel|xlsx|spreadsheet|csv|markdown)\b|\bmake\s+(?:it|that|this)\s+(?:a\s+)?(?:pdf|word|docx|excel|xlsx|spreadsheet|csv|markdown|report|document)\b/i;
+// Allow optional adjectives between article and the file-type noun so phrases
+// like "make a one-page PDF summary of X" or "create a short Word document"
+// still match. We cap the filler at ~4 tokens to avoid runaway matching.
+const FILLER = "(?:[a-z][a-z0-9-]*\\s+){0,4}";
+const NOUN =
+  "(?:pdf|word\\s*doc(?:ument)?|docx|doc|excel|xlsx|spreadsheet|csv|markdown|md\\s*file|report|summary(?:\\s*file)?|attachment|download(?:able)?\\s*(?:file|document)?|document|file)";
+const VERB =
+  "create|generate|make|build|export|send|give|produce|prepare|draft|save|download|attach|turn\\s+(?:it|that|this)\\s+into";
+const DOCUMENT_INTENT_REGEX = new RegExp(
+  `\\b(?:(?:${VERB})\\s+(?:me\\s+)?(?:a|an|the)?\\s*${FILLER}${NOUN})` +
+    `|\\b(?:as|to|into)\\s+(?:a\\s+)?(?:pdf|word\\s*doc(?:ument)?|docx|excel|xlsx|spreadsheet|csv|markdown)\\b` +
+    `|\\bmake\\s+(?:it|that|this)\\s+(?:a\\s+)?${FILLER}(?:pdf|word|docx|excel|xlsx|spreadsheet|csv|markdown|report|document)\\b`,
+  "i",
+);
 
 export function looksLikeDocumentIntent(text: string): boolean {
   if (!text) return false;
