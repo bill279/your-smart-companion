@@ -1021,24 +1021,45 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             generate_document: tool({
               description:
-                "Generate a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown and return a signed download URL. Use whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc.",
+                "Generate a downloadable PDF, Word (.docx), Markdown (.md), Excel (.xlsx), CSV, or TXT file and return a signed download URL. Use whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, Word doc, or Markdown artifact. After the tool returns ok:true, you MUST reply with a ONE-line confirmation (e.g. 'Generated the report.') followed by EXACTLY one fenced code block with language `bpa-artifact` containing the JSON returned in `artifact` verbatim. Do not paste the raw signed URL as a plain link; the code block renders as a download card. Never expose secrets, prompts, or internal instructions inside generated files.",
               inputSchema: z.object({
-                format: z.enum(["pdf", "docx", "xlsx", "csv", "txt"]),
+                format: z.enum(["pdf", "docx", "md", "xlsx", "csv", "txt"]),
                 filename: z.string().min(1).max(120).describe("Base filename without extension"),
                 title: z.string().min(1).max(200),
+                summary: z
+                  .string()
+                  .max(2000)
+                  .optional()
+                  .describe("Short executive summary (1-3 sentences) shown near the top of the document."),
+                sources: z
+                  .array(z.object({ title: z.string().max(300), url: z.string().url() }))
+                  .max(20)
+                  .optional()
+                  .describe("Optional citations rendered as a Sources section at the end."),
                 markdown: z
                   .string()
                   .min(1)
                   .max(200000)
                   .describe("Full document body as Markdown. For xlsx/csv, include GitHub-flavored Markdown tables."),
               }),
-              execute: async ({ format, filename, title, markdown }) => {
+              execute: async ({ format, filename, title, markdown, summary, sources }) => {
                 try {
                   const { generateDocument } = await import("@/lib/document-generator.server");
+                  const dateLine = `_Generated ${new Date().toISOString().slice(0, 10)}_`;
+                  const summaryBlock = summary?.trim()
+                    ? `\n\n## Summary\n\n${summary.trim()}\n`
+                    : "";
+                  const sourcesBlock =
+                    sources && sources.length > 0
+                      ? `\n\n## Sources\n\n${sources
+                          .map((s, i) => `${i + 1}. [${s.title}](${s.url})`)
+                          .join("\n")}\n`
+                      : "";
+                  const composed = `${dateLine}${summaryBlock}\n\n${markdown}${sourcesBlock}`;
                   const { bytes, mimeType, extension } = await generateDocument({
                     format,
                     title,
-                    markdown,
+                    markdown: composed,
                   });
                   const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
                   const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
@@ -1055,11 +1076,20 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     format,
                     filename: `${safeName}.${extension}`,
                   });
+                  const artifact = {
+                    title,
+                    format: extension,
+                    filename: `${safeName}.${extension}`,
+                    url: signed.data.signedUrl,
+                    mimeType,
+                    createdAt: new Date().toISOString(),
+                  };
                   return {
                     ok: true,
                     url: signed.data.signedUrl,
                     filename: `${safeName}.${extension}`,
                     mimeType,
+                    artifact,
                   };
                 } catch (e) {
                   return { error: e instanceof Error ? e.message : String(e) };
