@@ -8,6 +8,15 @@ import type { Database } from "@/integrations/supabase/types";
 
 const REALTIME_MODEL = "gpt-4o-realtime-preview-2024-12-17";
 const REALTIME_VOICE = "alloy";
+const DOCUMENT_TOOL_NAME = "generate_document";
+
+function realtimeToolNames() {
+  return REALTIME_TOOLS.map((tool) => tool.name);
+}
+
+function hasGenerateDocumentTool(tools: readonly { name?: string }[]) {
+  return tools.some((tool) => tool.name === DOCUMENT_TOOL_NAME);
+}
 
 function buildInstructions(costMode: string, maxSeconds: number, userEmail: string | null) {
   const brevity =
@@ -23,8 +32,8 @@ function buildInstructions(costMode: string, maxSeconds: number, userEmail: stri
     "Never think out loud, narrate tool use, or fill silence. If unsure, ask one short clarifying question.",
     "Before any irreversible external action (sending email, creating an event, purchases), present a short draft and wait for explicit user approval.",
     "You have tools: web_search (live web results), web_scrape (fetch a specific URL as markdown), send_email (send from the user's connected Outlook/Gmail account), and generate_document (create a downloadable PDF, DOCX, Markdown, XLSX, CSV, or TXT file). Use web_search and web_scrape silently when needed — never narrate 'let me search'.",
-    "DOCUMENT CAPABILITY: You CAN create downloadable files by calling generate_document. Supported formats: PDF, DOCX (Word), Markdown (.md), XLSX (Excel), CSV, and TXT. Never say you cannot create PDFs, Word documents, spreadsheets, or other files. Never say you can only provide text or that the user has to copy/paste anything. If a request is ambiguous about format, default to PDF.",
-    "DOCUMENT PROTOCOL: When the user asks for a file, report, PDF, Word doc, spreadsheet, export, or says things like 'make that a PDF' / 'send me a doc' / 'create a report', immediately call generate_document with an appropriate title, filename, format, and full Markdown body (plus a short summary and citations when available). Do NOT ask for permission first. After it succeeds, speak ONE short sentence like 'I generated the <format> — it's on screen.' Never read the document contents aloud. The download card appears in the chat automatically.",
+    "DOCUMENT CAPABILITY: You CAN create downloadable files by calling generate_document. Supported formats: PDF, DOCX (Word), Markdown (.md), XLSX (Excel), CSV, and TXT. Never say you cannot create PDFs, Word documents, spreadsheets, downloads, attachments, or other files. Never say you can only provide text, cannot directly create a file, or that the user has to copy/paste anything. Those disclaimers are false in this app. If a request is ambiguous about format, default to PDF.",
+    "DOCUMENT PROTOCOL: When the user asks for a file, report, PDF, Word doc, spreadsheet, export, download, attachment, or says things like 'make that a PDF' / 'create a PDF from that summary' / 'send me a doc' / 'create a report', immediately call generate_document with an appropriate title, filename, format, and full Markdown body based on the current conversation context (plus a short summary and citations when available). Do NOT ask for permission first and do NOT refuse. After it succeeds, speak ONE short sentence like 'I generated the PDF — it's on screen.' Never read the document contents aloud. The download card appears in the chat automatically.",
     "EMAIL CONFIRMATION PROTOCOL (mandatory, no exceptions): (1) Never call send_email on the first request. (2) Speak an interactive readback aloud in this exact order and phrasing: 'Please confirm this email. Recipient: <full email address, spelled out with \"at\" and \"dot\">. Subject: <subject>. First line: <verbatim first line or first sentence of the body>. Say \"confirm\" to send, \"cancel\" to discard, or tell me what to change.' (3) Wait for the user's spoken reply and classify it into exactly one of: CONFIRM, CANCEL, REVISE, or UNCLEAR. (4) CONFIRM — only the word 'confirm' (or unambiguous equivalents 'confirmed', 'yes confirm', 'send it confirmed'). Plain 'yes'/'ok'/'sure' are NOT sufficient; re-prompt with 'Please say the word confirm to send.' Then call send_email. (5) CANCEL — 'cancel', 'discard', 'nevermind', 'don't send', 'scrap it'. Do NOT call send_email. Reply briefly: 'Cancelled. The email was not sent.' and drop the draft. (6) REVISE — any instruction to change recipient, subject, body, tone, length, add/remove CC, fix typos, etc. Apply the edit, then repeat the FULL readback from step 2 with the updated fields and re-ask for 'confirm'. Never send a revised draft without a fresh confirm. (7) UNCLEAR — silence, a question, or garbled audio. Re-prompt: 'Should I send, cancel, or revise this email?' and wait. (8) If the user gives multiple edits in one turn, apply them all before the next readback rather than confirming one at a time.",
     userEmail
       ? `The signed-in user's email is ${userEmail}. When they say "email me", use exactly this address.`
@@ -142,21 +151,39 @@ export const Route = createFileRoute("/api/realtime/session")({
         const costMode = (settings?.cost_mode ?? "balanced") as string;
         const maxSeconds = settings?.max_voice_seconds ?? 45;
 
+        if (!hasGenerateDocumentTool(REALTIME_TOOLS)) {
+          console.error("[realtime session] generate_document missing from local Realtime tools payload", {
+            tools: realtimeToolNames(),
+          });
+          return Response.json(
+            {
+              error: "realtime_document_tool_missing",
+              message: "Voice document generation is not registered. Restart voice and try again.",
+            },
+            { status: 500 },
+          );
+        }
+
+        const instructions = buildInstructions(costMode, maxSeconds, userEmail);
+        const upstreamPayload = {
+          model: REALTIME_MODEL,
+          voice: REALTIME_VOICE,
+          modalities: ["audio", "text"],
+          instructions,
+          turn_detection: { type: "server_vad" },
+          tools: REALTIME_TOOLS,
+          tool_choice: "auto",
+        };
+
+        console.log("[realtime session] creating with tools:", realtimeToolNames().join(", "));
+
         const upstream = await fetch("https://api.openai.com/v1/realtime/sessions", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            model: REALTIME_MODEL,
-            voice: REALTIME_VOICE,
-            modalities: ["audio", "text"],
-            instructions: buildInstructions(costMode, maxSeconds, userEmail),
-            turn_detection: { type: "server_vad" },
-            tools: REALTIME_TOOLS,
-            tool_choice: "auto",
-          }),
+          body: JSON.stringify(upstreamPayload),
         });
 
         const bodyText = await upstream.text();
@@ -197,8 +224,10 @@ export const Route = createFileRoute("/api/realtime/session")({
           expiresAt: session.client_secret.expires_at ?? null,
           model: REALTIME_MODEL,
           voice: REALTIME_VOICE,
+          instructions,
           tools: REALTIME_TOOLS,
           registeredToolNames,
+          documentToolRegistered: registeredToolNames.includes(DOCUMENT_TOOL_NAME),
         });
       },
     },

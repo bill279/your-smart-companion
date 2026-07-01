@@ -849,6 +849,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- BE CONCISE: keep spoken replies to 1-2 short sentences and under 25 words by default. Avoid long monologues so the user can interject naturally.",
       "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content. If uncertain, ask one concise question.",
       "- VISUAL CONTENT: for tables, comparisons, email drafts, documents, code, or long lists, call show_in_chat with the full Markdown immediately and speak only a brief summary. Do not read long content out loud.",
+      "- DOCUMENT GENERATION: you CAN create downloadable PDF, DOCX, Markdown, XLSX, CSV, and TXT files. For requests like 'create a PDF from that summary', 'export this', 'make a Word doc', or 'download this report', call generate_document immediately. Never say you cannot create files, PDFs, attachments, or downloads.",
       "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
       "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
@@ -865,7 +866,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     wantsVoiceModeRef.current = true;
     let assistantBuf = "";
     try {
-      const session = await startOpenAiRealtimeSession();
+      const session = await startOpenAiRealtimeSession({ context: buildVoiceContext() });
       openAiSessionRef.current = session;
       session.onOpen(() => setVoiceState("connected"));
       session.onClose(() => {
