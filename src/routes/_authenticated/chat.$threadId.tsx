@@ -358,8 +358,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     queryFn: () => voiceQuotaFn(),
     staleTime: 60_000,
     refetchInterval: 5 * 60_000,
+    enabled: voiceProvider === "elevenlabs",
   });
-  const quota = voiceQuotaQ.data;
+  const quota = voiceProvider === "elevenlabs" ? voiceQuotaQ.data : undefined;
   const quotaTone =
     quota && quota.available
       ? quota.percentUsed >= 95
@@ -368,6 +369,31 @@ function ThreadView({ threadId }: { threadId: string }) {
         ? "warn"
         : "ok"
       : "unknown";
+  // Live voice session timer (used for OpenAI Realtime widget where we don't
+  // have a server-reported usage percent to show).
+  const [voiceSessionStart, setVoiceSessionStart] = useState<number | null>(null);
+  const [voiceElapsed, setVoiceElapsed] = useState(0);
+  useEffect(() => {
+    if (voiceUiState === "connected") {
+      setVoiceSessionStart((s) => s ?? Date.now());
+    } else if (voiceUiState === "idle") {
+      setVoiceSessionStart(null);
+      setVoiceElapsed(0);
+    }
+  }, [voiceUiState]);
+  useEffect(() => {
+    if (!voiceSessionStart) return;
+    const id = window.setInterval(() => {
+      setVoiceElapsed(Math.floor((Date.now() - voiceSessionStart) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [voiceSessionStart]);
+  const fmtElapsed = (s: number) => {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${r.toString().padStart(2, "0")}`;
+  };
+  const voiceActive = voiceUiState === "connected" || voiceUiState === "starting" || voiceUiState === "reconnecting";
   const warnedQuotaRef = useRef<string | null>(null);
   useEffect(() => {
     if (!quota || !quota.available || quota.limit <= 0) return;
