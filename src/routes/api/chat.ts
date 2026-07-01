@@ -440,6 +440,100 @@ export const Route = createFileRoute("/api/chat")({
             content: r.content,
           };
         });
+        // ── Deterministic document-generation shortcut ─────────────────────
+        // The model unreliably chooses generate_document (especially on mobile),
+        // often replying with prose or a Markdown link instead of the artifact
+        // block the client renders as a download card. When the user's current
+        // turn clearly asks for a file/PDF/DOCX/etc, bypass the LLM tool loop:
+        // compose the body with a single generateText call, generate the file
+        // server-side, upload, and stream back exactly the artifact block.
+        const docIntent = !body.regenerate ? detectDocumentIntent(userText) : null;
+        if (docIntent) {
+          try {
+            const composePrompt = `The user asked: ${userText}\n\nWrite the full body of the requested document in clean GitHub-Flavored Markdown. Use ## headings, short paragraphs, bullet lists, and tables where useful. Do NOT include the title, date, executive summary, or a Sources section — those are added automatically. Output ONLY the Markdown body. No preamble, no explanations, no outer code fences.`;
+            const composed = await generateText({
+              model: gateway(modelId),
+              system: systemWithUser,
+              messages: [
+                ...baseMessages.slice(0, -1),
+                { role: "user", content: composePrompt },
+              ],
+              providerOptions: { openai: { reasoningEffort: "minimal" } },
+            });
+            const bodyMd = composed.text.trim() || `# ${docIntent.title}\n\n(No content generated.)`;
+
+            const { generateDocument } = await import("@/lib/document-generator.server");
+            const dateLine = `_Generated ${new Date().toISOString().slice(0, 10)}_`;
+            const fullMd = `${dateLine}\n\n${bodyMd}`;
+            const { bytes, mimeType, extension } = await generateDocument({
+              format: docIntent.format,
+              title: docIntent.title,
+              markdown: fullMd,
+            });
+            const safeName = docIntent.filename
+              .replace(/[^a-zA-Z0-9._-]+/g, "_")
+              .slice(0, 80) || "document";
+            const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
+            const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+            const up = await supabaseAdmin.storage
+              .from("chat-uploads")
+              .upload(path, bytes, { contentType: mimeType, upsert: false });
+            if (up.error) throw new Error(up.error.message);
+            const signed = await supabaseAdmin.storage
+              .from("chat-uploads")
+              .createSignedUrl(path, 60 * 60 * 24 * 7);
+            if (signed.error) throw new Error(signed.error.message);
+            const artifact = {
+              title: docIntent.title,
+              format: extension,
+              filename: `${safeName}.${extension}`,
+              url: signed.data.signedUrl,
+              mimeType,
+              createdAt: new Date().toISOString(),
+            };
+            await logAction(
+              "generate_document",
+              `Generated ${extension.toUpperCase()} "${safeName}" (direct intent)`,
+              { format: docIntent.format, filename: `${safeName}.${extension}`, path: "direct-intent" },
+            );
+
+            const assistantText =
+              `Generated **${artifact.filename}**.\n\n\`\`\`bpa-artifact\n${JSON.stringify(artifact)}\n\`\`\``;
+            await supabase.from("messages").insert({
+              thread_id: body.threadId!,
+              user_id: userId,
+              role: "assistant",
+              content: assistantText,
+            });
+            await supabase
+              .from("threads")
+              .update({ updated_at: new Date().toISOString() })
+              .eq("id", body.threadId!);
+            const { data: t } = await supabase
+              .from("threads")
+              .select("title")
+              .eq("id", body.threadId!)
+              .maybeSingle();
+            if (t?.title === "New conversation") {
+              const title = userText.slice(0, 48).replace(/\s+/g, " ").trim();
+              await supabase.from("threads").update({ title }).eq("id", body.threadId!);
+            }
+            return new Response(assistantText, {
+              headers: { "Content-Type": "text/plain; charset=utf-8" },
+            });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error("[chat] direct document-intent failed:", msg);
+            await logAction(
+              "generate_document",
+              `Direct document-intent failed: ${msg}`,
+              { userText, intent: docIntent },
+              "error",
+            );
+            // Fall through to the normal LLM path so the user still gets a reply.
+          }
+        }
+
         const result = streamText({
           model: gateway(modelId),
           system: systemWithUser,
