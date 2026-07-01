@@ -393,7 +393,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     const r = s % 60;
     return `${m}:${r.toString().padStart(2, "0")}`;
   };
-  const voiceActive = voiceUiState === "connected" || voiceUiState === "starting" || voiceUiState === "reconnecting";
   const warnedQuotaRef = useRef<string | null>(null);
   useEffect(() => {
     if (!quota || !quota.available || quota.limit <= 0) return;
