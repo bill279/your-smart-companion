@@ -55,6 +55,7 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
 
   // Track streaming function-call argument deltas keyed by call_id.
   const pendingCalls = new Map<string, { name: string; args: string }>();
+  const dispatchedCalls = new Set<string>();
 
   async function runTool(name: string, argsJson: string, callId: string) {
     let args: Record<string, unknown> = {};
@@ -131,12 +132,16 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
           const name = msg.name ?? buf?.name ?? "";
           const argsJson = msg.arguments ?? buf?.args ?? "";
           pendingCalls.delete(id);
-          if (name && id) void runTool(name, argsJson, id);
+          if (name && id && !dispatchedCalls.has(id)) {
+            dispatchedCalls.add(id);
+            void runTool(name, argsJson, id);
+          }
           break;
         }
         case "response.output_item.done": {
           const item = msg.item;
-          if (item?.type === "function_call" && item.call_id && item.name) {
+          if (item?.type === "function_call" && item.call_id && item.name && !dispatchedCalls.has(item.call_id)) {
+            dispatchedCalls.add(item.call_id);
             void runTool(item.name, item.arguments ?? "", item.call_id);
           }
           break;
