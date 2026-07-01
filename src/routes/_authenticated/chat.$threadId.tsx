@@ -952,6 +952,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   async function stopVoice() {
+    if (openAiSessionRef.current) {
+      await stopOpenAiVoice();
+      return;
+    }
     wantsVoiceModeRef.current = false;
     clearVoiceReconnectTimer();
     startAttemptRef.current += 1;
