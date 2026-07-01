@@ -1946,6 +1946,33 @@ function Bubble({
                   <table {...props} className="w-full min-w-max border-collapse text-sm" />
                 </div>
               ),
+              code: ({ inline, className, children, ...props }: {
+                inline?: boolean;
+                className?: string;
+                children?: React.ReactNode;
+              }) => {
+                const lang = /language-(\w[\w-]*)/.exec(className ?? "")?.[1];
+                if (!inline && lang === "bpa-artifact") {
+                  const raw = String(children ?? "").trim();
+                  try {
+                    const data = JSON.parse(raw) as {
+                      title?: string;
+                      format?: string;
+                      filename?: string;
+                      url?: string;
+                      createdAt?: string;
+                    };
+                    if (data.url) return <ArtifactCard data={data} />;
+                  } catch {
+                    /* fall through */
+                  }
+                }
+                return (
+                  <code className={className} {...props}>
+                    {children}
+                  </code>
+                );
+              },
             }}
           >{displayContent}</ReactMarkdown>
           {streaming && (
