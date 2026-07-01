@@ -103,7 +103,7 @@ function SettingsPage() {
               {
                 value: "openai_realtime",
                 label: "OpenAI Realtime",
-                hint: "Not yet wired up — falls back to ElevenLabs today.",
+                hint: "Low-latency OpenAI voice. Requires OPENAI_API_KEY in project secrets.",
               },
               {
                 value: "none",
@@ -197,9 +197,10 @@ function SettingsPage() {
         </div>
 
         <p className="text-xs text-muted-foreground pt-4 border-t border-border">
-          Note: OpenAI Realtime voice requires a direct OpenAI API key and a
-          WebRTC rewrite. Until that ships, selecting it falls back to
-          ElevenLabs. Everything else takes effect on your next message.
+          Billing: OpenAI Realtime uses your OpenAI API usage; ElevenLabs uses
+          your ElevenLabs credits. If OpenAI Realtime fails to start (missing
+          key or session error), you'll see an inline message — switch back to
+          ElevenLabs or text mode and text chat keeps working either way.
         </p>
       </main>
     </div>
