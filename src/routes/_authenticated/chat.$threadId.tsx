@@ -876,6 +876,16 @@ function ThreadView({ threadId }: { threadId: string }) {
         toast.error(message);
         setVoiceError(message);
       });
+      session.onToolCall((name, _args, result) => {
+        if (name !== "generate_document") return;
+        const r = result as { ok?: boolean; artifact?: Record<string, unknown> } | null;
+        if (!r?.ok || !r.artifact) return;
+        const block = "```bpa-artifact\n" + JSON.stringify(r.artifact) + "\n```";
+        const content = `Generated ${(r.artifact.filename as string) ?? "document"}.\n\n${block}`;
+        void add({ data: { threadId, role: "assistant", content } }).then(() => {
+          qc.invalidateQueries({ queryKey: ["messages", threadId] });
+        });
+      });
       session.onTranscript((role, text, done) => {
         if (role === "assistant") {
           assistantBuf = text;
