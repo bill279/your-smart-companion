@@ -902,6 +902,12 @@ function ThreadView({ threadId }: { threadId: string }) {
           void add({ data: { threadId, role: "user", content: text } }).then(() => {
             qc.invalidateQueries({ queryKey: ["messages", threadId] });
           });
+          if (looksLikeDocumentIntent(text)) {
+            const forced = session.forceGenerateDocument(text);
+            if (forced) {
+              console.log("[realtime] doc-intent detected, forcing generate_document:", text);
+            }
+          }
         }
       });
     } catch (e) {
