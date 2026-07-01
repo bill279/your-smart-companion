@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import { streamText, tool, stepCountIs } from "ai";
+import { generateText } from "ai";
+import { detectDocumentIntent } from "@/lib/doc-intent";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
