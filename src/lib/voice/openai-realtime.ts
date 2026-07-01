@@ -13,7 +13,7 @@ export type RealtimeSession = {
   onToolCall: (cb: (name: string, args: Record<string, unknown>, result: unknown) => void) => void;
 };
 
-export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
+export async function startOpenAiRealtimeSession(options: { context?: string } = {}): Promise<RealtimeSession> {
   const { data: { session } } = await supabase.auth.getSession();
   const jwt = session?.access_token;
   if (!jwt) throw new Error("Not signed in.");
@@ -52,6 +52,11 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
       registeredToolNames,
     );
   }
+  const fallbackInstructions =
+    "You can create downloadable PDFs, DOCX Word documents, Markdown files, spreadsheets, CSV, and TXT files with generate_document. For any create/export PDF, Word, Markdown, report, download, or attachment request, call generate_document immediately. Never say you cannot create files or PDFs; briefly confirm after the artifact is generated and do not read the full document aloud.";
+  const realtimeInstructions = [instructions || fallbackInstructions, options.context?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
 
   const pc = new RTCPeerConnection();
   const audioEl = document.createElement("audio");
@@ -124,9 +129,7 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
             session: {
               tools,
               tool_choice: "auto",
-              instructions:
-                instructions ||
-                "You can create downloadable PDFs, DOCX Word documents, Markdown files, spreadsheets, CSV, and TXT files with generate_document. For any create/export PDF, Word, Markdown, report, download, or attachment request, call generate_document immediately. Never say you cannot create files or PDFs; briefly confirm after the artifact is generated and do not read the full document aloud.",
+              instructions: realtimeInstructions,
             },
           }),
         );
