@@ -30,10 +30,18 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
     } catch { /* ignore */ }
     throw new Error(msg);
   }
-  const { clientSecret, model } = (await resp.json()) as {
+  const { clientSecret, model, tools, registeredToolNames } = (await resp.json()) as {
     clientSecret: string;
     model: string;
+    tools?: unknown[];
+    registeredToolNames?: string[];
   };
+  if (registeredToolNames && !registeredToolNames.includes("generate_document")) {
+    console.warn(
+      "[realtime] server session missing generate_document — will re-register client-side",
+      registeredToolNames,
+    );
+  }
 
   const pc = new RTCPeerConnection();
   const audioEl = document.createElement("audio");
@@ -93,7 +101,24 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
   }
 
   let assistantBuf = "";
-  dc.addEventListener("open", () => onOpenCb?.());
+  dc.addEventListener("open", () => {
+    // Defensively (re)register tools via session.update so document/email/web
+    // tools are always available even if the ephemeral session config was
+    // dropped upstream.
+    if (Array.isArray(tools) && tools.length) {
+      try {
+        dc.send(
+          JSON.stringify({
+            type: "session.update",
+            session: { tools, tool_choice: "auto" },
+          }),
+        );
+      } catch (err) {
+        console.warn("[realtime] session.update tools failed", err);
+      }
+    }
+    onOpenCb?.();
+  });
   dc.addEventListener("message", (evt) => {
     try {
       const msg = JSON.parse(evt.data as string) as {
@@ -107,6 +132,18 @@ export async function startOpenAiRealtimeSession(): Promise<RealtimeSession> {
         item?: { type?: string; call_id?: string; name?: string; arguments?: string };
       };
       switch (msg.type) {
+        case "session.created":
+        case "session.updated": {
+          const s = (msg as unknown as { session?: { tools?: Array<{ name?: string }> } }).session;
+          const names = s?.tools?.map((t) => t?.name).filter(Boolean) ?? [];
+          console.log("[realtime] session tools:", names.join(", ") || "(none)");
+          if (names.length && !names.includes("generate_document")) {
+            onErrorCb?.(
+              "Voice session is missing the document tool — PDF/DOCX generation unavailable until you restart the mic.",
+            );
+          }
+          break;
+        }
         case "response.audio_transcript.delta":
           assistantBuf += msg.delta ?? "";
           onTranscriptCb?.("assistant", assistantBuf, false);
