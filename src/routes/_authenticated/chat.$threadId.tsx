@@ -1549,9 +1549,9 @@ function ThreadView({ threadId }: { threadId: string }) {
             <Menu size={20} />
           </button>
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
-          {quota && quota.available && quota.limit > 0 && (
+          {voiceProvider === "elevenlabs" && quota && quota.available && quota.limit > 0 ? (
             <span
-              title={`Voice quota: ${quota.percentUsed}% used`}
+              title={`ElevenLabs: ${quota.percentUsed}% used`}
               className={
                 "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
                 (quotaTone === "danger"
@@ -1561,10 +1561,24 @@ function ThreadView({ threadId }: { threadId: string }) {
                   : "bg-secondary text-muted-foreground")
               }
             >
-              🎙 {quota.percentUsed}%
+              🎙 EL {quota.percentUsed}%
+            </span>
+          ) : voiceProvider === "openai_realtime" ? (
+            <span
+              title={voiceActive ? `OpenAI Voice live · ${fmtElapsed(voiceElapsed)}` : `OpenAI Voice idle · ${costMode}`}
+              className={
+                "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
+                (voiceActive ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground")
+              }
+            >
+              🎙 {voiceActive ? fmtElapsed(voiceElapsed) : costMode}
+            </span>
+          ) : (
+            <span className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
+              Voice off
             </span>
           )}
-          <div className={`relative ${quota && quota.available && quota.limit > 0 ? "ml-1" : "ml-auto"}`}>
+          <div className="relative ml-1">
             <button
               onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
               className="p-2 rounded-md hover:bg-secondary text-foreground"
