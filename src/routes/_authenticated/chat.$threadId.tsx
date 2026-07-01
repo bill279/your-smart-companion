@@ -1459,10 +1459,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <SettingsIcon size={12} /> Assistant settings
         </Link>
-        {quota && quota.available && quota.limit > 0 && (
+        {voiceProvider === "elevenlabs" && quota && quota.available && quota.limit > 0 && (
           <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
             <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="font-medium text-foreground">Voice quota</span>
+              <span className="font-medium text-foreground">ElevenLabs</span>
               <span
                 className={
                   quotaTone === "danger"
@@ -1493,6 +1493,26 @@ function ThreadView({ threadId }: { threadId: string }) {
                 ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
                 : ""}
             </div>
+          </div>
+        )}
+        {voiceProvider === "openai_realtime" && (
+          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
+            <div className="flex items-center justify-between text-[11px] mb-1">
+              <span className="font-medium text-foreground">OpenAI Voice</span>
+              <span className={voiceActive ? "text-primary font-semibold" : "text-muted-foreground"}>
+                {voiceActive ? (voiceUiState === "connected" ? "Live" : voiceUiState) : "Idle"}
+              </span>
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              {voiceActive && voiceSessionStart
+                ? `Session ${fmtElapsed(voiceElapsed)} · ${costMode}`
+                : `Mode: ${costMode} · usage billed to OpenAI`}
+            </div>
+          </div>
+        )}
+        {voiceProvider === "none" && (
+          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5 text-[11px] text-muted-foreground">
+            Voice off · text only
           </div>
         )}
         <button
