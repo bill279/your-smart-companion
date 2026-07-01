@@ -61,13 +61,7 @@ function wait(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-const DOCUMENT_INTENT_REGEX =
-  /\b(?:(?:create|generate|make|build|export|send|give|produce|prepare|draft|save|download|attach|turn (?:it|that|this) into)\s+(?:me\s+)?(?:a|an|the)?\s*(?:pdf|word\s*doc(?:ument)?|docx|doc|excel|xlsx|spreadsheet|csv|markdown|md\s*file|report|summary\s*file|attachment|download(?:able)?\s*(?:file|document)?|file\s+(?:of|from|with)))|\b(?:as|to|into)\s+(?:a\s+)?(?:pdf|word\s*doc(?:ument)?|docx|excel|xlsx|spreadsheet|csv|markdown)\b|\bmake\s+(?:it|that|this)\s+(?:a\s+)?(?:pdf|word|docx|excel|xlsx|spreadsheet|csv|markdown|report|document)\b/i;
-
-function looksLikeDocumentIntent(text: string): boolean {
-  if (!text) return false;
-  return DOCUMENT_INTENT_REGEX.test(text);
-}
+import { looksLikeDocumentIntent } from "@/lib/doc-intent";
 
 function isRetryableVoiceStartError(message: string) {
   return /VOICE_RETRYABLE_CLOSING|still closing|closing another|another session|concurrent|capacity|rate|too many|429|active.*conversation|conversation.*active|already.*conversation|already.*session/i.test(message);
