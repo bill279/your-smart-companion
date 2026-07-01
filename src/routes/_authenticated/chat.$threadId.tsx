@@ -25,6 +25,7 @@ import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { getAssistantSettings } from "@/lib/assistant/settings.functions";
 import { startOpenAiRealtimeSession, type RealtimeSession } from "@/lib/voice/openai-realtime";
+import { looksLikeDocumentIntent } from "@/lib/doc-intent";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
@@ -60,8 +61,6 @@ const VOICE_CONNECT_TIMEOUT_MS = 15_000;
 function wait(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
-
-import { looksLikeDocumentIntent } from "@/lib/doc-intent";
 
 function isRetryableVoiceStartError(message: string) {
   return /VOICE_RETRYABLE_CLOSING|still closing|closing another|another session|concurrent|capacity|rate|too many|429|active.*conversation|conversation.*active|already.*conversation|already.*session/i.test(message);
