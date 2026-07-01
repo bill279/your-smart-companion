@@ -23,6 +23,8 @@ import {
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { getAssistantSettings } from "@/lib/assistant/settings.functions";
+import { startOpenAiRealtimeSession, type RealtimeSession } from "@/lib/voice/openai-realtime";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
