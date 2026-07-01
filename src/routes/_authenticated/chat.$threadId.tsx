@@ -285,6 +285,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getSettings = useServerFn(getAssistantSettings);
   const settingsQ = useQuery({ queryKey: ["assistant-settings"], queryFn: () => getSettings({}) });
   const voiceProvider = settingsQ.data?.voice_provider ?? "elevenlabs";
+  const costMode = settingsQ.data?.cost_mode ?? "balanced";
   const openAiSessionRef = useRef<RealtimeSession | null>(null);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
