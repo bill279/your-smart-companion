@@ -25,6 +25,7 @@ import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { getAssistantSettings } from "@/lib/assistant/settings.functions";
 import { startOpenAiRealtimeSession, type RealtimeSession } from "@/lib/voice/openai-realtime";
+import { looksLikeDocumentIntent } from "@/lib/doc-intent";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
@@ -59,14 +60,6 @@ const VOICE_CONNECT_TIMEOUT_MS = 15_000;
 
 function wait(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
-}
-
-const DOCUMENT_INTENT_REGEX =
-  /\b(?:(?:create|generate|make|build|export|send|give|produce|prepare|draft|save|download|attach|turn (?:it|that|this) into)\s+(?:me\s+)?(?:a|an|the)?\s*(?:pdf|word\s*doc(?:ument)?|docx|doc|excel|xlsx|spreadsheet|csv|markdown|md\s*file|report|summary\s*file|attachment|download(?:able)?\s*(?:file|document)?|file\s+(?:of|from|with)))|\b(?:as|to|into)\s+(?:a\s+)?(?:pdf|word\s*doc(?:ument)?|docx|excel|xlsx|spreadsheet|csv|markdown)\b|\bmake\s+(?:it|that|this)\s+(?:a\s+)?(?:pdf|word|docx|excel|xlsx|spreadsheet|csv|markdown|report|document)\b/i;
-
-function looksLikeDocumentIntent(text: string): boolean {
-  if (!text) return false;
-  return DOCUMENT_INTENT_REGEX.test(text);
 }
 
 function isRetryableVoiceStartError(message: string) {
