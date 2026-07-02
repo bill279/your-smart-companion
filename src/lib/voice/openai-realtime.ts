@@ -27,8 +27,24 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
   if (!resp.ok) {
     let msg = `Voice setup failed (${resp.status}).`;
     try {
-      const body = (await resp.json()) as { message?: string };
+      const body = (await resp.json()) as {
+        message?: string;
+        status?: number;
+        endpoint?: string;
+        model?: string;
+        openaiBody?: string;
+      };
       if (body?.message) msg = body.message;
+      if (body?.status || body?.model) {
+        const extra = [
+          body.status ? `OpenAI status ${body.status}` : "",
+          body.model ? `model ${body.model}` : "",
+        ]
+          .filter(Boolean)
+          .join(", ");
+        if (extra) msg = `${msg} (${extra})`;
+      }
+      console.error("[realtime] session creation failed", body);
     } catch { /* ignore */ }
     throw new Error(msg);
   }
