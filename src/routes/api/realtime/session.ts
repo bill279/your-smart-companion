@@ -6,6 +6,7 @@ import {
   realtimeToolNames,
   realtimeHasTool,
 } from "@/lib/voice/realtime-tools";
+import { buildRealtimeSessionPayload } from "@/lib/voice/realtime-session-payload";
 import {
   REALTIME_PRIMARY_MODEL,
   REALTIME_FALLBACK_MODELS,
@@ -156,19 +157,11 @@ export const Route = createFileRoute("/api/realtime/session")({
         let successModel: string | null = null;
         let successBodyText: string | null = null;
         for (const candidateModel of modelChain) {
-          const upstreamPayload = {
-            session: {
-              type: "realtime",
-              model: candidateModel,
-              instructions,
-              audio: {
-                input: { turn_detection: { type: "server_vad" } },
-                output: { voice: REALTIME_VOICE },
-              },
-              tools: REALTIME_TOOLS,
-              tool_choice: "auto",
-            },
-          };
+          const upstreamPayload = buildRealtimeSessionPayload({
+            model: candidateModel,
+            instructions,
+            voice: REALTIME_VOICE,
+          });
           console.log(
             "[realtime session] creating",
             REALTIME_SESSION_URL,
