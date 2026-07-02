@@ -285,7 +285,11 @@ function ThreadView({ threadId }: { threadId: string }) {
   const searchFn = useServerFn(searchChats);
   const getSettings = useServerFn(getAssistantSettings);
   const settingsQ = useQuery({ queryKey: ["assistant-settings"], queryFn: () => getSettings({}) });
-  const voiceProvider = settingsQ.data?.voice_provider ?? "elevenlabs";
+  // ElevenLabs is deprecated. Any legacy stored value is coerced to
+  // OpenAI Realtime, and OpenAI Realtime is the default for new users.
+  const rawVoiceProvider = (settingsQ.data?.voice_provider ?? "openai_realtime") as string;
+  const voiceProvider: "openai_realtime" | "none" =
+    rawVoiceProvider === "none" ? "none" : "openai_realtime";
   const costMode = settingsQ.data?.cost_mode ?? "balanced";
   const openAiSessionRef = useRef<RealtimeSession | null>(null);
   // Voice document-intent dedupe guards (survive re-renders across a session).
@@ -357,23 +361,9 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const messages = messagesQ.data ?? [];
 
-  const voiceQuotaFn = useServerFn(getVoiceQuota);
-  const voiceQuotaQ = useQuery({
-    queryKey: ["voiceQuota"],
-    queryFn: () => voiceQuotaFn(),
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
-    enabled: voiceProvider === "elevenlabs",
-  });
-  const quota = voiceProvider === "elevenlabs" ? voiceQuotaQ.data : undefined;
-  const quotaTone =
-    quota && quota.available
-      ? quota.percentUsed >= 95
-        ? "danger"
-        : quota.percentUsed >= 80
-        ? "warn"
-        : "ok"
-      : "unknown";
+  // ElevenLabs quota widget removed — OpenAI Realtime is the sole voice
+  // provider. Legacy voiceQuotaFn import is kept off the render path.
+  void getVoiceQuota;
   // Live voice session timer (used for OpenAI Realtime widget where we don't
   // have a server-reported usage percent to show).
   const [voiceSessionStart, setVoiceSessionStart] = useState<number | null>(null);
@@ -398,21 +388,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     const r = s % 60;
     return `${m}:${r.toString().padStart(2, "0")}`;
   };
-  const warnedQuotaRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!quota || !quota.available || quota.limit <= 0) return;
-    const key = quotaTone;
-    if (warnedQuotaRef.current === key) return;
-    if (quotaTone === "danger") {
-      toast.error(`Voice quota ${quota.percentUsed}% used — ${quota.remaining.toLocaleString()} chars left.`);
-      warnedQuotaRef.current = key;
-    } else if (quotaTone === "warn") {
-      toast.warning(`Voice quota ${quota.percentUsed}% used.`);
-      warnedQuotaRef.current = key;
-    } else {
-      warnedQuotaRef.current = key;
-    }
-  }, [quota, quotaTone]);
+  // ElevenLabs quota warnings removed — OpenAI Realtime is the sole voice
+  // provider and does not surface a client-side percent-used metric.
 
   function scrollToLatest() {
     const el = scrollRef.current;
@@ -852,12 +829,6 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function scheduleVoiceReconnect(reason?: string) {
     if (!wantsVoiceModeRef.current) return;
-    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
-      wantsVoiceModeRef.current = false;
-      setVoiceState("idle");
-      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-      return;
-    }
     if (/permission|notallowed/i.test(reason ?? "")) {
       wantsVoiceModeRef.current = false;
       setVoiceState("idle");
@@ -1056,113 +1027,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       toast.error("Voice is disabled in settings.");
       return;
     }
-    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
-      wantsVoiceModeRef.current = false;
-      toast.error("Voice quota exhausted — text chat still works.");
-      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-      return;
-    }
-    if (!options.automaticReconnect) {
-      wantsVoiceModeRef.current = true;
-      reconnectAttemptsRef.current = 0;
-    }
-    clearVoiceReconnectTimer();
-    const attemptId = startAttemptRef.current + 1;
-    startAttemptRef.current = attemptId;
-    if (!options.automaticReconnect) hasConnectedVoiceRef.current = false;
-    voiceUserHasSpokenRef.current = false;
-    setVoiceState(options.automaticReconnect ? "reconnecting" : "starting");
-    setVoiceError(null);
-    try {
-      // Request mic access immediately on a manual tap so browser gesture rules
-      // don't block the SDK after async cleanup/token fetching.
-      if (!options.automaticReconnect) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((track) => track.stop());
-        await endExistingVoiceTransport();
-      } else {
-        await waitForVoiceTransportReady();
-      }
-      if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
-      let conversationToken = "";
-      if (!conversationToken) {
-        let lastError = "Could not start voice";
-        for (let i = 0; i < MAX_VOICE_TOKEN_RETRY_ATTEMPTS; i += 1) {
-          try {
-            conversationToken = (await getAgentToken({})).token;
-            break;
-          } catch (err) {
-            lastError = err instanceof Error ? err.message : String(err || lastError);
-            if (!isRetryableVoiceStartError(lastError) || i === MAX_VOICE_TOKEN_RETRY_ATTEMPTS - 1) throw new Error(lastError);
-            setVoiceState("reconnecting");
-            setVoiceError(null);
-            await wait(voiceRetryDelay(i));
-            if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
-          }
-        }
-      }
-      if (startAttemptRef.current !== attemptId) return;
-      pendingContextRef.current = buildVoiceContext();
-      clearVoiceConnectTimeout();
-      connectTimeoutRef.current = window.setTimeout(() => {
-        if (startAttemptRef.current !== attemptId || !["starting", "reconnecting"].includes(voiceStateRef.current)) return;
-        pendingContextRef.current = "";
-        if (wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
-          setVoiceState("reconnecting");
-          scheduleVoiceReconnect("connect timeout");
-        } else {
-          wantsVoiceModeRef.current = false;
-          setVoiceState("idle");
-          setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
-        }
-        try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
-      }, VOICE_CONNECT_TIMEOUT_MS);
-      try {
-        await conversation.startSession({
-          conversationToken,
-          connectionType: "webrtc",
-        });
-      } catch (err) {
-        const firstStartError = err instanceof Error ? err.message : String(err || "");
-        if (!isRetryableVoiceStartError(firstStartError)) throw err;
-        await endExistingVoiceTransport();
-        const { signedUrl } = await getAgentSignedUrl({});
-        if (startAttemptRef.current !== attemptId || !wantsVoiceModeRef.current) return;
-        await conversation.startSession({
-          signedUrl,
-          connectionType: "websocket",
-        });
-      }
-    } catch (e) {
-      clearVoiceConnectTimeout();
-      const raw = e instanceof Error ? e.message : "Could not start voice";
-      pendingContextRef.current = "";
-      if (/permission|notallowed/i.test(raw)) {
-        wantsVoiceModeRef.current = false;
-        setVoiceState("idle");
-        setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
-        toast.error("Microphone blocked");
-      } else if (/quota/i.test(raw)) {
-        wantsVoiceModeRef.current = false;
-        setVoiceState("idle");
-        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-      } else if (isRetryableVoiceStartError(raw) && wantsVoiceModeRef.current) {
-        console.warn("voice session is still closing", raw);
-        wantsVoiceModeRef.current = false;
-        hasConnectedVoiceRef.current = false;
-        setVoiceState("idle");
-        setVoiceError("Voice is resetting. Tap the mic once more in a few seconds.");
-      } else if (options.automaticReconnect && wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
-        console.warn("startVoice failed; retrying", raw);
-        scheduleVoiceReconnect(raw);
-      } else {
-        wantsVoiceModeRef.current = false;
-        hasConnectedVoiceRef.current = false;
-        setVoiceState("idle");
-        console.warn("startVoice failed", raw, e);
-        setVoiceError(raw ? `Voice failed to connect: ${raw}` : "Voice failed to connect. Tap the mic once to try again.");
-      }
-    }
+    // Any other value is unreachable — ElevenLabs was removed.
+    toast.error("Voice is not available. Check assistant settings.");
+    return;
   }
 
   async function stopVoice() {
@@ -1594,42 +1461,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <SettingsIcon size={12} /> Assistant settings
         </Link>
-        {voiceProvider === "elevenlabs" && quota && quota.available && quota.limit > 0 && (
-          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
-            <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="font-medium text-foreground">ElevenLabs</span>
-              <span
-                className={
-                  quotaTone === "danger"
-                    ? "text-destructive font-semibold"
-                    : quotaTone === "warn"
-                    ? "text-amber-500 font-semibold"
-                    : "text-muted-foreground"
-                }
-              >
-                {quota.percentUsed}% used
-              </span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-              <div
-                className={
-                  quotaTone === "danger"
-                    ? "h-full bg-destructive"
-                    : quotaTone === "warn"
-                    ? "h-full bg-amber-500"
-                    : "h-full bg-primary"
-                }
-                style={{ width: `${Math.min(100, quota.percentUsed)}%` }}
-              />
-            </div>
-            <div className="mt-1.5 text-[10px] text-muted-foreground">
-              {quota.remaining.toLocaleString()} chars left
-              {quota.resetAt
-                ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
-                : ""}
-            </div>
-          </div>
-        )}
         {voiceProvider === "openai_realtime" && (
           <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
             <div className="flex items-center justify-between text-[11px] mb-1">
@@ -1684,21 +1515,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             <Menu size={20} />
           </button>
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
-          {voiceProvider === "elevenlabs" && quota && quota.available && quota.limit > 0 ? (
-            <span
-              title={`ElevenLabs: ${quota.percentUsed}% used`}
-              className={
-                "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
-                (quotaTone === "danger"
-                  ? "bg-destructive/15 text-destructive"
-                  : quotaTone === "warn"
-                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  : "bg-secondary text-muted-foreground")
-              }
-            >
-              🎙 EL {quota.percentUsed}%
-            </span>
-          ) : voiceProvider === "openai_realtime" ? (
+          {voiceProvider === "openai_realtime" ? (
             <span
               title={voiceActive ? `OpenAI Voice live · ${fmtElapsed(voiceElapsed)}` : `OpenAI Voice idle · ${costMode}`}
               className={
@@ -1706,7 +1523,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                 (voiceActive ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground")
               }
             >
-              🎙 {voiceActive ? fmtElapsed(voiceElapsed) : costMode}
+              {voiceActive ? `🎙 OpenAI live · ${fmtElapsed(voiceElapsed)}` : "🎙 OpenAI idle"}
             </span>
           ) : (
             <span className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">

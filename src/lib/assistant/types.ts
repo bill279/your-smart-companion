@@ -2,7 +2,10 @@
 // the frontend and server functions can reference them.
 
 export type InteractionMode = "text" | "push_to_talk" | "continuous";
-export type VoiceProvider = "elevenlabs" | "openai_realtime" | "none";
+// ElevenLabs was removed as an option. Legacy stored values of "elevenlabs"
+// or "el" are coerced to "openai_realtime" server-side before reaching the
+// client. The union intentionally no longer includes "elevenlabs".
+export type VoiceProvider = "openai_realtime" | "none";
 export type ModelProvider = "openai";
 export type CostMode = "economy" | "balanced" | "premium";
 
@@ -18,7 +21,7 @@ export type AssistantSettings = {
 
 export const DEFAULT_ASSISTANT_SETTINGS: AssistantSettings = {
   interaction_mode: "text",
-  voice_provider: "elevenlabs",
+  voice_provider: "openai_realtime",
   model_provider: "openai",
   cost_mode: "balanced",
   max_voice_seconds: 45,

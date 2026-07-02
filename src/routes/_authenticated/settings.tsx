@@ -96,14 +96,9 @@ function SettingsPage() {
             onChange={(v) => update("voice_provider", v as VoiceProvider)}
             options={[
               {
-                value: "elevenlabs",
-                label: "ElevenLabs (premium)",
-                hint: "Natural voice, uses ElevenLabs credits.",
-              },
-              {
                 value: "openai_realtime",
-                label: "OpenAI Realtime",
-                hint: "Low-latency OpenAI voice. Requires OPENAI_API_KEY in project secrets.",
+                label: "OpenAI Realtime (default)",
+                hint: "Low-latency OpenAI voice. Billed to OpenAI.",
               },
               {
                 value: "none",
@@ -197,10 +192,10 @@ function SettingsPage() {
         </div>
 
         <p className="text-xs text-muted-foreground pt-4 border-t border-border">
-          Billing: OpenAI Realtime uses your OpenAI API usage; ElevenLabs uses
-          your ElevenLabs credits. If OpenAI Realtime fails to start (missing
-          key or session error), you'll see an inline message — switch back to
-          ElevenLabs or text mode and text chat keeps working either way.
+          Voice uses OpenAI Realtime and is billed to your OpenAI API usage.
+          ElevenLabs is no longer supported. If OpenAI Realtime fails to
+          start you'll see an inline error — text chat keeps working either
+          way.
         </p>
       </main>
     </div>
