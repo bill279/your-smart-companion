@@ -388,21 +388,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     const r = s % 60;
     return `${m}:${r.toString().padStart(2, "0")}`;
   };
-  const warnedQuotaRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!quota || !quota.available || quota.limit <= 0) return;
-    const key = quotaTone;
-    if (warnedQuotaRef.current === key) return;
-    if (quotaTone === "danger") {
-      toast.error(`Voice quota ${quota.percentUsed}% used — ${quota.remaining.toLocaleString()} chars left.`);
-      warnedQuotaRef.current = key;
-    } else if (quotaTone === "warn") {
-      toast.warning(`Voice quota ${quota.percentUsed}% used.`);
-      warnedQuotaRef.current = key;
-    } else {
-      warnedQuotaRef.current = key;
-    }
-  }, [quota, quotaTone]);
+  // ElevenLabs quota warnings removed — OpenAI Realtime is the sole voice
+  // provider and does not surface a client-side percent-used metric.
 
   function scrollToLatest() {
     const el = scrollRef.current;
@@ -842,12 +829,6 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function scheduleVoiceReconnect(reason?: string) {
     if (!wantsVoiceModeRef.current) return;
-    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
-      wantsVoiceModeRef.current = false;
-      setVoiceState("idle");
-      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-      return;
-    }
     if (/permission|notallowed/i.test(reason ?? "")) {
       wantsVoiceModeRef.current = false;
       setVoiceState("idle");
@@ -1046,12 +1027,12 @@ function ThreadView({ threadId }: { threadId: string }) {
       toast.error("Voice is disabled in settings.");
       return;
     }
-    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
-      wantsVoiceModeRef.current = false;
-      toast.error("Voice quota exhausted — text chat still works.");
-      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-      return;
-    }
+    // Any other value is unreachable — ElevenLabs was removed.
+    toast.error("Voice is not available. Check assistant settings.");
+    return;
+    // The remaining code below is dead but kept to avoid a large refactor;
+    // execution never reaches it because voiceProvider is always
+    // "openai_realtime" or "none" after the migration coercion.
     if (!options.automaticReconnect) {
       wantsVoiceModeRef.current = true;
       reconnectAttemptsRef.current = 0;
@@ -1584,42 +1565,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <SettingsIcon size={12} /> Assistant settings
         </Link>
-        {voiceProvider === "elevenlabs" && quota && quota.available && quota.limit > 0 && (
-          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
-            <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="font-medium text-foreground">ElevenLabs</span>
-              <span
-                className={
-                  quotaTone === "danger"
-                    ? "text-destructive font-semibold"
-                    : quotaTone === "warn"
-                    ? "text-amber-500 font-semibold"
-                    : "text-muted-foreground"
-                }
-              >
-                {quota.percentUsed}% used
-              </span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-              <div
-                className={
-                  quotaTone === "danger"
-                    ? "h-full bg-destructive"
-                    : quotaTone === "warn"
-                    ? "h-full bg-amber-500"
-                    : "h-full bg-primary"
-                }
-                style={{ width: `${Math.min(100, quota.percentUsed)}%` }}
-              />
-            </div>
-            <div className="mt-1.5 text-[10px] text-muted-foreground">
-              {quota.remaining.toLocaleString()} chars left
-              {quota.resetAt
-                ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
-                : ""}
-            </div>
-          </div>
-        )}
         {voiceProvider === "openai_realtime" && (
           <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
             <div className="flex items-center justify-between text-[11px] mb-1">
@@ -1674,21 +1619,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             <Menu size={20} />
           </button>
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
-          {voiceProvider === "elevenlabs" && quota && quota.available && quota.limit > 0 ? (
-            <span
-              title={`ElevenLabs: ${quota.percentUsed}% used`}
-              className={
-                "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
-                (quotaTone === "danger"
-                  ? "bg-destructive/15 text-destructive"
-                  : quotaTone === "warn"
-                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  : "bg-secondary text-muted-foreground")
-              }
-            >
-              🎙 EL {quota.percentUsed}%
-            </span>
-          ) : voiceProvider === "openai_realtime" ? (
+          {voiceProvider === "openai_realtime" ? (
             <span
               title={voiceActive ? `OpenAI Voice live · ${fmtElapsed(voiceElapsed)}` : `OpenAI Voice idle · ${costMode}`}
               className={
@@ -1696,7 +1627,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                 (voiceActive ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground")
               }
             >
-              🎙 {voiceActive ? fmtElapsed(voiceElapsed) : costMode}
+              {voiceActive ? `🎙 OpenAI live · ${fmtElapsed(voiceElapsed)}` : "🎙 OpenAI idle"}
             </span>
           ) : (
             <span className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
