@@ -426,6 +426,19 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (openAiSessionRef.current) return;
     setVoiceError(null);
     setVoiceUiState("starting");
+    setVoicePhase("preflight");
+    // Server-side preflight BEFORE prompting for mic. If OPENAI_API_KEY is
+    // missing or the tools payload is broken, fail with a clear message
+    // instead of asking for microphone permissions and then dying.
+    const pre = await preflightOpenAiRealtime();
+    if (!pre.ok) {
+      const msg = pre.message ?? "OpenAI Realtime is not available.";
+      setVoiceError(msg);
+      toast.error(msg);
+      setVoicePhase("failed");
+      setVoiceUiState("idle");
+      return;
+    }
     let assistantBuf = "";
     // Document-intent loop guards use refs so repeated transcript fragments
     // and re-renders can't bypass the dedupe. Key = normalized text + format.
@@ -445,12 +458,22 @@ function ThreadView({ threadId }: { threadId: string }) {
       "|" +
       detectFormat(t);
     try {
-      const session = await startOpenAiRealtimeSession({ context: buildVoiceContext() });
+      const session = await startOpenAiRealtimeSession({
+        context: buildVoiceContext(),
+        onPhase: (p, detail) => {
+          setVoicePhase(p);
+          if (p === "failed" && detail) setVoiceError(detail);
+        },
+      });
       openAiSessionRef.current = session;
-      session.onOpen(() => setVoiceUiState("connected"));
+      session.onOpen(() => {
+        setVoiceUiState("connected");
+        setVoicePhase("live");
+      });
       session.onClose(() => {
         openAiSessionRef.current = null;
         setVoiceUiState("idle");
+        setVoicePhase("idle");
       });
       session.onError((message) => {
         toast.error(message);
@@ -458,6 +481,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (docInFlightRef.current) {
           docInFlightRef.current = false;
           lastDocumentIntentCompletedAtRef.current = Date.now();
+          setVoicePhase("live");
         }
       });
       session.onToolCall((name, _args, result) => {
@@ -465,16 +489,36 @@ function ThreadView({ threadId }: { threadId: string }) {
         const r = result as { ok?: boolean; artifact?: Record<string, unknown> } | null;
         docInFlightRef.current = false;
         lastDocumentIntentCompletedAtRef.current = Date.now();
+        setVoicePhase("live");
         if (!r?.ok || !r.artifact) {
           const errMsg =
             (r && typeof (r as { error?: unknown }).error === "string"
               ? ((r as { error?: string }).error as string)
               : null) ?? "Document generation failed.";
           toast.error(errMsg);
-          // Clear the key so the user can retry with the same utterance.
-          lastDocumentIntentKeyRef.current = "";
+          // Track failures per intent-key. After N failures, KEEP the key so
+          // repeated identical utterances no longer re-trigger the doc path
+          // for the completed-TTL window — this prevents infinite loops when
+          // the generator or model keeps returning errors.
+          const key = lastDocumentIntentKeyRef.current;
+          if (key) {
+            const n = (docIntentFailureCountRef.current.get(key) ?? 0) + 1;
+            docIntentFailureCountRef.current.set(key, n);
+            if (n >= DOC_MAX_FAILURES_PER_INTENT) {
+              console.warn(
+                "[realtime] doc-intent locked after repeated failures — will not retry same utterance",
+                { key, failures: n },
+              );
+              // Leave key + completed timestamp set so the TTL blocks repeats.
+            } else {
+              // Clear so the user can retry with same utterance.
+              lastDocumentIntentKeyRef.current = "";
+            }
+          }
           return;
         }
+        // Success — clear failure counter for this key.
+        docIntentFailureCountRef.current.delete(lastDocumentIntentKeyRef.current);
         const block = "```bpa-artifact\n" + JSON.stringify(r.artifact) + "\n```";
         const content = `Generated ${(r.artifact.filename as string) ?? "document"}.\n\n${block}`;
         void add({ data: { threadId, role: "assistant", content } }).then(() => {
@@ -511,11 +555,13 @@ function ThreadView({ threadId }: { threadId: string }) {
             } else {
               lastDocumentIntentKeyRef.current = key;
               docInFlightRef.current = true;
+              setVoicePhase("generating-document");
               const forced = session.forceGenerateDocument(text);
               if (forced) {
                 console.log("[realtime] doc-intent detected, forcing generate_document:", text);
               } else {
                 docInFlightRef.current = false;
+                setVoicePhase("live");
               }
               // Safety: if the tool call never resolves, release the lock.
               setTimeout(() => {
@@ -523,6 +569,13 @@ function ThreadView({ threadId }: { threadId: string }) {
                   console.warn("[realtime] doc-intent lock released by timeout");
                   docInFlightRef.current = false;
                   lastDocumentIntentCompletedAtRef.current = Date.now();
+                  setVoicePhase("live");
+                  // Count the timeout as a failure for repeat suppression.
+                  const k = lastDocumentIntentKeyRef.current;
+                  if (k) {
+                    const n = (docIntentFailureCountRef.current.get(k) ?? 0) + 1;
+                    docIntentFailureCountRef.current.set(k, n);
+                  }
                 }
               }, 45_000);
             }
@@ -534,6 +587,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceError(msg);
       toast.error(msg);
       setVoiceUiState("idle");
+      setVoicePhase("failed");
       openAiSessionRef.current = null;
     }
   }
@@ -542,6 +596,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     const s = openAiSessionRef.current;
     openAiSessionRef.current = null;
     setVoiceUiState("stopping");
+    setVoicePhase("idle");
     try { await s?.stop(); } catch (err) { console.warn(err); }
     setPendingAssistant("");
     setVoiceUiState("idle");
