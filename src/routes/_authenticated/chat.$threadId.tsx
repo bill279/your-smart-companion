@@ -288,6 +288,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  // Live interim user transcript shown while the user is still speaking
+  // during an OpenAI Realtime turn. Cleared once the final user message
+  // is persisted (or when the assistant finishes its reply).
+  const [pendingUserVoice, setPendingUserVoice] = useState<string>("");
   type Attachment = { path: string; name: string; mimeType: string; size: number };
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
