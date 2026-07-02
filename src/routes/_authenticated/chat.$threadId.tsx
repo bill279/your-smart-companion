@@ -411,7 +411,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     if (openAiSessionRef.current) return;
     setVoiceError(null);
     setVoiceState("starting");
-    wantsVoiceModeRef.current = true;
     let assistantBuf = "";
     // Document-intent loop guards use refs so repeated transcript fragments
     // and re-renders can't bypass the dedupe. Key = normalized text + format.
@@ -551,15 +550,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (!regenerate) setPendingUser(content);
       setPendingAssistant("");
 
-      // If voice is connected, route through ElevenLabs instead.
-      if (isConnected && !regenerate) {
-        voiceUserHasSpokenRef.current = true;
-        await add({ data: { threadId, role: "user", content } });
-        conversation.sendUserMessage(content);
-        setPendingUser(null);
-        return;
-      }
-
       // Text chat: stream from Lovable AI.
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
@@ -636,7 +626,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function regenerate() {
     if (addMut.isPending) return;
-    if (isConnected) {
+    if (voiceActive) {
       toast.error("Regenerate is for text chat. Stop voice first.");
       return;
     }
@@ -794,7 +784,11 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const voiceStopping = voiceUiState === "stopping";
-  const voiceActive = voiceUiState === "connected" || voiceUiState === "reconnecting" || voiceStopping || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceActive =
+    voiceUiState === "connected" ||
+    voiceUiState === "reconnecting" ||
+    voiceStopping ||
+    voiceUiState === "starting";
   const voiceConnecting = voiceUiState === "starting";
   const voiceReconnecting = voiceUiState === "reconnecting";
 
