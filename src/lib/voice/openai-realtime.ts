@@ -230,6 +230,7 @@ export async function startOpenAiRealtimeSession(options: {
           JSON.stringify({
             type: "session.update",
             session: {
+              type: "realtime",
               tools,
               tool_choice: "auto",
               instructions: realtimeInstructions,
