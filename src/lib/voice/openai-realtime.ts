@@ -27,8 +27,24 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
   if (!resp.ok) {
     let msg = `Voice setup failed (${resp.status}).`;
     try {
-      const body = (await resp.json()) as { message?: string };
+      const body = (await resp.json()) as {
+        message?: string;
+        status?: number;
+        endpoint?: string;
+        model?: string;
+        openaiBody?: string;
+      };
       if (body?.message) msg = body.message;
+      if (body?.status || body?.model) {
+        const extra = [
+          body.status ? `OpenAI status ${body.status}` : "",
+          body.model ? `model ${body.model}` : "",
+        ]
+          .filter(Boolean)
+          .join(", ");
+        if (extra) msg = `${msg} (${extra})`;
+      }
+      console.error("[realtime] session creation failed", body);
     } catch { /* ignore */ }
     throw new Error(msg);
   }
@@ -216,7 +232,8 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  const sdpResp = await fetch(`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
+  const sdpUrl = `https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(model)}`;
+  const sdpResp = await fetch(sdpUrl, {
     method: "POST",
     body: offer.sdp,
     headers: {
@@ -225,9 +242,13 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
     },
   });
   if (!sdpResp.ok) {
+    const detail = await sdpResp.text().catch(() => "");
     mic.getTracks().forEach((t) => t.stop());
     pc.close();
-    throw new Error(`OpenAI Realtime SDP exchange failed (${sdpResp.status}).`);
+    console.error("[realtime] SDP exchange failed", sdpResp.status, sdpUrl, detail);
+    throw new Error(
+      `OpenAI Realtime SDP exchange failed (${sdpResp.status}) at ${sdpUrl}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+    );
   }
   const answerSdp = await sdpResp.text();
   await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
