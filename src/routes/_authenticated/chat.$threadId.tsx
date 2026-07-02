@@ -298,29 +298,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const latestMessageRef = useRef<HTMLDivElement>(null);
-  const pendingContextRef = useRef<string>("");
-  const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
-  const seenVoiceEventsRef = useRef<Set<string>>(new Set());
-  const voiceStateRef = useRef<VoiceUiState>("idle");
-  const startAttemptRef = useRef(0);
-  const connectTimeoutRef = useRef<number | null>(null);
-  const reconnectTimerRef = useRef<number | null>(null);
-  const wantsVoiceModeRef = useRef(false);
-  const reconnectAttemptsRef = useRef(0);
-  const hasConnectedVoiceRef = useRef(false);
-  const voiceUserHasSpokenRef = useRef(false);
-  const lastUserSpeechAtRef = useRef<number>(0);
-  const idleTimerRef = useRef<number | null>(null);
-  const liveAssistantRef = useRef<string>("");
-  const voiceStopPromiseRef = useRef<Promise<void> | null>(null);
-  const voiceRestartReadyAtRef = useRef(0);
-  const voiceResetInProgressRef = useRef(false);
-  // Tracks whether the current voice turn is already streaming text via
-  // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
-  // bubble doesn't get doubled (chat parts + per-character audio chars),
-  // which is what caused the "looks longer for a second, then changes"
-  // flicker the user reported.
-  const chatPartsThisTurnRef = useRef<boolean>(false);
   const abortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
@@ -332,9 +309,6 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const messages = messagesQ.data ?? [];
 
-  // ElevenLabs quota widget removed — OpenAI Realtime is the sole voice
-  // provider. Legacy voiceQuotaFn import is kept off the render path.
-  void getVoiceQuota;
   // Live voice session timer (used for OpenAI Realtime widget where we don't
   // have a server-reported usage percent to show).
   const [voiceSessionStart, setVoiceSessionStart] = useState<number | null>(null);
