@@ -27,6 +27,7 @@ import {
   type RealtimePhase,
 } from "@/lib/voice/openai-realtime";
 import { looksLikeDocumentIntent } from "@/lib/doc-intent";
+import { filterOutTransientVoiceErrors } from "@/lib/voice/transient-errors";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
