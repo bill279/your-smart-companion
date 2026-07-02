@@ -479,13 +479,12 @@ export const Route = createFileRoute("/api/chat")({
             const safeName = docIntent.filename
               .replace(/[^a-zA-Z0-9._-]+/g, "_")
               .slice(0, 80) || "document";
-            const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
-            const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-            const up = await supabaseAdmin.storage
+            const path = `${userId}/generated/${Date.now()}-${safeName}.${extension}`;
+            const up = await supabase.storage
               .from("chat-uploads")
               .upload(path, bytes, { contentType: mimeType, upsert: false });
             if (up.error) throw new Error(up.error.message);
-            const signed = await supabaseAdmin.storage
+            const signed = await supabase.storage
               .from("chat-uploads")
               .createSignedUrl(path, 60 * 60 * 24 * 7);
             if (signed.error) throw new Error(signed.error.message);
@@ -1185,13 +1184,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     markdown: composed,
                   });
                   const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
-                  const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
-                  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-                  const up = await supabaseAdmin.storage
+                  const path = `${userId}/generated/${Date.now()}-${safeName}.${extension}`;
+                  const up = await supabase.storage
                     .from("chat-uploads")
                     .upload(path, bytes, { contentType: mimeType, upsert: false });
                   if (up.error) return { error: up.error.message };
-                  const signed = await supabaseAdmin.storage
+                  const signed = await supabase.storage
                     .from("chat-uploads")
                     .createSignedUrl(path, 60 * 60 * 24 * 7);
                   if (signed.error) return { error: signed.error.message };

@@ -175,7 +175,11 @@ async function runSendEmail(args: Record<string, unknown>) {
   return { error: "No email provider connected." };
 }
 
-async function runGenerateDocument(userId: string, args: Record<string, unknown>) {
+async function runGenerateDocument(
+  supabase: ReturnType<typeof createClient<Database>>,
+  userId: string,
+  args: Record<string, unknown>,
+) {
   const p = z
     .object({
       format: z.enum(["pdf", "docx", "md", "xlsx", "csv", "txt"]),
@@ -192,7 +196,6 @@ async function runGenerateDocument(userId: string, args: Record<string, unknown>
   if (!p.success) return { error: "invalid arguments for generate_document" };
   try {
     const { generateDocument } = await import("@/lib/document-generator.server");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const dateLine = `_Generated ${new Date().toISOString().slice(0, 10)}_`;
     const summaryBlock = p.data.summary?.trim() ? `\n\n## Summary\n\n${p.data.summary.trim()}\n` : "";
     const sourcesBlock =
@@ -208,12 +211,12 @@ async function runGenerateDocument(userId: string, args: Record<string, unknown>
       markdown: composed,
     });
     const safeName = p.data.filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
-    const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
-    const up = await supabaseAdmin.storage
+    const path = `${userId}/generated/${Date.now()}-${safeName}.${extension}`;
+    const up = await supabase.storage
       .from("chat-uploads")
       .upload(path, bytes, { contentType: mimeType, upsert: false });
     if (up.error) return { error: up.error.message };
-    const signed = await supabaseAdmin.storage
+    const signed = await supabase.storage
       .from("chat-uploads")
       .createSignedUrl(path, 60 * 60 * 24 * 7);
     if (signed.error) return { error: signed.error.message };
@@ -264,7 +267,7 @@ export const Route = createFileRoute("/api/realtime/tool")({
             case "send_email":
               return jr(await runSendEmail(parsed.data.arguments));
             case "generate_document":
-              return jr(await runGenerateDocument(userData.user.id, parsed.data.arguments));
+              return jr(await runGenerateDocument(supabase, userData.user.id, parsed.data.arguments));
             default:
               return jr({ error: `unknown tool: ${parsed.data.name}` }, 400);
           }
