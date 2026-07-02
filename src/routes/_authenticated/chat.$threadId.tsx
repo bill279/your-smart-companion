@@ -1075,7 +1075,7 @@ function ThreadView({ threadId }: { threadId: string }) {
               }
               return <Bubble role="assistant" content={pendingAssistant} streaming />;
             })()}
-            {addMut.isPending && !pendingAssistant && !isConnected && (
+            {addMut.isPending && !pendingAssistant && !voiceActive && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
                 <div className="flex items-center gap-1.5 pt-3 text-muted-foreground text-sm">
@@ -1157,9 +1157,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                 : voiceReconnecting
                 ? "Reconnecting… tap to stop"
                 : voiceActive
-                ? conversation.isSpeaking
-                  ? "BPA Bot is speaking — tap to stop voice"
-                  : "Voice is live and listening — tap to stop"
+                ? "Voice is live — tap to stop"
                 : "Tap to talk"
             }
             aria-label={voiceActive ? "Stop voice mode" : "Start voice mode"}
@@ -1219,14 +1217,12 @@ function ThreadView({ threadId }: { threadId: string }) {
                 : voiceReconnecting
                 ? "Reconnecting voice…"
                 : voiceActive
-                ? conversation.isSpeaking
-                  ? "BPA Bot is speaking…"
-                  : "Listening… or type"
+                ? "Listening… or type"
                 : "Message BPA Bot…"
             }
             className="flex-1 bg-transparent outline-none px-3 py-2 text-[15px] leading-6 resize-none max-h-[220px] min-h-[40px]"
           />
-          {addMut.isPending && !isConnected ? (
+          {addMut.isPending && !voiceActive ? (
             <button
               type="button"
               onClick={stopGenerating}
@@ -1248,7 +1244,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           </div>
         </form>
         {/* Regenerate action below composer when there's an assistant message and we're idle */}
-        {!addMut.isPending && !isConnected && messages.some((m) => m.role === "assistant") && (
+        {!addMut.isPending && !voiceActive && messages.some((m) => m.role === "assistant") && (
           <div className="relative z-10 -mt-4 mb-4 flex justify-center">
             <button
               type="button"
