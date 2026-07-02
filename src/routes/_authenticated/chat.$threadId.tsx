@@ -614,6 +614,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoicePhase("idle");
     try { await s?.stop(); } catch (err) { console.warn(err); }
     setPendingAssistant("");
+    setPendingUserVoice("");
     setVoiceUiState("idle");
   }
 
