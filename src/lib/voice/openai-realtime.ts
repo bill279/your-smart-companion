@@ -232,7 +232,8 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  const sdpResp = await fetch(`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
+  const sdpUrl = `https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(model)}`;
+  const sdpResp = await fetch(sdpUrl, {
     method: "POST",
     body: offer.sdp,
     headers: {
@@ -241,9 +242,13 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
     },
   });
   if (!sdpResp.ok) {
+    const detail = await sdpResp.text().catch(() => "");
     mic.getTracks().forEach((t) => t.stop());
     pc.close();
-    throw new Error(`OpenAI Realtime SDP exchange failed (${sdpResp.status}).`);
+    console.error("[realtime] SDP exchange failed", sdpResp.status, sdpUrl, detail);
+    throw new Error(
+      `OpenAI Realtime SDP exchange failed (${sdpResp.status}) at ${sdpUrl}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+    );
   }
   const answerSdp = await sdpResp.text();
   await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
