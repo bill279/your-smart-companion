@@ -1234,8 +1234,14 @@ function ThreadView({ threadId }: { threadId: string }) {
               else void startVoice();
             }}
             title={
-              voiceConnecting
-                ? "Connecting…"
+              voicePhase === "preflight"
+                ? "Checking voice service…"
+                : voicePhase === "requesting-mic"
+                ? "Waiting for microphone permission…"
+                : voicePhase === "connecting"
+                ? "Connecting to OpenAI Realtime…"
+                : voicePhase === "generating-document"
+                ? "Generating document — tap to stop"
                 : voiceStopping
                 ? "Stopping voice…"
                 : voiceReconnecting
@@ -1296,8 +1302,14 @@ function ThreadView({ threadId }: { threadId: string }) {
             }}
             rows={1}
             placeholder={
-              voiceConnecting
-                ? "Connecting voice…"
+              voicePhase === "requesting-mic"
+                ? "Allow microphone to continue…"
+                : voicePhase === "preflight"
+                ? "Checking voice service…"
+                : voicePhase === "connecting"
+                ? "Connecting to OpenAI…"
+                : voicePhase === "generating-document"
+                ? "Generating document…"
                 : voiceReconnecting
                 ? "Reconnecting voice…"
                 : voiceActive
