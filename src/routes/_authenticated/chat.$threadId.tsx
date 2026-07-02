@@ -540,13 +540,19 @@ function ThreadView({ threadId }: { threadId: string }) {
           assistantBuf = text;
           setPendingAssistant(text);
           if (done && text.trim()) {
+            setPendingUserVoice("");
             void add({ data: { threadId, role: "assistant", content: text } }).then(() => {
               qc.invalidateQueries({ queryKey: ["messages", threadId] });
             });
             setPendingAssistant("");
             assistantBuf = "";
           }
+        } else if (role === "user" && !done) {
+          // Interim user transcript — surface a live "you're saying…"
+          // bubble so the chat updates in real time while listening.
+          setPendingUserVoice(text);
         } else if (role === "user" && done && text.trim()) {
+          setPendingUserVoice("");
           void add({ data: { threadId, role: "user", content: text } }).then(() => {
             qc.invalidateQueries({ queryKey: ["messages", threadId] });
           });
