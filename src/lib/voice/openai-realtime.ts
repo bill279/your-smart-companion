@@ -209,6 +209,7 @@ export async function startOpenAiRealtimeSession(options: {
 
   let assistantBuf = "";
   dc.addEventListener("open", () => {
+    phase("live");
     // Defensively (re)register tools via session.update so document/email/web
     // tools are always available even if the ephemeral session config was
     // dropped upstream.
