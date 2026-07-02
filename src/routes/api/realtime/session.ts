@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import {
+  REALTIME_TOOLS,
+  realtimeToolNames,
+  realtimeHasTool,
+} from "@/lib/voice/realtime-tools";
 
 // Mints an ephemeral OpenAI Realtime client secret. The raw OPENAI_API_KEY
 // never leaves the server. The browser gets a short-lived client_secret it
@@ -15,14 +20,6 @@ const DOCUMENT_TOOL_NAME = "generate_document";
 // `{ value, expires_at }` and accepts the session config nested under
 // `session`.
 const REALTIME_SESSION_URL = "https://api.openai.com/v1/realtime/client_secrets";
-
-function realtimeToolNames() {
-  return REALTIME_TOOLS.map((tool) => tool.name);
-}
-
-function hasGenerateDocumentTool(tools: readonly { name?: string }[]) {
-  return tools.some((tool) => tool.name === DOCUMENT_TOOL_NAME);
-}
 
 function buildInstructions(costMode: string, maxSeconds: number, userEmail: string | null) {
   const brevity =
@@ -48,78 +45,47 @@ function buildInstructions(costMode: string, maxSeconds: number, userEmail: stri
   ].join(" ");
 }
 
-const REALTIME_TOOLS = [
-  {
-    type: "function",
-    name: "web_search",
-    description:
-      "Search the live web for current information (news, prices, companies, people, products). Returns titles, urls, and snippets.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "The search query" },
-        limit: { type: "integer", minimum: 1, maximum: 6 },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    type: "function",
-    name: "web_scrape",
-    description: "Fetch the readable markdown content of a specific URL.",
-    parameters: {
-      type: "object",
-      properties: { url: { type: "string", description: "The absolute URL to fetch" } },
-      required: ["url"],
-    },
-  },
-  {
-    type: "function",
-    name: "send_email",
-    description:
-      "Send an email from the user's connected Outlook/Gmail account. Only call after the user has verbally approved the draft.",
-    parameters: {
-      type: "object",
-      properties: {
-        to: { type: "string", description: "Recipient email address" },
-        subject: { type: "string" },
-        body: { type: "string", description: "Email body in Markdown" },
-        cc: { type: "string", description: "Optional Cc email address" },
-      },
-      required: ["to", "subject", "body"],
-    },
-  },
-  {
-    type: "function",
-    name: "generate_document",
-    description:
-      "Generate a downloadable PDF, DOCX, Markdown, XLSX, CSV, or TXT file and return an artifact with a signed download URL. The chat UI renders a download card automatically. Never read the generated content aloud.",
-    parameters: {
-      type: "object",
-      properties: {
-        format: { type: "string", enum: ["pdf", "docx", "md", "xlsx", "csv", "txt"] },
-        filename: { type: "string", description: "Base filename without extension" },
-        title: { type: "string" },
-        summary: { type: "string", description: "Optional short executive summary (1-3 sentences)" },
-        sources: {
-          type: "array",
-          description: "Optional citations",
-          items: {
-            type: "object",
-            properties: { title: { type: "string" }, url: { type: "string" } },
-            required: ["title", "url"],
-          },
-        },
-        markdown: { type: "string", description: "Full document body in Markdown" },
-      },
-      required: ["format", "filename", "title", "markdown"],
-    },
-  },
-] as const;
-
 export const Route = createFileRoute("/api/realtime/session")({
   server: {
     handlers: {
+      // Preflight health check. GET returns whether the server is capable of
+      // minting an OpenAI Realtime session (API key present, required tools
+      // registered) WITHOUT calling OpenAI or asking for the microphone. The
+      // client hits this before requesting mic permissions so we can fail
+      // fast with an actionable error instead of a mysterious mic prompt.
+      GET: async () => {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+          return Response.json(
+            {
+              ok: false,
+              error: "openai_not_configured",
+              message:
+                "OpenAI Realtime voice is not configured. Ask an administrator to add OPENAI_API_KEY to project secrets.",
+            },
+            { status: 501 },
+          );
+        }
+        if (!realtimeHasTool("generate_document")) {
+          return Response.json(
+            {
+              ok: false,
+              error: "realtime_document_tool_missing",
+              message:
+                "Voice document generation is not registered on the server. Redeploy required.",
+              tools: realtimeToolNames(),
+            },
+            { status: 500 },
+          );
+        }
+        return Response.json({
+          ok: true,
+          model: REALTIME_MODEL,
+          endpoint: REALTIME_SESSION_URL,
+          tools: realtimeToolNames(),
+          documentToolRegistered: true,
+        });
+      },
       POST: async ({ request }) => {
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {
@@ -158,7 +124,7 @@ export const Route = createFileRoute("/api/realtime/session")({
         const costMode = (settings?.cost_mode ?? "balanced") as string;
         const maxSeconds = settings?.max_voice_seconds ?? 45;
 
-        if (!hasGenerateDocumentTool(REALTIME_TOOLS)) {
+        if (!realtimeHasTool("generate_document")) {
           console.error("[realtime session] generate_document missing from local Realtime tools payload", {
             tools: realtimeToolNames(),
           });
