@@ -285,7 +285,11 @@ function ThreadView({ threadId }: { threadId: string }) {
   const searchFn = useServerFn(searchChats);
   const getSettings = useServerFn(getAssistantSettings);
   const settingsQ = useQuery({ queryKey: ["assistant-settings"], queryFn: () => getSettings({}) });
-  const voiceProvider = settingsQ.data?.voice_provider ?? "elevenlabs";
+  // ElevenLabs is deprecated. Any legacy stored value is coerced to
+  // OpenAI Realtime, and OpenAI Realtime is the default for new users.
+  const rawVoiceProvider = (settingsQ.data?.voice_provider ?? "openai_realtime") as string;
+  const voiceProvider: "openai_realtime" | "none" =
+    rawVoiceProvider === "none" ? "none" : "openai_realtime";
   const costMode = settingsQ.data?.cost_mode ?? "balanced";
   const openAiSessionRef = useRef<RealtimeSession | null>(null);
   // Voice document-intent dedupe guards (survive re-renders across a session).
@@ -357,23 +361,9 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const messages = messagesQ.data ?? [];
 
-  const voiceQuotaFn = useServerFn(getVoiceQuota);
-  const voiceQuotaQ = useQuery({
-    queryKey: ["voiceQuota"],
-    queryFn: () => voiceQuotaFn(),
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
-    enabled: voiceProvider === "elevenlabs",
-  });
-  const quota = voiceProvider === "elevenlabs" ? voiceQuotaQ.data : undefined;
-  const quotaTone =
-    quota && quota.available
-      ? quota.percentUsed >= 95
-        ? "danger"
-        : quota.percentUsed >= 80
-        ? "warn"
-        : "ok"
-      : "unknown";
+  // ElevenLabs quota widget removed — OpenAI Realtime is the sole voice
+  // provider. Legacy voiceQuotaFn import is kept off the render path.
+  void getVoiceQuota;
   // Live voice session timer (used for OpenAI Realtime widget where we don't
   // have a server-reported usage percent to show).
   const [voiceSessionStart, setVoiceSessionStart] = useState<number | null>(null);
