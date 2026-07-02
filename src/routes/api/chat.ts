@@ -294,6 +294,7 @@ export const Route = createFileRoute("/api/chat")({
           content?: string;
           attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
           regenerate?: boolean;
+          voiceDocIntent?: boolean;
         };
         const attachments = body.attachments ?? [];
         if (!body.threadId || (!body.regenerate && !body.content?.trim() && attachments.length === 0)) {
@@ -317,6 +318,8 @@ export const Route = createFileRoute("/api/chat")({
           if (lastAssistant?.id) {
             await supabase.from("messages").delete().eq("id", lastAssistant.id);
           }
+        } else if (body.voiceDocIntent) {
+          // Voice path already inserted the user's spoken turn; do not double-insert.
         } else {
         const { error: insErr } = await supabase.from("messages").insert({
           thread_id: body.threadId,
@@ -448,6 +451,9 @@ export const Route = createFileRoute("/api/chat")({
         // compose the body with a single generateText call, generate the file
         // server-side, upload, and stream back exactly the artifact block.
         const docIntent = !body.regenerate ? detectDocumentIntent(userText) : null;
+        if (body.voiceDocIntent && !docIntent) {
+          return new Response("No document intent detected", { status: 400 });
+        }
         if (docIntent) {
           try {
             const composePrompt = `The user asked: ${userText}\n\nWrite the full body of the requested document in clean GitHub-Flavored Markdown. Use ## headings, short paragraphs, bullet lists, and tables where useful. Do NOT include the title, date, executive summary, or a Sources section — those are added automatically. Output ONLY the Markdown body. No preamble, no explanations, no outer code fences.`;
