@@ -294,6 +294,7 @@ export const Route = createFileRoute("/api/chat")({
           content?: string;
           attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
           regenerate?: boolean;
+          voiceDocIntent?: boolean;
         };
         const attachments = body.attachments ?? [];
         if (!body.threadId || (!body.regenerate && !body.content?.trim() && attachments.length === 0)) {
@@ -317,6 +318,8 @@ export const Route = createFileRoute("/api/chat")({
           if (lastAssistant?.id) {
             await supabase.from("messages").delete().eq("id", lastAssistant.id);
           }
+        } else if (body.voiceDocIntent) {
+          // Voice path already inserted the user's spoken turn; do not double-insert.
         } else {
         const { error: insErr } = await supabase.from("messages").insert({
           thread_id: body.threadId,
