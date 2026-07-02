@@ -1263,7 +1263,15 @@ function ThreadView({ threadId }: { threadId: string }) {
               {voiceActive && (
                 <span className="flex items-center gap-1.5 text-xs uppercase">
                   <span className="h-2 w-2 rounded-full bg-destructive-foreground" />
-                  Stop voice
+                  {voicePhase === "generating-document"
+                    ? "Doc…"
+                    : voicePhase === "requesting-mic"
+                    ? "Mic…"
+                    : voicePhase === "preflight"
+                    ? "Check…"
+                    : voicePhase === "connecting"
+                    ? "Conn…"
+                    : "Stop voice"}
                 </span>
               )}
             </span>
