@@ -6,12 +6,20 @@ import {
   realtimeToolNames,
   realtimeHasTool,
 } from "@/lib/voice/realtime-tools";
+import {
+  REALTIME_PRIMARY_MODEL,
+  REALTIME_FALLBACK_MODELS,
+  classifyRealtimeFailure,
+  shouldTryFallbackModel,
+  humanRealtimeError,
+  extractRequestId,
+} from "@/lib/voice/realtime-errors";
 
 // Mints an ephemeral OpenAI Realtime client secret. The raw OPENAI_API_KEY
 // never leaves the server. The browser gets a short-lived client_secret it
 // can use directly against api.openai.com for the WebRTC SDP exchange.
 
-const REALTIME_MODEL = "gpt-realtime";
+const REALTIME_MODEL = REALTIME_PRIMARY_MODEL;
 const REALTIME_VOICE = "alloy";
 const DOCUMENT_TOOL_NAME = "generate_document";
 // Current OpenAI Realtime ephemeral-secret endpoint. The legacy
@@ -81,6 +89,7 @@ export const Route = createFileRoute("/api/realtime/session")({
         return Response.json({
           ok: true,
           model: REALTIME_MODEL,
+          fallbackModels: REALTIME_FALLBACK_MODELS,
           endpoint: REALTIME_SESSION_URL,
           tools: realtimeToolNames(),
           documentToolRegistered: true,
@@ -138,69 +147,100 @@ export const Route = createFileRoute("/api/realtime/session")({
         }
 
         const instructions = buildInstructions(costMode, maxSeconds, userEmail);
-        const upstreamPayload = {
-          session: {
-            type: "realtime",
-            model: REALTIME_MODEL,
-            instructions,
-            audio: {
-              input: { turn_detection: { type: "server_vad" } },
-              output: { voice: REALTIME_VOICE },
+        // Try primary model, then a documented fallback for 5xx / model-not-available.
+        // Tools + instructions are baked into the ephemeral client_secret when the
+        // endpoint accepts them; the client also re-registers via session.update
+        // after the data channel opens, so this is a defense-in-depth setup.
+        const modelChain = [REALTIME_MODEL, ...REALTIME_FALLBACK_MODELS];
+        const attempts: Array<{ model: string; status: number; requestId: string | null; bodySnippet: string; kind: string }> = [];
+        let successModel: string | null = null;
+        let successBodyText: string | null = null;
+        for (const candidateModel of modelChain) {
+          const upstreamPayload = {
+            session: {
+              type: "realtime",
+              model: candidateModel,
+              instructions,
+              audio: {
+                input: { turn_detection: { type: "server_vad" } },
+                output: { voice: REALTIME_VOICE },
+              },
+              tools: REALTIME_TOOLS,
+              tool_choice: "auto",
             },
-            tools: REALTIME_TOOLS,
-            tool_choice: "auto",
-          },
-        };
-
-        console.log(
-          "[realtime session] creating",
-          REALTIME_SESSION_URL,
-          "model",
-          REALTIME_MODEL,
-          "tools",
-          realtimeToolNames().join(", "),
-        );
-
-        const upstream = await fetch(REALTIME_SESSION_URL, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(upstreamPayload),
-        });
-
-        const bodyText = await upstream.text();
-        if (!upstream.ok) {
-          console.error(
-            "[realtime session] openai rejected",
-            upstream.status,
+          };
+          console.log(
+            "[realtime session] creating",
             REALTIME_SESSION_URL,
-            bodyText,
+            "model",
+            candidateModel,
+            "tools",
+            realtimeToolNames().join(", "),
           );
-          const hint =
-            upstream.status === 404
-              ? "OpenAI Realtime endpoint or model is unavailable for this API key. Confirm OPENAI_API_KEY has Realtime access and that the model 'gpt-realtime' is enabled on the account."
-              : upstream.status === 401
-                ? "OpenAI rejected the API key. Verify OPENAI_API_KEY in project secrets."
-                : upstream.status === 429
-                  ? "OpenAI rate limit or quota exceeded on this API key."
-                  : `OpenAI Realtime session creation failed (${upstream.status}).`;
+          const upstream = await fetch(REALTIME_SESSION_URL, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(upstreamPayload),
+          });
+          const requestId = extractRequestId(upstream.headers);
+          const bodyText = await upstream.text();
+          if (upstream.ok) {
+            successModel = candidateModel;
+            successBodyText = bodyText;
+            break;
+          }
+          const kind = classifyRealtimeFailure(upstream.status, bodyText);
+          console.error("[realtime session] openai rejected", {
+            status: upstream.status,
+            model: candidateModel,
+            requestId,
+            kind,
+            body: bodyText.slice(0, 500),
+          });
+          attempts.push({
+            model: candidateModel,
+            status: upstream.status,
+            requestId,
+            bodySnippet: bodyText.slice(0, 1200),
+            kind,
+          });
+          if (!shouldTryFallbackModel(kind)) break;
+        }
+        if (!successModel || !successBodyText) {
+          const last = attempts[attempts.length - 1];
+          const message = last
+            ? humanRealtimeError(
+                last.kind as ReturnType<typeof classifyRealtimeFailure>,
+                last.status,
+                last.requestId,
+                last.model,
+              )
+            : "OpenAI Realtime session creation failed.";
           return Response.json(
             {
               error: "openai_session_failed",
-              status: upstream.status,
+              status: last?.status ?? 502,
               endpoint: REALTIME_SESSION_URL,
-              model: REALTIME_MODEL,
-              message: hint,
-              openaiBody: bodyText.slice(0, 2000),
+              model: last?.model ?? REALTIME_MODEL,
+              requestId: last?.requestId ?? null,
+              kind: last?.kind ?? "unknown",
+              message,
+              attempts: attempts.map((a) => ({
+                model: a.model,
+                status: a.status,
+                requestId: a.requestId,
+                kind: a.kind,
+                bodySnippet: a.bodySnippet,
+              })),
+              retryable: last?.kind === "server_error" || last?.kind === "rate_limited",
             },
             { status: 502 },
           );
         }
-        // New endpoint returns { value, expires_at } at top level. The
-        // legacy shape nested it under `client_secret`. Accept both.
-        const session = JSON.parse(bodyText) as {
+        const session = JSON.parse(successBodyText) as {
           value?: string;
           expires_at?: number;
           client_secret?: { value?: string; expires_at?: number };
@@ -211,7 +251,7 @@ export const Route = createFileRoute("/api/realtime/session")({
         const clientSecretExpiresAt = session.expires_at ?? session.client_secret?.expires_at ?? null;
         if (!clientSecretValue) {
           return Response.json(
-            { error: "openai_session_invalid", message: "OpenAI did not return an ephemeral key.", openaiBody: bodyText.slice(0, 2000) },
+            { error: "openai_session_invalid", message: "OpenAI did not return an ephemeral key.", openaiBody: successBodyText.slice(0, 2000) },
             { status: 502 },
           );
         }
@@ -220,7 +260,7 @@ export const Route = createFileRoute("/api/realtime/session")({
           ? echoedTools.map((t) => t?.name).filter(Boolean)
           : REALTIME_TOOLS.map((t) => t.name);
         console.log(
-          "[realtime session] created; tools registered:",
+          `[realtime session] created (model ${successModel}); tools registered:`,
           registeredToolNames.join(", ") || "(none)",
         );
         if (!registeredToolNames.includes("generate_document")) {
@@ -231,7 +271,8 @@ export const Route = createFileRoute("/api/realtime/session")({
         return Response.json({
           clientSecret: clientSecretValue,
           expiresAt: clientSecretExpiresAt,
-          model: REALTIME_MODEL,
+          model: successModel,
+          modelChainTried: attempts.map((a) => a.model),
           voice: REALTIME_VOICE,
           instructions,
           tools: REALTIME_TOOLS,

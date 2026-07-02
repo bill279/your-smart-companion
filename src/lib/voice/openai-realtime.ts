@@ -84,28 +84,37 @@ export async function startOpenAiRealtimeSession(options: {
   });
   if (!resp.ok) {
     let msg = `Voice setup failed (${resp.status}).`;
+    let retryable = false;
     try {
       const body = (await resp.json()) as {
         message?: string;
         status?: number;
         endpoint?: string;
         model?: string;
+        requestId?: string | null;
+        kind?: string;
+        retryable?: boolean;
+        attempts?: Array<{ model: string; status: number; requestId: string | null; kind: string }>;
         openaiBody?: string;
       };
       if (body?.message) msg = body.message;
-      if (body?.status || body?.model) {
+      if (body?.status || body?.model || body?.requestId) {
         const extra = [
           body.status ? `OpenAI status ${body.status}` : "",
           body.model ? `model ${body.model}` : "",
+          body.requestId ? `request ${body.requestId}` : "",
         ]
           .filter(Boolean)
           .join(", ");
         if (extra) msg = `${msg} (${extra})`;
       }
+      if (body?.retryable) retryable = true;
       console.error("[realtime] session creation failed", body);
     } catch { /* ignore */ }
     phase("failed", msg);
-    throw new Error(msg);
+    const err = new Error(msg) as Error & { retryable?: boolean };
+    err.retryable = retryable;
+    throw err;
   }
   const { clientSecret, model, tools, registeredToolNames, documentToolRegistered, instructions } = (await resp.json()) as {
     clientSecret: string;
