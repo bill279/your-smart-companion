@@ -451,6 +451,9 @@ export const Route = createFileRoute("/api/chat")({
         // compose the body with a single generateText call, generate the file
         // server-side, upload, and stream back exactly the artifact block.
         const docIntent = !body.regenerate ? detectDocumentIntent(userText) : null;
+        if (body.voiceDocIntent && !docIntent) {
+          return new Response("No document intent detected", { status: 400 });
+        }
         if (docIntent) {
           try {
             const composePrompt = `The user asked: ${userText}\n\nWrite the full body of the requested document in clean GitHub-Flavored Markdown. Use ## headings, short paragraphs, bullet lists, and tables where useful. Do NOT include the title, date, executive summary, or a Sources section — those are added automatically. Output ONLY the Markdown body. No preamble, no explanations, no outer code fences.`;
