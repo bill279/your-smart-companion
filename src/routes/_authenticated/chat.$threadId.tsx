@@ -694,6 +694,62 @@ function ThreadView({ threadId }: { threadId: string }) {
           await add({ data: { threadId, role: "user", content: text } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingUser(null);
+          // Deterministic document-intent shortcut for ElevenLabs voice.
+          // Route straight to /api/chat (same path typed chat uses) so voice
+          // requests like "make a one-page PDF summary of X" produce the
+          // artifact card instead of asking follow-up questions.
+          if (looksLikeDocumentIntent(text)) {
+            const normalized = text.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+            const key = normalized;
+            const now = Date.now();
+            const completedRecently =
+              key === lastDocumentIntentKeyRef.current &&
+              now - lastDocumentIntentCompletedAtRef.current < 60_000;
+            if (!docInFlightRef.current && !completedRecently) {
+              docInFlightRef.current = true;
+              lastDocumentIntentKeyRef.current = key;
+              try {
+                const { data: sess } = await supabase.auth.getSession();
+                const tok = sess.session?.access_token;
+                if (tok) {
+                  // Nudge the agent so it doesn't waste voice tokens narrating
+                  // "I'll create that for you…" while we build the file.
+                  try {
+                    conversationRef.current?.sendContextualUpdate?.(
+                      "The requested document is being generated deterministically on the server and will appear as a download card on screen. Do not narrate the document body or say you cannot create files. Give one short spoken confirmation only.",
+                    );
+                  } catch { /* ignore */ }
+                  const res = await fetch("/api/chat", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${tok}`,
+                    },
+                    body: JSON.stringify({
+                      threadId,
+                      content: text,
+                      voiceDocIntent: true,
+                    }),
+                  });
+                  if (!res.ok) {
+                    const msg = await res.text().catch(() => "Document generation failed");
+                    toast.error(msg || "Document generation failed");
+                    lastDocumentIntentKeyRef.current = "";
+                  } else {
+                    await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+                  }
+                }
+              } catch (err) {
+                console.warn("[voice] doc-intent route failed", err);
+                lastDocumentIntentKeyRef.current = "";
+              } finally {
+                docInFlightRef.current = false;
+                lastDocumentIntentCompletedAtRef.current = Date.now();
+              }
+            } else {
+              console.log("[voice] doc-intent ignored (in-flight or duplicate)");
+            }
+          }
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
           scheduleVoiceIdleClose();
