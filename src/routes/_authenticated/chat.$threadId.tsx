@@ -1154,6 +1154,9 @@ function ThreadView({ threadId }: { threadId: string }) {
               );
             })}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
+            {pendingUserVoice.trim() && (
+              <Bubble role="user" content={pendingUserVoice + " …"} streaming />
+            )}
             {(() => {
               const p = pendingAssistant.trim();
               if (!p) return null;
