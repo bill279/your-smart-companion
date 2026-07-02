@@ -35,8 +35,10 @@ describe("OpenAI Realtime tools registry", () => {
     for (const key of ["format", "filename", "title", "markdown"]) {
       expect(required).toContain(key);
     }
-    const formats = (doc!.parameters.properties as { format: { enum: string[] } }).format.enum;
-    expect(formats).toEqual(["pdf", "docx", "md", "xlsx", "csv", "txt"]);
+    const formats = (
+      doc!.parameters.properties as unknown as { format: { enum: readonly string[] } }
+    ).format.enum;
+    expect([...formats]).toEqual(["pdf", "docx", "md", "xlsx", "csv", "txt"]);
   });
 
   it("voice document intent routes to the SAME deterministic path as typed chat", () => {
