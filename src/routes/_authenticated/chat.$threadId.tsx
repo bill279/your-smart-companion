@@ -410,7 +410,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function startOpenAiVoice() {
     if (openAiSessionRef.current) return;
     setVoiceError(null);
-    setVoiceState("starting");
+    setVoiceUiState("starting");
     let assistantBuf = "";
     // Document-intent loop guards use refs so repeated transcript fragments
     // and re-renders can't bypass the dedupe. Key = normalized text + format.
@@ -432,10 +432,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     try {
       const session = await startOpenAiRealtimeSession({ context: buildVoiceContext() });
       openAiSessionRef.current = session;
-      session.onOpen(() => setVoiceState("connected"));
+      session.onOpen(() => setVoiceUiState("connected"));
       session.onClose(() => {
         openAiSessionRef.current = null;
-        setVoiceState("idle");
+        setVoiceUiState("idle");
       });
       session.onError((message) => {
         toast.error(message);
@@ -518,7 +518,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       const msg = e instanceof Error ? e.message : "OpenAI voice failed to start.";
       setVoiceError(msg);
       toast.error(msg);
-      setVoiceState("idle");
+      setVoiceUiState("idle");
       openAiSessionRef.current = null;
     }
   }
@@ -526,10 +526,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function stopOpenAiVoice() {
     const s = openAiSessionRef.current;
     openAiSessionRef.current = null;
-    setVoiceState("stopping");
+    setVoiceUiState("stopping");
     try { await s?.stop(); } catch (err) { console.warn(err); }
     setPendingAssistant("");
-    setVoiceState("idle");
+    setVoiceUiState("idle");
   }
 
   async function startVoice() {
