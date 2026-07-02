@@ -27,6 +27,7 @@ import {
   type RealtimePhase,
 } from "@/lib/voice/openai-realtime";
 import { looksLikeDocumentIntent } from "@/lib/doc-intent";
+import { filterOutTransientVoiceErrors } from "@/lib/voice/transient-errors";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
@@ -287,6 +288,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  // Live interim user transcript shown while the user is still speaking
+  // during an OpenAI Realtime turn. Cleared once the final user message
+  // is persisted (or when the assistant finishes its reply).
+  const [pendingUserVoice, setPendingUserVoice] = useState<string>("");
   type Attachment = { path: string; name: string; mimeType: string; size: number };
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -322,7 +327,11 @@ function ThreadView({ threadId }: { threadId: string }) {
     return () => window.removeEventListener("click", onDoc);
   }, [exportOpen]);
 
-  const messages = messagesQ.data ?? [];
+  const rawMessages = messagesQ.data ?? [];
+  // Hide legacy transient voice/session error strings that a prior code
+  // path may have persisted as assistant messages. See
+  // src/lib/voice/transient-errors.ts for the pattern list.
+  const messages = filterOutTransientVoiceErrors(rawMessages);
 
   // Live voice session timer (used for OpenAI Realtime widget where we don't
   // have a server-reported usage percent to show).
@@ -531,13 +540,19 @@ function ThreadView({ threadId }: { threadId: string }) {
           assistantBuf = text;
           setPendingAssistant(text);
           if (done && text.trim()) {
+            setPendingUserVoice("");
             void add({ data: { threadId, role: "assistant", content: text } }).then(() => {
               qc.invalidateQueries({ queryKey: ["messages", threadId] });
             });
             setPendingAssistant("");
             assistantBuf = "";
           }
+        } else if (role === "user" && !done) {
+          // Interim user transcript — surface a live "you're saying…"
+          // bubble so the chat updates in real time while listening.
+          setPendingUserVoice(text);
         } else if (role === "user" && done && text.trim()) {
+          setPendingUserVoice("");
           void add({ data: { threadId, role: "user", content: text } }).then(() => {
             qc.invalidateQueries({ queryKey: ["messages", threadId] });
           });
@@ -599,6 +614,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoicePhase("idle");
     try { await s?.stop(); } catch (err) { console.warn(err); }
     setPendingAssistant("");
+    setPendingUserVoice("");
     setVoiceUiState("idle");
   }
 
@@ -1138,6 +1154,9 @@ function ThreadView({ threadId }: { threadId: string }) {
               );
             })}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
+            {pendingUserVoice.trim() && (
+              <Bubble role="user" content={pendingUserVoice + " …"} streaming />
+            )}
             {(() => {
               const p = pendingAssistant.trim();
               if (!p) return null;
