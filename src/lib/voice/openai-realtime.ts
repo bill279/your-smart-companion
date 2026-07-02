@@ -4,6 +4,13 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
+export type RealtimePhase =
+  | "preflight"
+  | "requesting-mic"
+  | "connecting"
+  | "live"
+  | "failed";
+
 export type RealtimeSession = {
   stop: () => Promise<void>;
   onTranscript: (cb: (role: "user" | "assistant", text: string, done: boolean) => void) => void;
@@ -15,10 +22,61 @@ export type RealtimeSession = {
   forceGenerateDocument: (hint?: string) => boolean;
 };
 
-export async function startOpenAiRealtimeSession(options: { context?: string } = {}): Promise<RealtimeSession> {
+export async function preflightOpenAiRealtime(): Promise<{
+  ok: boolean;
+  message?: string;
+  tools?: string[];
+  documentToolRegistered?: boolean;
+}> {
+  try {
+    const resp = await fetch("/api/realtime/session", { method: "GET" });
+    const body = (await resp.json().catch(() => ({}))) as {
+      ok?: boolean;
+      message?: string;
+      tools?: string[];
+      documentToolRegistered?: boolean;
+    };
+    if (!resp.ok || !body?.ok) {
+      return {
+        ok: false,
+        message:
+          body?.message ??
+          `Voice preflight failed (${resp.status}). Try again shortly or contact support.`,
+      };
+    }
+    return {
+      ok: true,
+      tools: body.tools,
+      documentToolRegistered: body.documentToolRegistered,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Preflight network error",
+    };
+  }
+}
+
+export async function startOpenAiRealtimeSession(options: {
+  context?: string;
+  onPhase?: (phase: RealtimePhase, detail?: string) => void;
+} = {}): Promise<RealtimeSession> {
+  const phase = (p: RealtimePhase, detail?: string) => {
+    try { options.onPhase?.(p, detail); } catch { /* ignore */ }
+  };
+  phase("preflight");
+  const pre = await preflightOpenAiRealtime();
+  if (!pre.ok) {
+    phase("failed", pre.message);
+    throw new Error(pre.message ?? "OpenAI Realtime preflight failed.");
+  }
+
   const { data: { session } } = await supabase.auth.getSession();
   const jwt = session?.access_token;
-  if (!jwt) throw new Error("Not signed in.");
+  if (!jwt) {
+    phase("failed", "Not signed in.");
+    throw new Error("Not signed in.");
+  }
 
   const resp = await fetch("/api/realtime/session", {
     method: "POST",
@@ -46,6 +104,7 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
       }
       console.error("[realtime] session creation failed", body);
     } catch { /* ignore */ }
+    phase("failed", msg);
     throw new Error(msg);
   }
   const { clientSecret, model, tools, registeredToolNames, documentToolRegistered, instructions } = (await resp.json()) as {
@@ -62,6 +121,7 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
         .filter(Boolean)
     : [];
   if (!localToolNames.includes("generate_document")) {
+    phase("failed", "Missing generate_document tool");
     throw new Error("Voice session is missing generate_document locally. PDF/DOCX generation cannot start.");
   }
   if (documentToolRegistered === false || (registeredToolNames && !registeredToolNames.includes("generate_document"))) {
@@ -83,7 +143,21 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
     audioEl.srcObject = e.streams[0];
   };
 
-  const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+  phase("requesting-mic");
+  let mic: MediaStream;
+  try {
+    mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    const detail =
+      err instanceof Error && /permission|denied|notallowed/i.test(err.message + err.name)
+        ? "Microphone permission denied. Enable mic access for this site and tap the mic again."
+        : err instanceof Error
+          ? `Microphone unavailable: ${err.message}`
+          : "Microphone unavailable.";
+    phase("failed", detail);
+    try { pc.close(); } catch { /* ignore */ }
+    throw new Error(detail);
+  }
   mic.getTracks().forEach((t) => pc.addTrack(t, mic));
 
   const dc = pc.createDataChannel("oai-events");
@@ -232,6 +306,7 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
+  phase("connecting");
   const sdpUrl = `https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(model)}`;
   const sdpResp = await fetch(sdpUrl, {
     method: "POST",
@@ -246,6 +321,7 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
     mic.getTracks().forEach((t) => t.stop());
     pc.close();
     console.error("[realtime] SDP exchange failed", sdpResp.status, sdpUrl, detail);
+    phase("failed", `SDP ${sdpResp.status}`);
     throw new Error(
       `OpenAI Realtime SDP exchange failed (${sdpResp.status}) at ${sdpUrl}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
     );
@@ -254,6 +330,7 @@ export async function startOpenAiRealtimeSession(options: { context?: string } =
   await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
   pc.addEventListener("connectionstatechange", () => {
+    if (pc.connectionState === "connected") phase("live");
     if (["failed", "closed", "disconnected"].includes(pc.connectionState)) onCloseCb?.();
   });
 
