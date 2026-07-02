@@ -2,7 +2,6 @@ import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-r
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Settings as SettingsIcon } from "lucide-react";
@@ -13,15 +12,12 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentToken,
-  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
   searchChats,
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
-import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { getAssistantSettings } from "@/lib/assistant/settings.functions";
 import { startOpenAiRealtimeSession, type RealtimeSession } from "@/lib/voice/openai-realtime";
@@ -44,31 +40,12 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
-// (Voice agent prompt is configured in ElevenLabs; keep this for reference / contextual updates.)
-
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automation'?s assistant\.\s*How can I help\??\s*/i;
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
 type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
-const MAX_VOICE_RECONNECT_ATTEMPTS = 6;
-const VOICE_IDLE_MS = 60_000;
-const VOICE_RESTART_COOLDOWN_MS = 1_500;
-const MAX_VOICE_TOKEN_RETRY_ATTEMPTS = 5;
-const VOICE_CONNECT_TIMEOUT_MS = 15_000;
-
-function wait(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms));
-}
-
-function isRetryableVoiceStartError(message: string) {
-  return /VOICE_RETRYABLE_CLOSING|still closing|closing another|another session|concurrent|capacity|rate|too many|429|active.*conversation|conversation.*active|already.*conversation|already.*session/i.test(message);
-}
-
-function voiceRetryDelay(attempt: number) {
-  return Math.min(1_500 + attempt * 1_500, 6_000);
-}
 
 function cleanAssistantText(text: string) {
   return text
@@ -263,11 +240,7 @@ export const Route = createFileRoute("/_authenticated/chat/$threadId")({
 
 function ThreadPage() {
   const { threadId } = useParams({ from: "/_authenticated/chat/$threadId" });
-  return (
-    <ConversationProvider>
-      <ThreadView key={threadId} threadId={threadId} />
-    </ConversationProvider>
-  );
+  return <ThreadView key={threadId} threadId={threadId} />;
 }
 
 function ThreadView({ threadId }: { threadId: string }) {
@@ -279,8 +252,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentToken = useServerFn(getElevenLabsAgentToken);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
   const getSettings = useServerFn(getAssistantSettings);
@@ -327,29 +298,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const latestMessageRef = useRef<HTMLDivElement>(null);
-  const pendingContextRef = useRef<string>("");
-  const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
-  const seenVoiceEventsRef = useRef<Set<string>>(new Set());
-  const voiceStateRef = useRef<VoiceUiState>("idle");
-  const startAttemptRef = useRef(0);
-  const connectTimeoutRef = useRef<number | null>(null);
-  const reconnectTimerRef = useRef<number | null>(null);
-  const wantsVoiceModeRef = useRef(false);
-  const reconnectAttemptsRef = useRef(0);
-  const hasConnectedVoiceRef = useRef(false);
-  const voiceUserHasSpokenRef = useRef(false);
-  const lastUserSpeechAtRef = useRef<number>(0);
-  const idleTimerRef = useRef<number | null>(null);
-  const liveAssistantRef = useRef<string>("");
-  const voiceStopPromiseRef = useRef<Promise<void> | null>(null);
-  const voiceRestartReadyAtRef = useRef(0);
-  const voiceResetInProgressRef = useRef(false);
-  // Tracks whether the current voice turn is already streaming text via
-  // onAgentChatResponsePart. When true, we ignore onAudioAlignment so the
-  // bubble doesn't get doubled (chat parts + per-character audio chars),
-  // which is what caused the "looks longer for a second, then changes"
-  // flicker the user reported.
-  const chatPartsThisTurnRef = useRef<boolean>(false);
   const abortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
@@ -361,9 +309,6 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const messages = messagesQ.data ?? [];
 
-  // ElevenLabs quota widget removed — OpenAI Realtime is the sole voice
-  // provider. Legacy voiceQuotaFn import is kept off the render path.
-  void getVoiceQuota;
   // Live voice session timer (used for OpenAI Realtime widget where we don't
   // have a server-reported usage percent to show).
   const [voiceSessionStart, setVoiceSessionStart] = useState<number | null>(null);
@@ -426,435 +371,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
   }, [messages.length]);
 
-  // Guard against an ElevenLabs SDK bug where malformed error events throw
-  // `undefined is not an object (evaluating 'event.error_event.error_type')`
-  // as an unhandled rejection.
-  useEffect(() => {
-    const handler = (e: PromiseRejectionEvent) => {
-      const msg = String((e.reason as { message?: string })?.message ?? e.reason ?? "");
-      if (msg.includes("error_event") || msg.includes("error_type")) {
-        e.preventDefault();
-        console.warn("Suppressed voice malformed error event:", msg);
-      }
-    };
-    window.addEventListener("unhandledrejection", handler);
-    return () => {
-      window.removeEventListener("unhandledrejection", handler);
-      voiceStateRef.current = "idle";
-      clearVoiceConnectTimeout();
-      clearVoiceReconnectTimer();
-      try {
-        conversationRef.current?.endSession();
-      } catch (err) {
-        console.warn("voice cleanup failed", err);
-      }
-    };
-  }, []);
-
-  const conversation = useConversation({
-    clientTools: {
-      show_in_chat: async (params: { markdown?: string; content?: string }) => {
-        // Render rich content (tables, lists, code, long drafts) directly in
-        // the chat WITHOUT the voice agent speaking it. The agent should call
-        // this whenever the user asks for a table/list/code/email draft so
-        // the audio stays a short spoken summary while the visual appears
-        // instantly in the transcript.
-        const md = (params.markdown ?? params.content ?? "").trim();
-        if (!md) return JSON.stringify({ error: "markdown required" });
-        try {
-          setPendingAssistant(md);
-          liveAssistantRef.current = md;
-          await add({ data: { threadId, role: "assistant", content: md } });
-          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          setPendingAssistant("");
-          liveAssistantRef.current = "";
-          return JSON.stringify({ ok: true });
-        } catch (err) {
-          console.warn("show_in_chat failed", err);
-          return JSON.stringify({ error: "failed to render" });
-        }
-      },
-      web_search: async (params: { query?: string; limit?: number }) => {
-        const query = params.query?.trim();
-        if (!query) return JSON.stringify({ error: "query required" });
-
-        const res = await fetch("/api/public/web-search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, limit: params.limit ?? 5 }),
-        });
-        const data = await res.json().catch(() => ({ error: "search failed" }));
-        if (!res.ok) return JSON.stringify({ error: data?.error ?? "search failed" });
-        return JSON.stringify(data);
-      },
-      send_email: async (params: { to?: string; subject?: string; body?: string; cc?: string }) => {
-        if (!params.to || !params.subject || !params.body) {
-          return JSON.stringify({ error: "to, subject and body are required" });
-        }
-        const { data: sess } = await supabase.auth.getSession();
-        const token = sess.session?.access_token;
-        if (!token) return JSON.stringify({ error: "not signed in" });
-        const res = await fetch("/api/public/jarvis/tools/send_email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(params),
-        });
-        const data = await res.json().catch(() => ({ error: "send failed" }));
-        if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
-        return JSON.stringify(data);
-      },
-    },
-    onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
-      // Stream agent text to the chat in real time as ElevenLabs generates it.
-      const kind = part?.type;
-      const chunk = part?.text ?? "";
-      if (kind === "start") {
-        liveAssistantRef.current = chunk;
-        chatPartsThisTurnRef.current = true;
-        // New assistant turn: clear any leftover text from the previous turn
-        // so the old response doesn't flash before the new one streams in.
-        setPendingAssistant(chunk ? cleanAssistantText(chunk) : "");
-        return;
-      } else if (kind === "delta") {
-        liveAssistantRef.current += chunk;
-        chatPartsThisTurnRef.current = true;
-      } else if (kind === "stop") {
-        if (chunk) liveAssistantRef.current += chunk;
-      }
-      if (looksUnstableVoiceText(liveAssistantRef.current)) {
-        // Don't leave a stale half-streamed bubble visible if the stream
-        // started generating gibberish — clear it so we don't ghost the UI.
-        setPendingAssistant("");
-        return;
-      }
-      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
-    },
-    onAudioAlignment: (props: { chars?: string[] }) => {
-      // Fallback live transcript: only used when the agent isn't already
-      // streaming text via onAgentChatResponsePart for this turn. Otherwise
-      // appending here would duplicate text and cause a visible flicker.
-      if (chatPartsThisTurnRef.current) return;
-      const chars = props?.chars;
-      if (!chars || chars.length === 0) return;
-      liveAssistantRef.current += chars.join("");
-      if (looksUnstableVoiceText(liveAssistantRef.current)) return;
-      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
-    },
-    onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
-      const corrected = props?.corrected_agent_response;
-      if (!corrected) return;
-      if (looksUnstableVoiceText(corrected)) return;
-      liveAssistantRef.current = corrected;
-      setPendingAssistant(cleanAssistantText(corrected));
-    },
-    onDebug: (event: unknown) => {
-      const e = event as { type?: string; tentative_user_transcription_event?: { user_transcript?: string } };
-      if (e?.type === "tentative_user_transcript") {
-        const text = e.tentative_user_transcription_event?.user_transcript?.trim();
-        if (text) setPendingUser(text);
-      }
-    },
-    onConnect: () => {
-      clearVoiceConnectTimeout();
-      clearVoiceReconnectTimer();
-      if (!wantsVoiceModeRef.current) {
-        setVoiceState("stopping");
-        void Promise.resolve(conversationRef.current?.endSession()).finally(() => setVoiceState("idle"));
-        return;
-      }
-      reconnectAttemptsRef.current = 0;
-      hasConnectedVoiceRef.current = true;
-      wantsVoiceModeRef.current = true;
-      setVoiceState("connected");
-      setVoiceError(null);
-      try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
-      const ctx = pendingContextRef.current;
-      pendingContextRef.current = "";
-      if (ctx) {
-        try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
-      }
-      scheduleVoiceIdleClose();
-    },
-    onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
-      clearVoiceConnectTimeout();
-      if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-      const wasStopping = voiceStateRef.current === "stopping";
-      pendingContextRef.current = "";
-      if (voiceResetInProgressRef.current) return;
-      if (wasStopping) {
-        setVoiceState("idle");
-        return;
-      }
-      if (!wantsVoiceModeRef.current) {
-        setVoiceState("idle");
-        return;
-      }
-      const closeText = details?.closeReason || details?.message || "";
-      if (/quota/i.test(closeText)) {
-        wantsVoiceModeRef.current = false;
-        setVoiceState("idle");
-        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-        return;
-      }
-      if (isRetryableVoiceStartError(closeText)) {
-        setVoiceState("reconnecting");
-        setVoiceError(null);
-        scheduleVoiceReconnect(closeText);
-        return;
-      }
-      // Voice mode is intentionally persistent: if ElevenLabs drops the
-      // transport, reconnect automatically until the user taps the mic to stop.
-      if (hasConnectedVoiceRef.current) {
-        setVoiceState("reconnecting");
-        scheduleVoiceReconnect(closeText);
-        return;
-      }
-      wantsVoiceModeRef.current = false;
-      setVoiceState("idle");
-      voiceUserHasSpokenRef.current = false;
-      setVoiceError(closeText || "Voice could not connect. Tap the mic once to try again.");
-    },
-    onError: (e) => {
-      const msg = String(e || "");
-      if (msg.includes("error_event") || msg.includes("error_type")) return;
-      console.warn("voice error", msg);
-      clearVoiceConnectTimeout();
-      voiceUserHasSpokenRef.current = false;
-      if (/quota/i.test(msg)) {
-        wantsVoiceModeRef.current = false;
-        setVoiceState("idle");
-        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-      } else if (/permission|notallowed/i.test(msg)) {
-        wantsVoiceModeRef.current = false;
-        setVoiceState("idle");
-        setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
-      } else if (isRetryableVoiceStartError(msg) && wantsVoiceModeRef.current) {
-        setVoiceState("reconnecting");
-        setVoiceError(null);
-        scheduleVoiceReconnect(msg);
-      } else if (wantsVoiceModeRef.current && hasConnectedVoiceRef.current) {
-        setVoiceState("reconnecting");
-        scheduleVoiceReconnect(msg);
-      } else {
-        wantsVoiceModeRef.current = false;
-        setVoiceState("idle");
-        setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
-      }
-    },
-    onMessage: async (message: { source?: string; message?: string }) => {
-      const text = message?.message;
-      if (!text) return;
-      const voiceMessage = message as { source?: string; message?: string; event_id?: number };
-      const eventKey = `${voiceMessage.source ?? "unknown"}:${voiceMessage.event_id ?? text}`;
-      if (seenVoiceEventsRef.current.has(eventKey)) return;
-      seenVoiceEventsRef.current.add(eventKey);
-      if (seenVoiceEventsRef.current.size > 250) {
-        seenVoiceEventsRef.current = new Set(Array.from(seenVoiceEventsRef.current).slice(-120));
-      }
-      try {
-        if (message.source === "user") {
-          voiceUserHasSpokenRef.current = true;
-          lastUserSpeechAtRef.current = Date.now();
-          scheduleVoiceIdleClose();
-          // New user turn — reset the per-turn streaming source flag so
-          // the next assistant turn can correctly pick between chat parts
-          // and audio alignment without leftover state from the prior turn.
-          chatPartsThisTurnRef.current = false;
-          liveAssistantRef.current = "";
-          // Also clear any lingering assistant bubble from the prior turn so
-          // it doesn't flash above the user's new message while the agent thinks.
-          setPendingAssistant("");
-          // Mute assistant output at the start of each turn; stable response
-          // streaming callbacks below unmute it immediately when content looks sane.
-          // Live update: show the user's spoken turn immediately.
-          setPendingUser(text);
-          await add({ data: { threadId, role: "user", content: text } });
-          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          setPendingUser(null);
-          // Deterministic document-intent shortcut for ElevenLabs voice.
-          // Route straight to /api/chat (same path typed chat uses) so voice
-          // requests like "make a one-page PDF summary of X" produce the
-          // artifact card instead of asking follow-up questions.
-          if (looksLikeDocumentIntent(text)) {
-            const normalized = text.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
-            const key = normalized;
-            const now = Date.now();
-            const completedRecently =
-              key === lastDocumentIntentKeyRef.current &&
-              now - lastDocumentIntentCompletedAtRef.current < 60_000;
-            if (!docInFlightRef.current && !completedRecently) {
-              docInFlightRef.current = true;
-              lastDocumentIntentKeyRef.current = key;
-              try {
-                const { data: sess } = await supabase.auth.getSession();
-                const tok = sess.session?.access_token;
-                if (tok) {
-                  // Nudge the agent so it doesn't waste voice tokens narrating
-                  // "I'll create that for you…" while we build the file.
-                  try {
-                    conversationRef.current?.sendContextualUpdate?.(
-                      "The requested document is being generated deterministically on the server and will appear as a download card on screen. Do not narrate the document body or say you cannot create files. Give one short spoken confirmation only.",
-                    );
-                  } catch { /* ignore */ }
-                  const res = await fetch("/api/chat", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${tok}`,
-                    },
-                    body: JSON.stringify({
-                      threadId,
-                      content: text,
-                      voiceDocIntent: true,
-                    }),
-                  });
-                  if (!res.ok) {
-                    const msg = await res.text().catch(() => "Document generation failed");
-                    toast.error(msg || "Document generation failed");
-                    lastDocumentIntentKeyRef.current = "";
-                  } else {
-                    await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-                  }
-                }
-              } catch (err) {
-                console.warn("[voice] doc-intent route failed", err);
-                lastDocumentIntentKeyRef.current = "";
-              } finally {
-                docInFlightRef.current = false;
-                lastDocumentIntentCompletedAtRef.current = Date.now();
-              }
-            } else {
-              console.log("[voice] doc-intent ignored (in-flight or duplicate)");
-            }
-          }
-        } else if (message.source === "ai") {
-          const cleaned = cleanAssistantText(text);
-          scheduleVoiceIdleClose();
-          if (looksUnstableVoiceText(cleaned)) {
-            setPendingAssistant("");
-            liveAssistantRef.current = "";
-            chatPartsThisTurnRef.current = false;
-            return;
-          }
-          // Live update: show assistant turn the moment the transcript arrives.
-          setPendingAssistant(cleaned);
-          liveAssistantRef.current = cleaned;
-          await add({ data: { threadId, role: "assistant", content: cleaned } });
-          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          setPendingAssistant("");
-          liveAssistantRef.current = "";
-          chatPartsThisTurnRef.current = false;
-          const t = threads.data?.find((x) => x.id === threadId);
-          if (t && t.title === "New conversation") {
-            const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
-            await rename({ data: { id: threadId, title } });
-          }
-        }
-        qc.invalidateQueries({ queryKey: ["threads"] });
-      } catch (err) {
-        console.warn("Failed to persist voice message", err);
-      }
-    },
-  });
-
-  const isConnected = conversation.status === "connected";
-  conversationRef.current = conversation;
-
-  function setVoiceState(next: VoiceUiState) {
-    voiceStateRef.current = next;
-    setVoiceUiState(next);
-  }
-
-  function clearVoiceConnectTimeout() {
-    if (connectTimeoutRef.current !== null) {
-      window.clearTimeout(connectTimeoutRef.current);
-      connectTimeoutRef.current = null;
-    }
-  }
-
-  function clearVoiceReconnectTimer() {
-    if (reconnectTimerRef.current !== null) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
-  }
-
-  function scheduleVoiceIdleClose() {
-    if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
-    idleTimerRef.current = window.setTimeout(() => {
-      idleTimerRef.current = null;
-      if (!conversationRef.current) return;
-      // No activity for the idle window — close the voice session to stop
-      // burning ElevenLabs credits. The user can tap the mic to resume.
-      wantsVoiceModeRef.current = false;
-      setVoiceState("stopping");
-      voiceRestartReadyAtRef.current = Date.now() + VOICE_RESTART_COOLDOWN_MS;
-      voiceStopPromiseRef.current = Promise.resolve(conversationRef.current.endSession())
-        .catch(() => {})
-        .then(async () => {
-          await wait(VOICE_RESTART_COOLDOWN_MS);
-        })
-        .finally(() => {
-          voiceStopPromiseRef.current = null;
-          setVoiceState("idle");
-        });
-    }, VOICE_IDLE_MS);
-  }
-
-  async function waitForVoiceTransportReady() {
-    if (voiceStopPromiseRef.current) await voiceStopPromiseRef.current;
-    const remaining = voiceRestartReadyAtRef.current - Date.now();
-    if (remaining > 0) await wait(remaining);
-  }
-
-  async function endExistingVoiceTransport() {
-    clearVoiceConnectTimeout();
-    clearVoiceReconnectTimer();
-    voiceResetInProgressRef.current = true;
-    pendingContextRef.current = "";
-    liveAssistantRef.current = "";
-    chatPartsThisTurnRef.current = false;
-    setPendingAssistant("");
-    setPendingUser(null);
-    if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-    try {
-      await Promise.resolve(conversationRef.current?.endSession());
-    } catch (err) {
-      console.warn("voice transport reset failed", err);
-    }
-    voiceRestartReadyAtRef.current = Date.now() + VOICE_RESTART_COOLDOWN_MS;
-    await waitForVoiceTransportReady();
-    voiceResetInProgressRef.current = false;
-  }
-
-  function scheduleVoiceReconnect(reason?: string) {
-    if (!wantsVoiceModeRef.current) return;
-    if (/permission|notallowed/i.test(reason ?? "")) {
-      wantsVoiceModeRef.current = false;
-      setVoiceState("idle");
-      setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
-      return;
-    }
-    if (reconnectAttemptsRef.current >= MAX_VOICE_RECONNECT_ATTEMPTS) {
-      wantsVoiceModeRef.current = false;
-      hasConnectedVoiceRef.current = false;
-      setVoiceState("idle");
-      setVoiceError("Voice connection is unstable. Tap the mic once to reconnect.");
-      return;
-    }
-    if (reconnectTimerRef.current !== null || voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
-    const attempt = reconnectAttemptsRef.current + 1;
-    reconnectAttemptsRef.current = attempt;
-    const delay = voiceRetryDelay(attempt - 1);
-    setVoiceState("reconnecting");
-    setVoiceError(null);
-    reconnectTimerRef.current = window.setTimeout(() => {
-      reconnectTimerRef.current = null;
-      if (!wantsVoiceModeRef.current || voiceStateRef.current === "connected") return;
-      void startVoice({ automaticReconnect: true });
-    }, delay);
-  }
-
   function buildVoiceContext() {
     const MAX_CHARS = 5000;
     const recent = (messages ?? []).slice(-30).map(
@@ -894,8 +410,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function startOpenAiVoice() {
     if (openAiSessionRef.current) return;
     setVoiceError(null);
-    setVoiceState("starting");
-    wantsVoiceModeRef.current = true;
+    setVoiceUiState("starting");
     let assistantBuf = "";
     // Document-intent loop guards use refs so repeated transcript fragments
     // and re-renders can't bypass the dedupe. Key = normalized text + format.
@@ -917,10 +432,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     try {
       const session = await startOpenAiRealtimeSession({ context: buildVoiceContext() });
       openAiSessionRef.current = session;
-      session.onOpen(() => setVoiceState("connected"));
+      session.onOpen(() => setVoiceUiState("connected"));
       session.onClose(() => {
         openAiSessionRef.current = null;
-        setVoiceState("idle");
+        setVoiceUiState("idle");
       });
       session.onError((message) => {
         toast.error(message);
@@ -1003,7 +518,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       const msg = e instanceof Error ? e.message : "OpenAI voice failed to start.";
       setVoiceError(msg);
       toast.error(msg);
-      setVoiceState("idle");
+      setVoiceUiState("idle");
       openAiSessionRef.current = null;
     }
   }
@@ -1011,79 +526,29 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function stopOpenAiVoice() {
     const s = openAiSessionRef.current;
     openAiSessionRef.current = null;
-    setVoiceState("stopping");
+    setVoiceUiState("stopping");
     try { await s?.stop(); } catch (err) { console.warn(err); }
     setPendingAssistant("");
-    setVoiceState("idle");
+    setVoiceUiState("idle");
   }
 
-  async function startVoice(options: { automaticReconnect?: boolean } = {}) {
-    if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
-    if (voiceProvider === "openai_realtime") {
-      await startOpenAiVoice();
-      return;
-    }
+  async function startVoice() {
+    if (voiceUiState === "starting" || voiceUiState === "connected") return;
     if (voiceProvider === "none") {
       toast.error("Voice is disabled in settings.");
       return;
     }
-    // Any other value is unreachable — ElevenLabs was removed.
-    toast.error("Voice is not available. Check assistant settings.");
-    return;
+    await startOpenAiVoice();
   }
 
   async function stopVoice() {
-    if (openAiSessionRef.current) {
-      await stopOpenAiVoice();
-      return;
-    }
-    wantsVoiceModeRef.current = false;
-    clearVoiceReconnectTimer();
-    startAttemptRef.current += 1;
-    clearVoiceConnectTimeout();
-    setVoiceState("stopping");
-    pendingContextRef.current = "";
-    setVoiceError(null);
-    voiceRestartReadyAtRef.current = Date.now() + VOICE_RESTART_COOLDOWN_MS;
-    try {
-      voiceStopPromiseRef.current = Promise.resolve(conversation.endSession())
-        .catch((err) => {
-          console.warn("endSession failed", err);
-        })
-        .then(async () => {
-          await wait(VOICE_RESTART_COOLDOWN_MS);
-        });
-      await voiceStopPromiseRef.current;
-    } catch (err) {
-      console.warn("endSession failed", err);
-    } finally {
-      voiceStopPromiseRef.current = null;
-      hasConnectedVoiceRef.current = false;
-      voiceUserHasSpokenRef.current = false;
-      reconnectAttemptsRef.current = 0;
-      // Clear any half-streamed assistant bubble so the next tap starts clean.
-      liveAssistantRef.current = "";
-      chatPartsThisTurnRef.current = false;
-      setPendingAssistant("");
-      setPendingUser(null);
-      if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-      setVoiceState("idle");
-    }
+    if (openAiSessionRef.current) await stopOpenAiVoice();
   }
 
   const addMut = useMutation({
     mutationFn: async ({ content, files, regenerate }: { content: string; files: Attachment[]; regenerate?: boolean }) => {
       if (!regenerate) setPendingUser(content);
       setPendingAssistant("");
-
-      // If voice is connected, route through ElevenLabs instead.
-      if (isConnected && !regenerate) {
-        voiceUserHasSpokenRef.current = true;
-        await add({ data: { threadId, role: "user", content } });
-        conversation.sendUserMessage(content);
-        setPendingUser(null);
-        return;
-      }
 
       // Text chat: stream from Lovable AI.
       const { data: sess } = await supabase.auth.getSession();
@@ -1161,7 +626,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function regenerate() {
     if (addMut.isPending) return;
-    if (isConnected) {
+    if (voiceActive) {
       toast.error("Regenerate is for text chat. Stop voice first.");
       return;
     }
@@ -1319,7 +784,11 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const voiceStopping = voiceUiState === "stopping";
-  const voiceActive = voiceUiState === "connected" || voiceUiState === "reconnecting" || voiceStopping || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceActive =
+    voiceUiState === "connected" ||
+    voiceUiState === "reconnecting" ||
+    voiceStopping ||
+    voiceUiState === "starting";
   const voiceConnecting = voiceUiState === "starting";
   const voiceReconnecting = voiceUiState === "reconnecting";
 
@@ -1606,7 +1075,7 @@ function ThreadView({ threadId }: { threadId: string }) {
               }
               return <Bubble role="assistant" content={pendingAssistant} streaming />;
             })()}
-            {addMut.isPending && !pendingAssistant && !isConnected && (
+            {addMut.isPending && !pendingAssistant && !voiceActive && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
                 <div className="flex items-center gap-1.5 pt-3 text-muted-foreground text-sm">
@@ -1688,9 +1157,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                 : voiceReconnecting
                 ? "Reconnecting… tap to stop"
                 : voiceActive
-                ? conversation.isSpeaking
-                  ? "BPA Bot is speaking — tap to stop voice"
-                  : "Voice is live and listening — tap to stop"
+                ? "Voice is live — tap to stop"
                 : "Tap to talk"
             }
             aria-label={voiceActive ? "Stop voice mode" : "Start voice mode"}
@@ -1750,14 +1217,12 @@ function ThreadView({ threadId }: { threadId: string }) {
                 : voiceReconnecting
                 ? "Reconnecting voice…"
                 : voiceActive
-                ? conversation.isSpeaking
-                  ? "BPA Bot is speaking…"
-                  : "Listening… or type"
+                ? "Listening… or type"
                 : "Message BPA Bot…"
             }
             className="flex-1 bg-transparent outline-none px-3 py-2 text-[15px] leading-6 resize-none max-h-[220px] min-h-[40px]"
           />
-          {addMut.isPending && !isConnected ? (
+          {addMut.isPending && !voiceActive ? (
             <button
               type="button"
               onClick={stopGenerating}
@@ -1779,7 +1244,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           </div>
         </form>
         {/* Regenerate action below composer when there's an assistant message and we're idle */}
-        {!addMut.isPending && !isConnected && messages.some((m) => m.role === "assistant") && (
+        {!addMut.isPending && !voiceActive && messages.some((m) => m.role === "assistant") && (
           <div className="relative z-10 -mt-4 mb-4 flex justify-center">
             <button
               type="button"
