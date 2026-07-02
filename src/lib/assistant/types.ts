@@ -101,7 +101,7 @@ export type ToolDefinition<Input = unknown, Output = unknown> = {
 
 // Cost mode → model id used by the orchestrator.
 export const MODEL_FOR_COST_MODE: Record<CostMode, string> = {
-  economy: "openai/gpt-5-nano",
-  balanced: "openai/gpt-5-mini",
-  premium: "openai/gpt-5",
+  economy: "gpt-5-nano",
+  balanced: "gpt-5-mini",
+  premium: "gpt-5",
 };

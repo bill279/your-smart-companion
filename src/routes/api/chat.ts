@@ -5,7 +5,7 @@ import { generateText } from "ai";
 import { detectDocumentIntent } from "@/lib/doc-intent";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
-import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
+import { createOpenAiProvider } from "@/lib/ai-gateway.server";
 
 const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
 
@@ -229,8 +229,8 @@ export const Route = createFileRoute("/api/chat")({
 
         const SUPABASE_URL = process.env.SUPABASE_URL!;
         const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY!;
-        const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY;
-        if (!LOVABLE_API_KEY) {
+        const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+        if (!OPENAI_API_KEY) {
           return new Response("AI not configured", { status: 500 });
         }
 
@@ -263,10 +263,10 @@ export const Route = createFileRoute("/api/chat")({
         const requireCitations = settingsRow?.require_citations ?? true;
         const modelId =
           costMode === "economy"
-            ? "openai/gpt-5-nano"
+            ? "gpt-5-nano"
             : costMode === "premium"
-              ? "openai/gpt-5"
-              : "openai/gpt-5-mini";
+              ? "gpt-5"
+              : "gpt-5-mini";
 
         // Helper: log an agent action (best-effort, never throws)
         const logAction = async (
@@ -397,7 +397,7 @@ export const Route = createFileRoute("/api/chat")({
         const lessonRows = lessonsRes.data ?? [];
         const feedbackRows = feedbackRes.data ?? [];
 
-        const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
+        const gateway = createOpenAiProvider(OPENAI_API_KEY);
         const factsBlock =
           factRows && factRows.length > 0
             ? `\n\n# Remembered facts about this user\n${factRows
@@ -1102,15 +1102,14 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               }),
               execute: async ({ query, limit }) => {
                 try {
-                  const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+                  const r = await fetch("https://api.openai.com/v1/embeddings", {
                     method: "POST",
                     headers: {
                       "Content-Type": "application/json",
-                      "Lovable-API-Key": LOVABLE_API_KEY!,
-                      Authorization: `Bearer ${LOVABLE_API_KEY!}`,
+                      Authorization: `Bearer ${OPENAI_API_KEY}`,
                     },
                     body: JSON.stringify({
-                      model: "openai/text-embedding-3-small",
+                      model: "text-embedding-3-small",
                       input: query,
                     }),
                   });

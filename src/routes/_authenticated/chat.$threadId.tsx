@@ -372,9 +372,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     setShowScrollDown(false);
   }
 
-  useEffect(() => {
-    scrollToLatest();
-  }, [messages.length, pendingAssistant, pendingUser]);
+	  useEffect(() => {
+	    scrollToLatest();
+	  }, [messages.length, pendingAssistant, pendingUser, pendingUserVoice]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -462,11 +462,64 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (/\btxt|text file\b/.test(s)) return "txt";
       return "auto";
     };
-    const normalizeIntent = (t: string) =>
-      t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200) +
-      "|" +
-      detectFormat(t);
-    try {
+	    const normalizeIntent = (t: string) =>
+	      t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200) +
+	      "|" +
+	      detectFormat(t);
+	    const isDocumentLimboReply = (t: string) =>
+	      /\b(?:i can|i will|i'll|would you like|need .*overview|cannot|can't|unable)\b/i.test(t) &&
+	      /\b(?:pdf|document|file|summary|report)\b/i.test(t);
+	    const runDeterministicVoiceDocument = async (text: string, key: string) => {
+	      setVoicePhase("generating-document");
+	      setPendingAssistant(`Generating ${detectFormat(text).toUpperCase() === "AUTO" ? "document" : detectFormat(text).toUpperCase()}…`);
+	      try {
+	        const { data: sess } = await supabase.auth.getSession();
+	        const token = sess.session?.access_token;
+	        if (!token) throw new Error("Session expired. Please sign in again.");
+	        const res = await fetch("/api/chat", {
+	          method: "POST",
+	          headers: {
+	            "Content-Type": "application/json",
+	            Authorization: `Bearer ${token}`,
+	          },
+	          body: JSON.stringify({
+	            threadId,
+	            content: text,
+	            attachments: [],
+	            voiceDocIntent: true,
+	          }),
+	        });
+	        if (!res.ok || !res.body) {
+	          throw new Error((await res.text().catch(() => "")) || `Document generation failed (${res.status}).`);
+	        }
+	        const reader = res.body.getReader();
+	        const decoder = new TextDecoder();
+	        let acc = "";
+	        while (true) {
+	          const { value, done } = await reader.read();
+	          if (done) break;
+	          acc += decoder.decode(value, { stream: true });
+	          setPendingAssistant(cleanAssistantText(acc));
+	        }
+	        docIntentFailureCountRef.current.delete(key);
+	        lastDocumentIntentCompletedAtRef.current = Date.now();
+	        toast.success("Document generated.");
+	      } catch (err) {
+	        const n = (docIntentFailureCountRef.current.get(key) ?? 0) + 1;
+	        docIntentFailureCountRef.current.set(key, n);
+	        if (n < DOC_MAX_FAILURES_PER_INTENT) {
+	          lastDocumentIntentKeyRef.current = "";
+	        }
+	        toast.error(err instanceof Error ? err.message : "Document generation failed.");
+	      } finally {
+	        docInFlightRef.current = false;
+	        setVoicePhase("live");
+	        setPendingAssistant("");
+	        qc.invalidateQueries({ queryKey: ["messages", threadId] });
+	        qc.invalidateQueries({ queryKey: ["threads"] });
+	      }
+	    };
+	    try {
       const session = await startOpenAiRealtimeSession({
         context: buildVoiceContext(),
         onPhase: (p, detail) => {
@@ -536,13 +589,20 @@ function ThreadView({ threadId }: { threadId: string }) {
         // Keep lastDocumentIntentKey set; completed-TTL blocks repeats for 60s.
       });
       session.onTranscript((role, text, done) => {
-        if (role === "assistant") {
-          assistantBuf = text;
-          setPendingAssistant(text);
-          if (done && text.trim()) {
-            setPendingUserVoice("");
-            void add({ data: { threadId, role: "assistant", content: text } }).then(() => {
-              qc.invalidateQueries({ queryKey: ["messages", threadId] });
+	        if (role === "assistant") {
+	          assistantBuf = text;
+	          if (!docInFlightRef.current) setPendingAssistant(text);
+	          if (done && text.trim()) {
+	            const recentlyHandledDoc =
+	              Date.now() - lastDocumentIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
+	            if (docInFlightRef.current || (recentlyHandledDoc && isDocumentLimboReply(text))) {
+	              setPendingAssistant("");
+	              assistantBuf = "";
+	              return;
+	            }
+	            setPendingUserVoice("");
+	            void add({ data: { threadId, role: "assistant", content: text } }).then(() => {
+	              qc.invalidateQueries({ queryKey: ["messages", threadId] });
             });
             setPendingAssistant("");
             assistantBuf = "";
@@ -571,15 +631,10 @@ function ThreadView({ threadId }: { threadId: string }) {
               lastDocumentIntentKeyRef.current = key;
               docInFlightRef.current = true;
               setVoicePhase("generating-document");
-              const forced = session.forceGenerateDocument(text);
-              if (forced) {
-                console.log("[realtime] doc-intent detected, forcing generate_document:", text);
-              } else {
-                docInFlightRef.current = false;
-                setVoicePhase("live");
-              }
-              // Safety: if the tool call never resolves, release the lock.
-              setTimeout(() => {
+	              console.log("[realtime] doc-intent detected, using deterministic document route:", text);
+	              void runDeterministicVoiceDocument(text, key);
+	              // Safety: if the tool call never resolves, release the lock.
+	              setTimeout(() => {
                 if (docInFlightRef.current) {
                   console.warn("[realtime] doc-intent lock released by timeout");
                   docInFlightRef.current = false;
