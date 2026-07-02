@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { gatewayHeaders } from "@/lib/jarvis-tools.server";
+import { scrapeWeb, searchWeb } from "@/lib/web-tools.server";
 import { marked } from "marked";
 
 // Server-side dispatcher for OpenAI Realtime function calls. The Realtime
@@ -68,64 +69,13 @@ async function runWebSearch(args: Record<string, unknown>) {
     .object({ query: z.string().min(1).max(500), limit: z.number().int().min(1).max(6).optional() })
     .safeParse(args);
   if (!p.success) return { error: "invalid arguments for web_search" };
-  const key = process.env.FIRECRAWL_API_KEY;
-  if (!key) return { error: "web search not configured" };
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), 10000);
-  try {
-    const r = await fetch("https://api.firecrawl.dev/v2/search", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ query: p.data.query, limit: Math.min(p.data.limit ?? 4, 5) }),
-      signal: ac.signal,
-    });
-    if (!r.ok) return { error: `search failed (${r.status})` };
-    const j = (await r.json()) as {
-      data?:
-        | { web?: Array<{ title?: string; url?: string; description?: string }> }
-        | Array<{ title?: string; url?: string; description?: string }>;
-    };
-    const arr = Array.isArray(j.data) ? j.data : j.data?.web ?? [];
-    return {
-      results: arr.slice(0, p.data.limit ?? 5).map((x) => ({
-        title: x.title,
-        url: x.url,
-        snippet: x.description,
-      })),
-    };
-  } catch {
-    return { error: "search timed out" };
-  } finally {
-    clearTimeout(t);
-  }
+  return searchWeb(p.data.query, p.data.limit ?? 5);
 }
 
 async function runWebScrape(args: Record<string, unknown>) {
   const p = z.object({ url: z.string().url() }).safeParse(args);
   if (!p.success) return { error: "invalid arguments for web_scrape" };
-  const key = process.env.FIRECRAWL_API_KEY;
-  if (!key) return { error: "web scrape not configured" };
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), 12000);
-  try {
-    const r = await fetch("https://api.firecrawl.dev/v2/scrape", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ url: p.data.url, formats: ["markdown"], onlyMainContent: true }),
-      signal: ac.signal,
-    });
-    if (!r.ok) return { error: `scrape failed (${r.status})` };
-    const j = (await r.json()) as { data?: { markdown?: string; metadata?: { title?: string } } };
-    const md = j.data?.markdown ?? "";
-    return {
-      title: j.data?.metadata?.title,
-      markdown: md.length > 3500 ? md.slice(0, 3500) + "\n…[truncated]" : md,
-    };
-  } catch {
-    return { error: "scrape timed out" };
-  } finally {
-    clearTimeout(t);
-  }
+  return scrapeWeb(p.data.url);
 }
 
 async function runSendEmail(args: Record<string, unknown>) {

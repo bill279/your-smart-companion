@@ -6,6 +6,7 @@ import { detectDocumentIntent } from "@/lib/doc-intent";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createOpenAiProvider } from "@/lib/ai-gateway.server";
+import { scrapeWeb, searchWeb } from "@/lib/web-tools.server";
 
 const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
 
@@ -583,77 +584,14 @@ export const Route = createFileRoute("/api/chat")({
                 limit: z.number().int().min(1).max(10).optional(),
               }),
               execute: async ({ query, limit }) => {
-                const key = process.env.FIRECRAWL_API_KEY;
-                if (!key) return { error: "Web search not configured" };
-                const ac = new AbortController();
-                const t = setTimeout(() => ac.abort(), 10000);
-                let r: Response;
-                try {
-                  r = await fetch("https://api.firecrawl.dev/v2/search", {
-                    method: "POST",
-                    headers: {
-                      Authorization: `Bearer ${key}`,
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({ query, limit: Math.min(limit ?? 4, 5) }),
-                    signal: ac.signal,
-                  });
-                } catch {
-                  return { error: "Search timed out — try a more specific query." };
-                } finally {
-                  clearTimeout(t);
-                }
-                if (!r.ok) return { error: `Search failed (${r.status})` };
-                const j = (await r.json()) as {
-                  data?: { web?: Array<{ title?: string; url?: string; description?: string }> } | Array<{ title?: string; url?: string; description?: string }>;
-                };
-                const arr = Array.isArray(j.data) ? j.data : j.data?.web ?? [];
-                return {
-                  results: arr.slice(0, limit ?? 5).map((x) => ({
-                    title: x.title,
-                    url: x.url,
-                    snippet: x.description,
-                  })),
-                };
+                return searchWeb(query, limit ?? 5);
               },
             }),
             web_scrape: tool({
               description: "Fetch the readable markdown contents of a specific URL.",
               inputSchema: z.object({ url: z.string().url() }),
               execute: async ({ url }) => {
-                const key = process.env.FIRECRAWL_API_KEY;
-                if (!key) return { error: "Web scrape not configured" };
-                const ac = new AbortController();
-                const t = setTimeout(() => ac.abort(), 12000);
-                let r: Response;
-                try {
-                  r = await fetch("https://api.firecrawl.dev/v2/scrape", {
-                    method: "POST",
-                    headers: {
-                      Authorization: `Bearer ${key}`,
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      url,
-                      formats: ["markdown"],
-                      onlyMainContent: true,
-                    }),
-                    signal: ac.signal,
-                  });
-                } catch {
-                  return { error: "Scrape timed out — skip this URL and try another." };
-                } finally {
-                  clearTimeout(t);
-                }
-                if (!r.ok) return { error: `Scrape failed (${r.status})` };
-                const j = (await r.json()) as {
-                  data?: { markdown?: string; metadata?: { title?: string } };
-                };
-                const md = j.data?.markdown ?? "";
-                return {
-                  title: j.data?.metadata?.title,
-                  markdown: md.length > 4000 ? md.slice(0, 4000) + "\n\n…[truncated]" : md,
-                };
+                return scrapeWeb(url);
               },
             }),
             search_images: tool({
