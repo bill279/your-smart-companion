@@ -2,7 +2,6 @@ import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-r
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Settings as SettingsIcon } from "lucide-react";
@@ -13,15 +12,12 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentToken,
-  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
   searchChats,
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
-import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { getAssistantSettings } from "@/lib/assistant/settings.functions";
 import { startOpenAiRealtimeSession, type RealtimeSession } from "@/lib/voice/openai-realtime";
@@ -44,31 +40,12 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
-// (Voice agent prompt is configured in ElevenLabs; keep this for reference / contextual updates.)
-
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automation'?s assistant\.\s*How can I help\??\s*/i;
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
 type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
-const MAX_VOICE_RECONNECT_ATTEMPTS = 6;
-const VOICE_IDLE_MS = 60_000;
-const VOICE_RESTART_COOLDOWN_MS = 1_500;
-const MAX_VOICE_TOKEN_RETRY_ATTEMPTS = 5;
-const VOICE_CONNECT_TIMEOUT_MS = 15_000;
-
-function wait(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms));
-}
-
-function isRetryableVoiceStartError(message: string) {
-  return /VOICE_RETRYABLE_CLOSING|still closing|closing another|another session|concurrent|capacity|rate|too many|429|active.*conversation|conversation.*active|already.*conversation|already.*session/i.test(message);
-}
-
-function voiceRetryDelay(attempt: number) {
-  return Math.min(1_500 + attempt * 1_500, 6_000);
-}
 
 function cleanAssistantText(text: string) {
   return text
