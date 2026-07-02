@@ -20,7 +20,12 @@ import {
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { getAssistantSettings } from "@/lib/assistant/settings.functions";
-import { startOpenAiRealtimeSession, type RealtimeSession } from "@/lib/voice/openai-realtime";
+import {
+  startOpenAiRealtimeSession,
+  preflightOpenAiRealtime,
+  type RealtimeSession,
+  type RealtimePhase,
+} from "@/lib/voice/openai-realtime";
 import { looksLikeDocumentIntent } from "@/lib/doc-intent";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
@@ -267,6 +272,11 @@ function ThreadView({ threadId }: { threadId: string }) {
   const docInFlightRef = useRef(false);
   const lastDocumentIntentKeyRef = useRef<string>("");
   const lastDocumentIntentCompletedAtRef = useRef<number>(0);
+  // Failure counter per intent key. After 2 failures the same intent is
+  // suppressed for the completed-TTL window so we don't loop forever if the
+  // generator is down.
+  const docIntentFailureCountRef = useRef<Map<string, number>>(new Map());
+  const DOC_MAX_FAILURES_PER_INTENT = 2;
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -294,6 +304,11 @@ function ThreadView({ threadId }: { threadId: string }) {
   });
   const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  // Fine-grained phase surfaced to the mic UI so mobile users know exactly
+  // what's happening (mic prompt vs. OpenAI handshake vs. generating a doc).
+  const [voicePhase, setVoicePhase] = useState<RealtimePhase | "generating-document" | "idle">(
+    "idle",
+  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
