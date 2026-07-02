@@ -327,7 +327,11 @@ function ThreadView({ threadId }: { threadId: string }) {
     return () => window.removeEventListener("click", onDoc);
   }, [exportOpen]);
 
-  const messages = messagesQ.data ?? [];
+  const rawMessages = messagesQ.data ?? [];
+  // Hide legacy transient voice/session error strings that a prior code
+  // path may have persisted as assistant messages. See
+  // src/lib/voice/transient-errors.ts for the pattern list.
+  const messages = filterOutTransientVoiceErrors(rawMessages);
 
   // Live voice session timer (used for OpenAI Realtime widget where we don't
   // have a server-reported usage percent to show).
