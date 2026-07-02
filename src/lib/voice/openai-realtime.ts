@@ -217,6 +217,7 @@ export async function startOpenAiRealtimeSession(options: {
   }
 
   let assistantBuf = "";
+  let userInterimBuf = "";
   dc.addEventListener("open", () => {
     phase("live");
     // Defensively (re)register tools via session.update so document/email/web
@@ -277,6 +278,14 @@ export async function startOpenAiRealtimeSession(options: {
           break;
         case "conversation.item.input_audio_transcription.completed":
           if (msg.transcript) onTranscriptCb?.("user", msg.transcript, true);
+          userInterimBuf = "";
+          break;
+        case "conversation.item.input_audio_transcription.delta":
+          // Newer Realtime API emits interim user transcript deltas. Buffer
+          // them so the chat page can render a live "you're saying…" bubble
+          // while the user is still speaking.
+          userInterimBuf += msg.delta ?? "";
+          if (userInterimBuf) onTranscriptCb?.("user", userInterimBuf, false);
           break;
         case "response.function_call_arguments.delta": {
           const id = msg.call_id ?? "";
