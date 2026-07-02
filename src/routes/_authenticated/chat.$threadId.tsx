@@ -1004,8 +1004,17 @@ function ThreadView({ threadId }: { threadId: string }) {
           <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
             <div className="flex items-center justify-between text-[11px] mb-1">
               <span className="font-medium text-foreground">OpenAI Voice</span>
-              <span className={voiceActive ? "text-primary font-semibold" : "text-muted-foreground"}>
-                {voiceActive ? (voiceUiState === "connected" ? "Live" : voiceUiState) : "Idle"}
+              <span className={voiceActive || voicePhase === "failed" ? (voicePhase === "failed" ? "text-destructive font-semibold" : "text-primary font-semibold") : "text-muted-foreground"}>
+                {(() => {
+                  if (voicePhase === "failed") return "Failed";
+                  if (voicePhase === "generating-document") return "Generating doc…";
+                  if (voicePhase === "requesting-mic") return "Mic prompt…";
+                  if (voicePhase === "preflight") return "Checking…";
+                  if (voicePhase === "connecting") return "Connecting…";
+                  if (voicePhase === "live" || voiceUiState === "connected") return "Live";
+                  if (voiceActive) return voiceUiState;
+                  return "Idle";
+                })()}
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground">
@@ -1013,6 +1022,11 @@ function ThreadView({ threadId }: { threadId: string }) {
                 ? `Session ${fmtElapsed(voiceElapsed)} · ${costMode}`
                 : `Mode: ${costMode} · usage billed to OpenAI`}
             </div>
+            {voiceError && voicePhase === "failed" && (
+              <div className="mt-1.5 text-[10px] text-destructive leading-snug">
+                {voiceError}
+              </div>
+            )}
           </div>
         )}
         {voiceProvider === "none" && (
