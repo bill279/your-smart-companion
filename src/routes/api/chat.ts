@@ -430,7 +430,7 @@ export const Route = createFileRoute("/api/chat")({
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
         const prefsBlock = `\n\n# User preferences\n- Cost mode: ${costMode} (respond accordingly — economy = shortest, premium = deepest analysis).\n- Approval-before-external-actions: ${requireApproval ? "REQUIRED" : "off"}${requireApproval ? " — always draft-and-confirm before send_email, create_calendar_event, or any irreversible action." : " — user has opted out of pre-approval, but still confirm anything destructive."}\n- Citations for web research: ${requireCitations ? "REQUIRED" : "optional"}${requireCitations ? " — cite every factual claim you got from web_search / web_scrape with a Markdown link." : ""}.`;
-        const microsoftStatus = await microsoftIntegrationStatus(userId).catch(() => ({ connected: false }));
+        const microsoftStatus = await microsoftIntegrationStatus(supabase, userId).catch(() => ({ connected: false }));
         const emailConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY)));
         const calendarConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY)));
         const integrationsBlock = `\n\n# Connected integration status\n- OpenAI chat, voice, web search, web scrape, and document generation: CONNECTED.\n- Email sending: ${emailConfigured ? "CONNECTED" : "NOT CONNECTED yet. Do not promise to send email. You may draft the email body, but say the email account must be connected before sending."}\n- Calendar read/create: ${calendarConfigured ? "CONNECTED" : "NOT CONNECTED yet. Do not promise to read or create calendar events. You may draft event details, but say the calendar account must be connected first."}`;
@@ -663,7 +663,7 @@ export const Route = createFileRoute("/api/chat")({
               }),
               execute: async ({ to, subject, body: emailBody, cc }) => {
                 try {
-                  await sendOutlookMail(userId, { to, subject, body: emailBody, cc });
+                  await sendOutlookMail(supabase, userId, { to, subject, body: emailBody, cc });
                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "microsoft" });
                   return { ok: true, provider: "microsoft", to, subject };
                 } catch (error) {
@@ -814,7 +814,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 try {
                   return {
                     provider: "microsoft",
-                    events: await listMicrosoftCalendarEvents(userId, {
+                    events: await listMicrosoftCalendarEvents(supabase, userId, {
                       days,
                       maxResults: max_results,
                     }),
@@ -927,7 +927,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone }) => {
                 try {
-                  const event = await createMicrosoftCalendarEvent(userId, {
+                  const event = await createMicrosoftCalendarEvent(supabase, userId, {
                     title,
                     start,
                     end,

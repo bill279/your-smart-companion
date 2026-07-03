@@ -154,7 +154,7 @@ export const Route = createFileRoute("/api/realtime/session")({
           );
         }
 
-        const microsoftStatus = await microsoftIntegrationStatus(userData.user.id).catch(() => ({ connected: false }));
+        const microsoftStatus = await microsoftIntegrationStatus(supabase, userData.user.id).catch(() => ({ connected: false }));
         const emailConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY)));
         const calendarConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY)));
         const instructions = buildInstructions(costMode, maxSeconds, userEmail, {

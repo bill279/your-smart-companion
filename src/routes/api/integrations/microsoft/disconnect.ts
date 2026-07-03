@@ -22,7 +22,7 @@ export const Route = createFileRoute("/api/integrations/microsoft/disconnect")({
         const { data, error } = await supabase.auth.getUser();
         if (error || !data.user) return Response.json({ error: "unauthorized" }, { status: 401 });
         try {
-          await disconnectMicrosoftIntegration(data.user.id);
+          await disconnectMicrosoftIntegration(supabase, data.user.id);
           return Response.json({ ok: true });
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 500 });

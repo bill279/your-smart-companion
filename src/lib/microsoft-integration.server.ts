@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { z } from "zod";
 import { marked } from "marked";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { createClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
@@ -41,7 +42,8 @@ type IntegrationRow = {
   metadata: Record<string, unknown> | null;
 };
 
-const adminDb = supabaseAdmin as any;
+type UserSupabaseClient = ReturnType<typeof createClient<Database>>;
+const MICROSOFT_FACT_KEY = "microsoft_integration";
 
 function requiredEnv(name: string) {
   const value = process.env[name];
@@ -66,6 +68,37 @@ function sign(payload: string) {
     .createHmac("sha256", requiredEnv("OAUTH_STATE_SECRET"))
     .update(payload)
     .digest("base64url");
+}
+
+function encryptionKey() {
+  return crypto.createHash("sha256").update(requiredEnv("OAUTH_STATE_SECRET")).digest();
+}
+
+function encryptJson(value: unknown) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey(), iv);
+  const plaintext = Buffer.from(JSON.stringify(value), "utf8");
+  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1.${iv.toString("base64url")}.${tag.toString("base64url")}.${encrypted.toString("base64url")}`;
+}
+
+function decryptJson<T>(value: string): T {
+  const [version, ivText, tagText, encryptedText] = value.split(".");
+  if (version !== "v1" || !ivText || !tagText || !encryptedText) {
+    throw new Error("Invalid encrypted Microsoft integration payload");
+  }
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    encryptionKey(),
+    Buffer.from(ivText, "base64url"),
+  );
+  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(encryptedText, "base64url")),
+    decipher.final(),
+  ]);
+  return JSON.parse(decrypted.toString("utf8")) as T;
 }
 
 export function createMicrosoftOAuthState(userId: string) {
@@ -142,18 +175,25 @@ async function getMicrosoftMe(accessToken: string) {
   return MeResponse.parse(await response.json());
 }
 
-export async function getMicrosoftIntegration(userId: string) {
-  const { data, error } = await adminDb
-    .from("user_integrations")
-    .select("user_id,provider,provider_account_email,scopes,access_token,refresh_token,expires_at,metadata")
+export async function getMicrosoftIntegration(
+  supabase: UserSupabaseClient,
+  userId: string,
+) {
+  const { data, error } = await supabase
+    .from("user_facts")
+    .select("value")
     .eq("user_id", userId)
-    .eq("provider", "microsoft")
+    .eq("key", MICROSOFT_FACT_KEY)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return (data as unknown as IntegrationRow | null) ?? null;
+  if (!data?.value) return null;
+  return decryptJson<IntegrationRow>(data.value);
 }
 
-async function refreshMicrosoftAccessToken(row: IntegrationRow) {
+async function refreshMicrosoftAccessToken(
+  supabase: UserSupabaseClient,
+  row: IntegrationRow,
+) {
   if (!row.refresh_token) throw new Error("Microsoft refresh token missing. Reconnect Outlook.");
   const response = await fetch(tokenUrl(), {
     method: "POST",
@@ -170,66 +210,86 @@ async function refreshMicrosoftAccessToken(row: IntegrationRow) {
   if (!response.ok) throw new Error(`Microsoft token refresh failed (${response.status}): ${text.slice(0, 300)}`);
   const token = TokenResponse.parse(JSON.parse(text));
   const expiresAt = new Date(Date.now() + (token.expires_in ?? 3600) * 1000).toISOString();
-  const { data, error } = await adminDb
-    .from("user_integrations")
-    .update({
-      access_token: token.access_token,
-      refresh_token: token.refresh_token ?? row.refresh_token,
-      expires_at: expiresAt,
-      scopes: token.scope ? token.scope.split(" ") : row.scopes ?? [...MICROSOFT_SCOPES],
-    } as never)
-    .eq("user_id", row.user_id)
-    .eq("provider", "microsoft")
-    .select("user_id,provider,provider_account_email,scopes,access_token,refresh_token,expires_at,metadata")
-    .single();
-  if (error) throw new Error(error.message);
-  return data as unknown as IntegrationRow;
+  const updated: IntegrationRow = {
+    ...row,
+    access_token: token.access_token,
+    refresh_token: token.refresh_token ?? row.refresh_token,
+    expires_at: expiresAt,
+    scopes: token.scope ? token.scope.split(" ") : row.scopes ?? [...MICROSOFT_SCOPES],
+  };
+  await upsertMicrosoftFact(supabase, row.user_id, updated);
+  return updated;
 }
 
-export async function getFreshMicrosoftAccessToken(userId: string) {
-  const row = await getMicrosoftIntegration(userId);
+export async function getFreshMicrosoftAccessToken(
+  supabase: UserSupabaseClient,
+  userId: string,
+) {
+  const row = await getMicrosoftIntegration(supabase, userId);
   if (!row) throw new Error("Microsoft Outlook is not connected.");
   const expiresAt = row.expires_at ? new Date(row.expires_at).getTime() : 0;
   if (expiresAt && expiresAt > Date.now() + 60_000) return row.access_token;
-  const refreshed = await refreshMicrosoftAccessToken(row);
+  const refreshed = await refreshMicrosoftAccessToken(supabase, row);
   return refreshed.access_token;
 }
 
-export async function saveMicrosoftIntegration(userId: string, token: z.infer<typeof TokenResponse>) {
-  const me = await getMicrosoftMe(token.access_token);
-  const existing = await getMicrosoftIntegration(userId);
-  const expiresAt = new Date(Date.now() + (token.expires_in ?? 3600) * 1000).toISOString();
-  const { error } = await adminDb.from("user_integrations").upsert(
+async function upsertMicrosoftFact(
+  supabase: UserSupabaseClient,
+  userId: string,
+  integration: IntegrationRow,
+) {
+  const { error } = await supabase.from("user_facts").upsert(
     {
       user_id: userId,
-      provider: "microsoft",
-      provider_account_email: me?.mail ?? me?.userPrincipalName ?? existing?.provider_account_email ?? null,
-      scopes: token.scope ? token.scope.split(" ") : [...MICROSOFT_SCOPES],
-      access_token: token.access_token,
-      refresh_token: token.refresh_token ?? existing?.refresh_token ?? null,
-      expires_at: expiresAt,
-      metadata: {
-        graph_id: me?.id,
-        displayName: me?.displayName,
-      },
-      connected_at: new Date().toISOString(),
-    } as never,
-    { onConflict: "user_id,provider" },
+      key: MICROSOFT_FACT_KEY,
+      value: encryptJson(integration),
+      source: "microsoft_oauth",
+    },
+    { onConflict: "user_id,key" },
   );
   if (error) throw new Error(error.message);
 }
 
-export async function disconnectMicrosoftIntegration(userId: string) {
-  const { error } = await adminDb
-    .from("user_integrations")
+export async function saveMicrosoftIntegration(
+  supabase: UserSupabaseClient,
+  userId: string,
+  token: z.infer<typeof TokenResponse>,
+) {
+  const me = await getMicrosoftMe(token.access_token);
+  const existing = await getMicrosoftIntegration(supabase, userId);
+  const expiresAt = new Date(Date.now() + (token.expires_in ?? 3600) * 1000).toISOString();
+  await upsertMicrosoftFact(supabase, userId, {
+    user_id: userId,
+    provider: "microsoft",
+    provider_account_email: me?.mail ?? me?.userPrincipalName ?? existing?.provider_account_email ?? null,
+    scopes: token.scope ? token.scope.split(" ") : [...MICROSOFT_SCOPES],
+    access_token: token.access_token,
+    refresh_token: token.refresh_token ?? existing?.refresh_token ?? null,
+    expires_at: expiresAt,
+    metadata: {
+      graph_id: me?.id,
+      displayName: me?.displayName,
+    },
+  });
+}
+
+export async function disconnectMicrosoftIntegration(
+  supabase: UserSupabaseClient,
+  userId: string,
+) {
+  const { error } = await supabase
+    .from("user_facts")
     .delete()
     .eq("user_id", userId)
-    .eq("provider", "microsoft");
+    .eq("key", MICROSOFT_FACT_KEY);
   if (error) throw new Error(error.message);
 }
 
-export async function microsoftIntegrationStatus(userId: string) {
-  const row = await getMicrosoftIntegration(userId);
+export async function microsoftIntegrationStatus(
+  supabase: UserSupabaseClient,
+  userId: string,
+) {
+  const row = await getMicrosoftIntegration(supabase, userId);
   return {
     connected: Boolean(row),
     email: row?.provider_account_email ?? null,
@@ -252,10 +312,11 @@ th{background:#0b2545;color:#fff;font-weight:600;} tr:nth-child(even) td{backgro
 }
 
 export async function sendOutlookMail(
+  supabase: UserSupabaseClient,
   userId: string,
   message: { to: string; subject: string; body: string; cc?: string },
 ) {
-  const accessToken = await getFreshMicrosoftAccessToken(userId);
+  const accessToken = await getFreshMicrosoftAccessToken(supabase, userId);
   const response = await fetch(`${GRAPH_BASE}/me/sendMail`, {
     method: "POST",
     headers: {
@@ -278,10 +339,11 @@ export async function sendOutlookMail(
 }
 
 export async function listMicrosoftCalendarEvents(
+  supabase: UserSupabaseClient,
   userId: string,
   options: { days?: number; maxResults?: number },
 ) {
-  const accessToken = await getFreshMicrosoftAccessToken(userId);
+  const accessToken = await getFreshMicrosoftAccessToken(supabase, userId);
   const now = new Date();
   const end = new Date(now.getTime() + (options.days ?? 7) * 86400000);
   const params = new URLSearchParams({
@@ -319,6 +381,7 @@ export async function listMicrosoftCalendarEvents(
 }
 
 export async function createMicrosoftCalendarEvent(
+  supabase: UserSupabaseClient,
   userId: string,
   event: {
     title: string;
@@ -330,7 +393,7 @@ export async function createMicrosoftCalendarEvent(
     timezone?: string;
   },
 ) {
-  const accessToken = await getFreshMicrosoftAccessToken(userId);
+  const accessToken = await getFreshMicrosoftAccessToken(supabase, userId);
   const response = await fetch(`${GRAPH_BASE}/me/events`, {
     method: "POST",
     headers: {

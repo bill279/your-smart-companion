@@ -52,6 +52,47 @@ function SettingsPage() {
     if (query.data) setForm(query.data);
   }, [query.data]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("microsoft") !== "complete") return;
+    const code = params.get("microsoft_code");
+    const state = params.get("microsoft_state");
+    if (!code || !state) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) throw new Error("Sign in again");
+        const res = await fetch("/api/integrations/microsoft/complete", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ code, state }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || "Microsoft connection failed");
+        if (!cancelled) {
+          toast.success("Microsoft connected");
+          qc.invalidateQueries({ queryKey: ["microsoft-integration-status"] });
+          window.history.replaceState({}, "", "/settings?microsoft=connected");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error((error as Error).message);
+          window.history.replaceState({}, "", "/settings?microsoft=error");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [qc]);
+
   const save = useMutation({
     mutationFn: async (payload: AssistantSettings) => saveFn({ data: payload }),
     onSuccess: (row) => {

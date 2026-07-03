@@ -22,7 +22,7 @@ export const Route = createFileRoute("/api/integrations/microsoft/status")({
         const { data, error } = await supabase.auth.getUser();
         if (error || !data.user) return Response.json({ error: "unauthorized" }, { status: 401 });
         try {
-          return Response.json(await microsoftIntegrationStatus(data.user.id));
+          return Response.json(await microsoftIntegrationStatus(supabase, data.user.id));
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 500 });
         }

@@ -79,7 +79,11 @@ async function runWebScrape(args: Record<string, unknown>) {
   return scrapeWeb(p.data.url);
 }
 
-async function runSendEmail(userId: string, args: Record<string, unknown>) {
+async function runSendEmail(
+  supabase: ReturnType<typeof createClient<Database>>,
+  userId: string,
+  args: Record<string, unknown>,
+) {
   const p = z
     .object({
       to: z.string().email(),
@@ -91,7 +95,7 @@ async function runSendEmail(userId: string, args: Record<string, unknown>) {
   if (!p.success) return { error: "invalid arguments for send_email" };
 
   try {
-    await sendOutlookMail(userId, p.data);
+    await sendOutlookMail(supabase, userId, p.data);
     return { ok: true, provider: "microsoft", to: p.data.to, subject: p.data.subject };
   } catch (error) {
     if (!String((error as Error).message).includes("not connected")) {
@@ -225,7 +229,7 @@ export const Route = createFileRoute("/api/realtime/tool")({
             case "web_scrape":
               return jr(await runWebScrape(parsed.data.arguments));
             case "send_email":
-              return jr(await runSendEmail(userData.user.id, parsed.data.arguments));
+              return jr(await runSendEmail(supabase, userData.user.id, parsed.data.arguments));
             case "generate_document":
               return jr(await runGenerateDocument(supabase, userData.user.id, parsed.data.arguments));
             default:

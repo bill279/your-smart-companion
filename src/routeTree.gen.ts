@@ -25,6 +25,7 @@ import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authent
 import { Route as ApiIntegrationsMicrosoftStatusRouteImport } from './routes/api/integrations/microsoft/status'
 import { Route as ApiIntegrationsMicrosoftDisconnectRouteImport } from './routes/api/integrations/microsoft/disconnect'
 import { Route as ApiIntegrationsMicrosoftConnectRouteImport } from './routes/api/integrations/microsoft/connect'
+import { Route as ApiIntegrationsMicrosoftCompleteRouteImport } from './routes/api/integrations/microsoft/complete'
 import { Route as ApiIntegrationsMicrosoftCallbackRouteImport } from './routes/api/integrations/microsoft/callback'
 import { Route as ApiPublicJarvisToolsSend_outlookRouteImport } from './routes/api/public/jarvis/tools/send_outlook'
 import { Route as ApiPublicJarvisToolsSend_gmailRouteImport } from './routes/api/public/jarvis/tools/send_gmail'
@@ -115,6 +116,12 @@ const ApiIntegrationsMicrosoftConnectRoute =
     path: '/api/integrations/microsoft/connect',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiIntegrationsMicrosoftCompleteRoute =
+  ApiIntegrationsMicrosoftCompleteRouteImport.update({
+    id: '/api/integrations/microsoft/complete',
+    path: '/api/integrations/microsoft/complete',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiIntegrationsMicrosoftCallbackRoute =
   ApiIntegrationsMicrosoftCallbackRouteImport.update({
     id: '/api/integrations/microsoft/callback',
@@ -166,6 +173,7 @@ export interface FileRoutesByFullPath {
   '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/chat/': typeof AuthenticatedChatIndexRoute
   '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
+  '/api/integrations/microsoft/complete': typeof ApiIntegrationsMicrosoftCompleteRoute
   '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
   '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
   '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
@@ -189,6 +197,7 @@ export interface FileRoutesByTo {
   '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/chat': typeof AuthenticatedChatIndexRoute
   '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
+  '/api/integrations/microsoft/complete': typeof ApiIntegrationsMicrosoftCompleteRoute
   '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
   '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
   '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
@@ -214,6 +223,7 @@ export interface FileRoutesById {
   '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/_authenticated/chat/': typeof AuthenticatedChatIndexRoute
   '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
+  '/api/integrations/microsoft/complete': typeof ApiIntegrationsMicrosoftCompleteRoute
   '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
   '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
   '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
@@ -239,6 +249,7 @@ export interface FileRouteTypes {
     | '/api/realtime/tool'
     | '/chat/'
     | '/api/integrations/microsoft/callback'
+    | '/api/integrations/microsoft/complete'
     | '/api/integrations/microsoft/connect'
     | '/api/integrations/microsoft/disconnect'
     | '/api/integrations/microsoft/status'
@@ -262,6 +273,7 @@ export interface FileRouteTypes {
     | '/api/realtime/tool'
     | '/chat'
     | '/api/integrations/microsoft/callback'
+    | '/api/integrations/microsoft/complete'
     | '/api/integrations/microsoft/connect'
     | '/api/integrations/microsoft/disconnect'
     | '/api/integrations/microsoft/status'
@@ -286,6 +298,7 @@ export interface FileRouteTypes {
     | '/api/realtime/tool'
     | '/_authenticated/chat/'
     | '/api/integrations/microsoft/callback'
+    | '/api/integrations/microsoft/complete'
     | '/api/integrations/microsoft/connect'
     | '/api/integrations/microsoft/disconnect'
     | '/api/integrations/microsoft/status'
@@ -305,6 +318,7 @@ export interface RootRouteChildren {
   ApiRealtimeSessionRoute: typeof ApiRealtimeSessionRoute
   ApiRealtimeToolRoute: typeof ApiRealtimeToolRoute
   ApiIntegrationsMicrosoftCallbackRoute: typeof ApiIntegrationsMicrosoftCallbackRoute
+  ApiIntegrationsMicrosoftCompleteRoute: typeof ApiIntegrationsMicrosoftCompleteRoute
   ApiIntegrationsMicrosoftConnectRoute: typeof ApiIntegrationsMicrosoftConnectRoute
   ApiIntegrationsMicrosoftDisconnectRoute: typeof ApiIntegrationsMicrosoftDisconnectRoute
   ApiIntegrationsMicrosoftStatusRoute: typeof ApiIntegrationsMicrosoftStatusRoute
@@ -429,6 +443,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiIntegrationsMicrosoftConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/integrations/microsoft/complete': {
+      id: '/api/integrations/microsoft/complete'
+      path: '/api/integrations/microsoft/complete'
+      fullPath: '/api/integrations/microsoft/complete'
+      preLoaderRoute: typeof ApiIntegrationsMicrosoftCompleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/integrations/microsoft/callback': {
       id: '/api/integrations/microsoft/callback'
       path: '/api/integrations/microsoft/callback'
@@ -504,6 +525,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRealtimeSessionRoute: ApiRealtimeSessionRoute,
   ApiRealtimeToolRoute: ApiRealtimeToolRoute,
   ApiIntegrationsMicrosoftCallbackRoute: ApiIntegrationsMicrosoftCallbackRoute,
+  ApiIntegrationsMicrosoftCompleteRoute: ApiIntegrationsMicrosoftCompleteRoute,
   ApiIntegrationsMicrosoftConnectRoute: ApiIntegrationsMicrosoftConnectRoute,
   ApiIntegrationsMicrosoftDisconnectRoute:
     ApiIntegrationsMicrosoftDisconnectRoute,

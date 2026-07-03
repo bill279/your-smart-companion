@@ -1,9 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  exchangeMicrosoftCode,
-  saveMicrosoftIntegration,
-  verifyMicrosoftOAuthState,
-} from "@/lib/microsoft-integration.server";
 
 export const Route = createFileRoute("/api/integrations/microsoft/callback")({
   server: {
@@ -19,15 +14,12 @@ export const Route = createFileRoute("/api/integrations/microsoft/callback")({
         if (!code || !state) {
           return Response.redirect(new URL("/settings?microsoft=missing_code", request.url));
         }
-        try {
-          const { userId } = verifyMicrosoftOAuthState(state);
-          const token = await exchangeMicrosoftCode(request, code);
-          await saveMicrosoftIntegration(userId, token);
-          return Response.redirect(new URL("/settings?microsoft=connected", request.url));
-        } catch (err) {
-          const message = encodeURIComponent((err as Error).message.slice(0, 200));
-          return Response.redirect(new URL(`/settings?microsoft=error&message=${message}`, request.url));
-        }
+        const params = new URLSearchParams({
+          microsoft: "complete",
+          microsoft_code: code,
+          microsoft_state: state,
+        });
+        return Response.redirect(new URL(`/settings?${params}`, request.url));
       },
     },
   },
