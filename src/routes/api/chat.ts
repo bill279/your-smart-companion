@@ -6,6 +6,12 @@ import { detectDocumentIntent } from "@/lib/doc-intent";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createOpenAiProvider } from "@/lib/ai-gateway.server";
+import {
+  createMicrosoftCalendarEvent,
+  listMicrosoftCalendarEvents,
+  microsoftIntegrationStatus,
+  sendOutlookMail,
+} from "@/lib/microsoft-integration.server";
 import { scrapeWeb, searchWeb } from "@/lib/web-tools.server";
 
 const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
@@ -424,8 +430,9 @@ export const Route = createFileRoute("/api/chat")({
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
         const prefsBlock = `\n\n# User preferences\n- Cost mode: ${costMode} (respond accordingly — economy = shortest, premium = deepest analysis).\n- Approval-before-external-actions: ${requireApproval ? "REQUIRED" : "off"}${requireApproval ? " — always draft-and-confirm before send_email, create_calendar_event, or any irreversible action." : " — user has opted out of pre-approval, but still confirm anything destructive."}\n- Citations for web research: ${requireCitations ? "REQUIRED" : "optional"}${requireCitations ? " — cite every factual claim you got from web_search / web_scrape with a Markdown link." : ""}.`;
-        const emailConfigured = Boolean(process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY));
-        const calendarConfigured = Boolean(process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY));
+        const microsoftStatus = await microsoftIntegrationStatus(userId).catch(() => ({ connected: false }));
+        const emailConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY)));
+        const calendarConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY)));
         const integrationsBlock = `\n\n# Connected integration status\n- OpenAI chat, voice, web search, web scrape, and document generation: CONNECTED.\n- Email sending: ${emailConfigured ? "CONNECTED" : "NOT CONNECTED yet. Do not promise to send email. You may draft the email body, but say the email account must be connected before sending."}\n- Calendar read/create: ${calendarConfigured ? "CONNECTED" : "NOT CONNECTED yet. Do not promise to read or create calendar events. You may draft event details, but say the calendar account must be connected first."}`;
         const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${OUTPUT_HYGIENE}${SAFETY_GUARDRAILS}${userBlock}${prefsBlock}${integrationsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
         // Build messages: history as text, but replace the final user turn
@@ -655,6 +662,16 @@ export const Route = createFileRoute("/api/chat")({
                 cc: z.string().email().optional(),
               }),
               execute: async ({ to, subject, body: emailBody, cc }) => {
+                try {
+                  await sendOutlookMail(userId, { to, subject, body: emailBody, cc });
+                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "microsoft" });
+                  return { ok: true, provider: "microsoft", to, subject };
+                } catch (error) {
+                  if (!String((error as Error).message).includes("not connected")) {
+                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "microsoft", error: (error as Error).message }, "error");
+                    return { error: (error as Error).message };
+                  }
+                }
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const { marked } = await import("marked");
                 const renderHtml = (md: string) => {
@@ -794,6 +811,19 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 max_results: z.number().int().min(1).max(50).optional(),
               }),
               execute: async ({ days, max_results }) => {
+                try {
+                  return {
+                    provider: "microsoft",
+                    events: await listMicrosoftCalendarEvents(userId, {
+                      days,
+                      maxResults: max_results,
+                    }),
+                  };
+                } catch (error) {
+                  if (!String((error as Error).message).includes("not connected")) {
+                    return { error: (error as Error).message };
+                  }
+                }
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const now = new Date();
                 const end = new Date(now.getTime() + (days ?? 7) * 86400000);
@@ -896,6 +926,23 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 timezone: z.string().optional().describe("IANA timezone, e.g. America/New_York"),
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone }) => {
+                try {
+                  const event = await createMicrosoftCalendarEvent(userId, {
+                    title,
+                    start,
+                    end,
+                    description,
+                    location,
+                    attendees,
+                    timezone,
+                  });
+                  await logAction("create_calendar_event", `Created event "${title}" on Microsoft`, { title, start, end, attendees, location, provider: "microsoft" });
+                  return { ok: true, provider: "microsoft", id: event.id, link: event.webLink };
+                } catch (error) {
+                  if (!String((error as Error).message).includes("not connected")) {
+                    return { error: (error as Error).message };
+                  }
+                }
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
                   const r = await fetch(

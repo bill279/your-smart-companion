@@ -15,6 +15,7 @@ import {
   humanRealtimeError,
   extractRequestId,
 } from "@/lib/voice/realtime-errors";
+import { microsoftIntegrationStatus } from "@/lib/microsoft-integration.server";
 
 // Mints an ephemeral OpenAI Realtime client secret. The raw OPENAI_API_KEY
 // never leaves the server. The browser gets a short-lived client_secret it
@@ -153,8 +154,9 @@ export const Route = createFileRoute("/api/realtime/session")({
           );
         }
 
-        const emailConfigured = Boolean(process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY));
-        const calendarConfigured = Boolean(process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY));
+        const microsoftStatus = await microsoftIntegrationStatus(userData.user.id).catch(() => ({ connected: false }));
+        const emailConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY)));
+        const calendarConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY)));
         const instructions = buildInstructions(costMode, maxSeconds, userEmail, {
           emailConfigured,
           calendarConfigured,

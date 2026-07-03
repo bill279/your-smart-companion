@@ -2,8 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Save, Unplug } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import {
   getAssistantSettings,
   updateAssistantSettings,
@@ -33,6 +34,20 @@ function SettingsPage() {
   });
 
   const [form, setForm] = useState<AssistantSettings>(DEFAULT_ASSISTANT_SETTINGS);
+  const microsoftQ = useQuery({
+    queryKey: ["microsoft-integration-status"],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) throw new Error("Sign in again");
+      const res = await fetch("/api/integrations/microsoft/status", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load Microsoft status");
+      return json as { connected: boolean; email: string | null; scopes: string[] };
+    },
+  });
   useEffect(() => {
     if (query.data) setForm(query.data);
   }, [query.data]);
@@ -48,6 +63,32 @@ function SettingsPage() {
 
   const update = <K extends keyof AssistantSettings>(k: K, v: AssistantSettings[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  const connectMicrosoft = async () => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return toast.error("Sign in again");
+    const res = await fetch("/api/integrations/microsoft/connect", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json();
+    if (!res.ok) return toast.error(json.error || "Microsoft connect failed");
+    window.location.href = json.url;
+  };
+
+  const disconnectMicrosoft = async () => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return toast.error("Sign in again");
+    const res = await fetch("/api/integrations/microsoft/disconnect", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) return toast.error(json.error || "Disconnect failed");
+    toast.success("Microsoft disconnected");
+    qc.invalidateQueries({ queryKey: ["microsoft-integration-status"] });
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -169,6 +210,46 @@ function SettingsPage() {
             checked={form.require_citations}
             onChange={(v) => update("require_citations", v)}
           />
+        </Section>
+
+        <Section
+          title="Microsoft Outlook & Calendar"
+          description="Connect your Microsoft account once so BPA Bot can send approved emails and manage your Outlook calendar."
+        >
+          <div className="rounded-md border border-border bg-background p-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">
+                {microsoftQ.isLoading
+                  ? "Checking Microsoft connection…"
+                  : microsoftQ.data?.connected
+                    ? "Microsoft connected"
+                    : "Microsoft not connected"}
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                {microsoftQ.data?.connected
+                  ? `Connected as ${microsoftQ.data.email ?? "Microsoft account"}`
+                  : "Required for real Outlook email sending and calendar actions."}
+              </div>
+            </div>
+            {microsoftQ.data?.connected ? (
+              <button
+                type="button"
+                onClick={disconnectMicrosoft}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border text-sm hover:bg-secondary"
+              >
+                <Unplug size={14} />
+                Disconnect
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={connectMicrosoft}
+                className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90"
+              >
+                Connect Microsoft
+              </button>
+            )}
+          </div>
         </Section>
 
         <div className="flex justify-end gap-2 pt-2">

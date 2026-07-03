@@ -22,6 +22,10 @@ import { Route as ApiRealtimeToolRouteImport } from './routes/api/realtime/tool'
 import { Route as ApiRealtimeSessionRouteImport } from './routes/api/realtime/session'
 import { Route as ApiPublicWebSearchRouteImport } from './routes/api/public/web-search'
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
+import { Route as ApiIntegrationsMicrosoftStatusRouteImport } from './routes/api/integrations/microsoft/status'
+import { Route as ApiIntegrationsMicrosoftDisconnectRouteImport } from './routes/api/integrations/microsoft/disconnect'
+import { Route as ApiIntegrationsMicrosoftConnectRouteImport } from './routes/api/integrations/microsoft/connect'
+import { Route as ApiIntegrationsMicrosoftCallbackRouteImport } from './routes/api/integrations/microsoft/callback'
 import { Route as ApiPublicJarvisToolsSend_outlookRouteImport } from './routes/api/public/jarvis/tools/send_outlook'
 import { Route as ApiPublicJarvisToolsSend_gmailRouteImport } from './routes/api/public/jarvis/tools/send_gmail'
 import { Route as ApiPublicJarvisToolsSend_emailRouteImport } from './routes/api/public/jarvis/tools/send_email'
@@ -93,6 +97,30 @@ const AuthenticatedChatThreadIdRoute =
     path: '/chat/$threadId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiIntegrationsMicrosoftStatusRoute =
+  ApiIntegrationsMicrosoftStatusRouteImport.update({
+    id: '/api/integrations/microsoft/status',
+    path: '/api/integrations/microsoft/status',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiIntegrationsMicrosoftDisconnectRoute =
+  ApiIntegrationsMicrosoftDisconnectRouteImport.update({
+    id: '/api/integrations/microsoft/disconnect',
+    path: '/api/integrations/microsoft/disconnect',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiIntegrationsMicrosoftConnectRoute =
+  ApiIntegrationsMicrosoftConnectRouteImport.update({
+    id: '/api/integrations/microsoft/connect',
+    path: '/api/integrations/microsoft/connect',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiIntegrationsMicrosoftCallbackRoute =
+  ApiIntegrationsMicrosoftCallbackRouteImport.update({
+    id: '/api/integrations/microsoft/callback',
+    path: '/api/integrations/microsoft/callback',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicJarvisToolsSend_outlookRoute =
   ApiPublicJarvisToolsSend_outlookRouteImport.update({
     id: '/api/public/jarvis/tools/send_outlook',
@@ -137,6 +165,10 @@ export interface FileRoutesByFullPath {
   '/api/realtime/session': typeof ApiRealtimeSessionRoute
   '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/chat/': typeof AuthenticatedChatIndexRoute
+  '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
+  '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
+  '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
+  '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
@@ -156,6 +188,10 @@ export interface FileRoutesByTo {
   '/api/realtime/session': typeof ApiRealtimeSessionRoute
   '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/chat': typeof AuthenticatedChatIndexRoute
+  '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
+  '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
+  '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
+  '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
@@ -177,6 +213,10 @@ export interface FileRoutesById {
   '/api/realtime/session': typeof ApiRealtimeSessionRoute
   '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/_authenticated/chat/': typeof AuthenticatedChatIndexRoute
+  '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
+  '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
+  '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
+  '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
@@ -198,6 +238,10 @@ export interface FileRouteTypes {
     | '/api/realtime/session'
     | '/api/realtime/tool'
     | '/chat/'
+    | '/api/integrations/microsoft/callback'
+    | '/api/integrations/microsoft/connect'
+    | '/api/integrations/microsoft/disconnect'
+    | '/api/integrations/microsoft/status'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
@@ -217,6 +261,10 @@ export interface FileRouteTypes {
     | '/api/realtime/session'
     | '/api/realtime/tool'
     | '/chat'
+    | '/api/integrations/microsoft/callback'
+    | '/api/integrations/microsoft/connect'
+    | '/api/integrations/microsoft/disconnect'
+    | '/api/integrations/microsoft/status'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
@@ -237,6 +285,10 @@ export interface FileRouteTypes {
     | '/api/realtime/session'
     | '/api/realtime/tool'
     | '/_authenticated/chat/'
+    | '/api/integrations/microsoft/callback'
+    | '/api/integrations/microsoft/connect'
+    | '/api/integrations/microsoft/disconnect'
+    | '/api/integrations/microsoft/status'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
@@ -252,6 +304,10 @@ export interface RootRouteChildren {
   ApiPublicWebSearchRoute: typeof ApiPublicWebSearchRoute
   ApiRealtimeSessionRoute: typeof ApiRealtimeSessionRoute
   ApiRealtimeToolRoute: typeof ApiRealtimeToolRoute
+  ApiIntegrationsMicrosoftCallbackRoute: typeof ApiIntegrationsMicrosoftCallbackRoute
+  ApiIntegrationsMicrosoftConnectRoute: typeof ApiIntegrationsMicrosoftConnectRoute
+  ApiIntegrationsMicrosoftDisconnectRoute: typeof ApiIntegrationsMicrosoftDisconnectRoute
+  ApiIntegrationsMicrosoftStatusRoute: typeof ApiIntegrationsMicrosoftStatusRoute
   ApiPublicJarvisToolsRead_calendarRoute: typeof ApiPublicJarvisToolsRead_calendarRoute
   ApiPublicJarvisToolsSearch_webRoute: typeof ApiPublicJarvisToolsSearch_webRoute
   ApiPublicJarvisToolsSend_emailRoute: typeof ApiPublicJarvisToolsSend_emailRoute
@@ -352,6 +408,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatThreadIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/integrations/microsoft/status': {
+      id: '/api/integrations/microsoft/status'
+      path: '/api/integrations/microsoft/status'
+      fullPath: '/api/integrations/microsoft/status'
+      preLoaderRoute: typeof ApiIntegrationsMicrosoftStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/integrations/microsoft/disconnect': {
+      id: '/api/integrations/microsoft/disconnect'
+      path: '/api/integrations/microsoft/disconnect'
+      fullPath: '/api/integrations/microsoft/disconnect'
+      preLoaderRoute: typeof ApiIntegrationsMicrosoftDisconnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/integrations/microsoft/connect': {
+      id: '/api/integrations/microsoft/connect'
+      path: '/api/integrations/microsoft/connect'
+      fullPath: '/api/integrations/microsoft/connect'
+      preLoaderRoute: typeof ApiIntegrationsMicrosoftConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/integrations/microsoft/callback': {
+      id: '/api/integrations/microsoft/callback'
+      path: '/api/integrations/microsoft/callback'
+      fullPath: '/api/integrations/microsoft/callback'
+      preLoaderRoute: typeof ApiIntegrationsMicrosoftCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/jarvis/tools/send_outlook': {
       id: '/api/public/jarvis/tools/send_outlook'
       path: '/api/public/jarvis/tools/send_outlook'
@@ -419,6 +503,11 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicWebSearchRoute: ApiPublicWebSearchRoute,
   ApiRealtimeSessionRoute: ApiRealtimeSessionRoute,
   ApiRealtimeToolRoute: ApiRealtimeToolRoute,
+  ApiIntegrationsMicrosoftCallbackRoute: ApiIntegrationsMicrosoftCallbackRoute,
+  ApiIntegrationsMicrosoftConnectRoute: ApiIntegrationsMicrosoftConnectRoute,
+  ApiIntegrationsMicrosoftDisconnectRoute:
+    ApiIntegrationsMicrosoftDisconnectRoute,
+  ApiIntegrationsMicrosoftStatusRoute: ApiIntegrationsMicrosoftStatusRoute,
   ApiPublicJarvisToolsRead_calendarRoute:
     ApiPublicJarvisToolsRead_calendarRoute,
   ApiPublicJarvisToolsSearch_webRoute: ApiPublicJarvisToolsSearch_webRoute,

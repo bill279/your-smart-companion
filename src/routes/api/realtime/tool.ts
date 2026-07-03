@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { gatewayHeaders } from "@/lib/jarvis-tools.server";
+import { sendOutlookMail } from "@/lib/microsoft-integration.server";
 import { scrapeWeb, searchWeb } from "@/lib/web-tools.server";
 import { marked } from "marked";
 
@@ -78,7 +79,7 @@ async function runWebScrape(args: Record<string, unknown>) {
   return scrapeWeb(p.data.url);
 }
 
-async function runSendEmail(args: Record<string, unknown>) {
+async function runSendEmail(userId: string, args: Record<string, unknown>) {
   const p = z
     .object({
       to: z.string().email(),
@@ -88,6 +89,15 @@ async function runSendEmail(args: Record<string, unknown>) {
     })
     .safeParse(args);
   if (!p.success) return { error: "invalid arguments for send_email" };
+
+  try {
+    await sendOutlookMail(userId, p.data);
+    return { ok: true, provider: "microsoft", to: p.data.to, subject: p.data.subject };
+  } catch (error) {
+    if (!String((error as Error).message).includes("not connected")) {
+      return { error: (error as Error).message };
+    }
+  }
 
   if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
     const payload = {
@@ -215,7 +225,7 @@ export const Route = createFileRoute("/api/realtime/tool")({
             case "web_scrape":
               return jr(await runWebScrape(parsed.data.arguments));
             case "send_email":
-              return jr(await runSendEmail(parsed.data.arguments));
+              return jr(await runSendEmail(userData.user.id, parsed.data.arguments));
             case "generate_document":
               return jr(await runGenerateDocument(supabase, userData.user.id, parsed.data.arguments));
             default:
