@@ -104,6 +104,8 @@ function looksUnstableVoiceText(text: string) {
 
 function looksLikeVoiceVisualAnswerIntent(text: string) {
   const s = text.toLowerCase();
+  const asksForCurrentSimpleFact =
+    /\b(weather|temperature|forecast|rain|snow|wind|humidity|air quality|aqi|stock price|exchange rate|current time|time in|latest score|traffic)\b/.test(s);
   const asksForTable =
     /\b(table|comparison|compare|matrix|side[-\s]?by[-\s]?side|chart|spreadsheet|rows?|columns?|specs?|specifications?)\b/.test(s);
   const asksForResearch =
@@ -113,7 +115,7 @@ function looksLikeVoiceVisualAnswerIntent(text: string) {
     /\b(camera|cameras|sensor|sensors|machine|machines|robot|robots|plc|scada|vendor|vendors|supplier|suppliers|product|products|model|models|software|tool|tools|system|systems|equipment|component|components|part|parts)\b/.test(s);
   const asksForMeasuredCriteria =
     /\b(depth of field|resolution|price|cost|range|payload|accuracy|speed|rating|dimensions?|throughput|capacity)\b/.test(s);
-  return asksForTable || asksForProductResearch || (asksForResearch && asksForMeasuredCriteria);
+  return asksForCurrentSimpleFact || asksForTable || asksForProductResearch || (asksForResearch && asksForMeasuredCriteria);
 }
 
 function looksLikeVoiceVisualPlaceholder(text: string) {
@@ -623,7 +625,8 @@ function ThreadView({ threadId }: { threadId: string }) {
 	      /\b(?:i can|i will|i'll|would you like|need .*overview|cannot|can't|unable)\b/i.test(t) &&
 	      /\b(?:pdf|document|file|summary|report)\b/i.test(t);
 	    const runDeterministicVoiceVisualAnswer = async (text: string) => {
-	      setPendingAssistant("Building the table and source-backed details…");
+	      const currentInfo = /\b(weather|temperature|forecast|rain|snow|wind|humidity|air quality|aqi|stock price|exchange rate|current time|time in|latest score|traffic)\b/i.test(text);
+	      setPendingAssistant(currentInfo ? "Checking the latest info…" : "Building the table and source-backed details…");
 	      try {
 	        const { data: sess } = await supabase.auth.getSession();
 	        const token = sess.session?.access_token;
@@ -1893,7 +1896,7 @@ function Bubble({
               },
             }}
           >{displayContent}</ReactMarkdown>
-          {streaming && (
+          {streaming && displayContent.trim() && (
             <span className="inline-block w-1.5 h-4 align-[-2px] ml-0.5 bg-foreground/70 animate-pulse rounded-sm" />
           )}
         </div>
