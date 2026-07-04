@@ -350,6 +350,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     rawVoiceProvider === "none" ? "none" : "openai_realtime";
   const costMode = settingsQ.data?.cost_mode ?? "balanced";
   const openAiSessionRef = useRef<RealtimeSession | null>(null);
+  const startupPromptHandledRef = useRef(false);
   // Voice document-intent dedupe guards (survive re-renders across a session).
   const docInFlightRef = useRef(false);
   const lastDocumentIntentKeyRef = useRef<string>("");
@@ -847,6 +848,23 @@ function ThreadView({ threadId }: { threadId: string }) {
       setPendingAssistant("");
     },
   });
+
+  useEffect(() => {
+    if (startupPromptHandledRef.current || addMut.isPending) return;
+    const params = new URLSearchParams(window.location.search);
+    const prompt = params.get("prompt")?.trim();
+    if (!prompt) return;
+
+    startupPromptHandledRef.current = true;
+    params.delete("prompt");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`,
+    );
+    addMut.mutate({ content: prompt, files: [] });
+  }, [threadId]);
 
   function stopGenerating() {
     abortRef.current?.abort();

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { microsoftIntegrationStatus } from "@/lib/microsoft-integration.server";
 
 export const listThreads = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -24,6 +25,36 @@ export const createThread = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
     return row;
+  });
+
+export const getDashboard = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const [threads, actions, microsoft] = await Promise.all([
+      context.supabase
+        .from("threads")
+        .select("id,title,updated_at")
+        .order("updated_at", { ascending: false })
+        .limit(5),
+      context.supabase
+        .from("agent_actions")
+        .select("id,action,summary,status,created_at")
+        .order("created_at", { ascending: false })
+        .limit(6),
+      microsoftIntegrationStatus(context.supabase, context.userId).catch(() => ({
+        connected: false,
+        email: null,
+        scopes: [],
+        expires_at: null,
+      })),
+    ]);
+    if (threads.error) throw new Error(threads.error.message);
+    if (actions.error) throw new Error(actions.error.message);
+    return {
+      threads: threads.data ?? [],
+      actions: actions.data ?? [],
+      microsoft,
+    };
   });
 
 export const deleteThread = createServerFn({ method: "POST" })
