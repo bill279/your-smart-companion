@@ -4,6 +4,7 @@ const APP_SHELL = [
   "/icon-192.png",
   "/icon-512.png",
   "/apple-touch-icon.png",
+  "/favicon.ico",
   "/favicon-32.png",
 ];
 
