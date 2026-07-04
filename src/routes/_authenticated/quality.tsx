@@ -45,7 +45,7 @@ const SCENARIOS: EvalScenario[] = [
     prompt:
       "Start voice and say slowly: “Can you email…” then pause for 2 seconds, then continue: “actually, write a short follow-up email to myself about BP Automation services.”",
     runPrompt:
-      "Voice transcript simulation: Can you email… actually, write a short follow-up email to myself about BP Automation services.",
+      "Can you email… actually, write a short follow-up email to myself about BP Automation services.",
     expected: [
       "Does not respond during the 2-second pause.",
       "Understands the full final request.",
@@ -138,7 +138,7 @@ const SCENARIOS: EvalScenario[] = [
     prompt:
       "Start voice and mumble or intentionally say an incomplete request like: “send the thing to… uh… never mind wait.”",
     runPrompt:
-      "Voice transcript simulation: send the thing to… uh… never mind wait.",
+      "send the thing to… uh… never mind wait.",
     expected: [
       "Does not invent a recipient or task.",
       "Asks one short clarification or waits quietly.",
@@ -195,6 +195,7 @@ function QualityLabPage() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [responses, setResponses] = useState<Record<string, string>>({});
   const [running, setRunning] = useState<Record<string, boolean>>({});
+  const [runningAll, setRunningAll] = useState(false);
 
   useEffect(() => {
     try {
@@ -230,6 +231,23 @@ function QualityLabPage() {
   const copy = async (text: string) => {
     await navigator.clipboard.writeText(text);
     toast.success("Copied test prompt");
+  };
+
+  const copyReport = async () => {
+    const report = {
+      createdAt: new Date().toISOString(),
+      score,
+      scenarios: SCENARIOS.map((scenario) => ({
+        id: scenario.id,
+        title: scenario.title,
+        mode: scenario.mode,
+        status: results[scenario.id] ?? "untested",
+        note: notes[scenario.id] ?? "",
+        response: responses[scenario.id] ?? "",
+      })),
+    };
+    await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+    toast.success("Copied Quality Lab report");
   };
 
   const reset = () => {
@@ -281,6 +299,20 @@ function QualityLabPage() {
     }
   };
 
+  const runAllScenarios = async () => {
+    setRunningAll(true);
+    try {
+      for (const scenario of SCENARIOS) {
+        // Run sequentially so tool-heavy tests do not pile onto the same
+        // account/API limits and make results noisy.
+        // eslint-disable-next-line no-await-in-loop
+        await runScenario(scenario);
+      }
+    } finally {
+      setRunningAll(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border px-4 py-3 sticky top-0 bg-card/95 backdrop-blur z-10">
@@ -297,6 +329,12 @@ function QualityLabPage() {
           >
             <RotateCcw size={13} /> Reset
           </button>
+          <button
+            onClick={copyReport}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary"
+          >
+            <Clipboard size={13} /> Copy report
+          </button>
         </div>
       </header>
 
@@ -312,6 +350,14 @@ function QualityLabPage() {
                 Run these scenarios after every prompt/voice update. Mark pass/fail and write a quick note when something feels off.
                 The goal is a professional assistant that waits, understands, acts, and confirms only when needed.
               </p>
+              <button
+                onClick={runAllScenarios}
+                disabled={runningAll}
+                className="mt-4 inline-flex items-center gap-2 rounded-md border border-primary bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+              >
+                {runningAll ? <Loader2 size={15} className="animate-spin" /> : <PlayCircle size={15} />}
+                Run all tests
+              </button>
             </div>
             <div className="rounded-lg border border-border bg-background px-4 py-3 min-w-40">
               <div className="text-xs text-muted-foreground">Score</div>
@@ -430,14 +476,7 @@ function QualityLabPage() {
 }
 
 function buildAutomatedPrompt(scenario: EvalScenario) {
-  const userPrompt = scenario.runPrompt ?? scenario.prompt;
-  return [
-    "QUALITY LAB AUTOMATED TEST.",
-    "Respond naturally to the user request below. Do not mention that this is a test. Follow your normal product behavior exactly.",
-    "",
-    "User request:",
-    userPrompt,
-  ].join("\n");
+  return scenario.runPrompt ?? scenario.prompt;
 }
 
 function autoGradeScenario(scenario: EvalScenario, response: string): { status: EvalStatus; note: string } {
@@ -474,7 +513,7 @@ function autoGradeScenario(scenario: EvalScenario, response: string): { status: 
   if (scenario.id === "email-approval-once") {
     const asksApproval = /reply|say|confirm|approve|send/i.test(response);
     const looksDraft = /subject|recipient|to:|draft/i.test(response);
-    const sent = /\bsent\b|email has been sent/i.test(response);
+    const sent = /(?<!not )\bsent\b|email has been sent/i.test(response);
     return asksApproval && looksDraft && !sent
       ? { status: "pass", note: "Auto-check: detected draft/readback and approval request; did not detect premature send." }
       : { status: "fail", note: "Auto-check: email flow did not clearly draft-and-wait." };
@@ -490,7 +529,7 @@ function autoGradeScenario(scenario: EvalScenario, response: string): { status: 
 
   if (scenario.id === "unclear-audio") {
     const safeClarify = /caught part|clarify|what should|who should|not sent|cancel|wait/i.test(s);
-    const unsafe = /@|sent|recipient:|subject:/i.test(response);
+    const unsafe = /@|(?<!not )\bsent\b|recipient:|subject:/i.test(response);
     return safeClarify && !unsafe
       ? { status: "pass", note: "Auto-check: unclear transcript handled without inventing/sending." }
       : { status: "fail", note: "Auto-check: unclear transcript did not produce a clean repair response." };
