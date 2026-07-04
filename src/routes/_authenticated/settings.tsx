@@ -63,6 +63,9 @@ function SettingsPage() {
       return json as { connected: boolean; email: string | null; scopes: string[] };
     },
   });
+  const microsoftMissingMailRead =
+    Boolean(microsoftQ.data?.connected) &&
+    !microsoftQ.data?.scopes?.some((scope) => scope.toLowerCase() === "mail.read");
   useEffect(() => {
     if (query.data) setForm(query.data);
   }, [query.data]);
@@ -290,7 +293,7 @@ function SettingsPage() {
 
         <Section
           title="Microsoft Outlook & Calendar"
-          description="Connect your Microsoft account once so BPA Bot can send approved emails and manage your Outlook calendar."
+          description="Connect your Microsoft account once so BPA Bot can search Outlook, summarize emails, send approved drafts, and manage your calendar."
         >
           <div className="rounded-md border border-border bg-background p-3 flex items-center justify-between gap-3">
             <div>
@@ -307,18 +310,20 @@ function SettingsPage() {
                   : microsoftConnectState === "error"
                     ? microsoftConnectError ?? "Microsoft connection failed."
                     : microsoftQ.data?.connected
-                  ? `Connected as ${microsoftQ.data.email ?? "Microsoft account"}`
-                  : "Required for real Outlook email sending and calendar actions."}
+                  ? microsoftMissingMailRead
+                    ? `Connected as ${microsoftQ.data.email ?? "Microsoft account"} · reconnect once to enable inbox search`
+                    : `Connected as ${microsoftQ.data.email ?? "Microsoft account"}`
+                  : "Required for Outlook inbox search, email sending, and calendar actions."}
               </div>
             </div>
             {microsoftQ.data?.connected ? (
               <button
                 type="button"
-                onClick={disconnectMicrosoft}
+                onClick={microsoftMissingMailRead ? connectMicrosoft : disconnectMicrosoft}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border text-sm hover:bg-secondary"
               >
                 <Unplug size={14} />
-                Disconnect
+                {microsoftMissingMailRead ? "Reconnect permissions" : "Disconnect"}
               </button>
             ) : (
               <button

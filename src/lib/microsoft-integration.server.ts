@@ -12,6 +12,7 @@ export const MICROSOFT_SCOPES = [
   "profile",
   "offline_access",
   "User.Read",
+  "Mail.Read",
   "Mail.Send",
   "Calendars.ReadWrite",
 ] as const;
@@ -374,6 +375,145 @@ export async function sendOutlookMail(
   const text = await response.text();
   if (!response.ok) throw new Error(`Outlook send failed (${response.status}): ${text.slice(0, 300)}`);
   return { ok: true };
+}
+
+function stripHtml(html: string) {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function mapGraphMessage(message: {
+  id: string;
+  subject?: string | null;
+  from?: { emailAddress?: { name?: string | null; address?: string | null } } | null;
+  receivedDateTime?: string | null;
+  sentDateTime?: string | null;
+  bodyPreview?: string | null;
+  body?: { contentType?: string; content?: string | null } | null;
+  isRead?: boolean | null;
+  webLink?: string | null;
+  toRecipients?: Array<{ emailAddress?: { name?: string | null; address?: string | null } }>;
+  ccRecipients?: Array<{ emailAddress?: { name?: string | null; address?: string | null } }>;
+}) {
+  const bodyContent = message.body?.content ?? "";
+  return {
+    id: message.id,
+    subject: message.subject ?? "(no subject)",
+    from: {
+      name: message.from?.emailAddress?.name ?? null,
+      address: message.from?.emailAddress?.address ?? null,
+    },
+    receivedDateTime: message.receivedDateTime ?? null,
+    sentDateTime: message.sentDateTime ?? null,
+    bodyPreview: message.bodyPreview ?? null,
+    body:
+      message.body?.contentType?.toLowerCase() === "html"
+        ? stripHtml(bodyContent)
+        : bodyContent || null,
+    isRead: Boolean(message.isRead),
+    webLink: message.webLink ?? null,
+    to: (message.toRecipients ?? []).map((r) => ({
+      name: r.emailAddress?.name ?? null,
+      address: r.emailAddress?.address ?? null,
+    })),
+    cc: (message.ccRecipients ?? []).map((r) => ({
+      name: r.emailAddress?.name ?? null,
+      address: r.emailAddress?.address ?? null,
+    })),
+  };
+}
+
+export async function listMicrosoftMailMessages(
+  supabase: UserSupabaseClient,
+  userId: string,
+  options: {
+    query?: string;
+    from?: string;
+    unreadOnly?: boolean;
+    top?: number;
+  },
+) {
+  const accessToken = await getFreshMicrosoftAccessToken(supabase, userId);
+  const top = Math.min(Math.max(options.top ?? 10, 1), 50);
+  const select = "id,subject,from,receivedDateTime,bodyPreview,isRead,webLink";
+  const params = new URLSearchParams({
+    $top: String(top),
+    $select: select,
+  });
+
+  let url = `${GRAPH_BASE}/me/messages?${params}`;
+  const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}` };
+
+  if (options.query?.trim()) {
+    const search = options.query.trim().replace(/"/g, '\\"');
+    params.set("$search", `"${search}"`);
+    // Graph does not support $orderby with $search on messages. Search results
+    // are relevance-ranked; we sort the returned slice by received date below.
+    url = `${GRAPH_BASE}/me/messages?${params}`;
+    headers.ConsistencyLevel = "eventual";
+  } else {
+    const filters: string[] = [];
+    if (options.unreadOnly) filters.push("isRead eq false");
+    if (filters.length) params.set("$filter", filters.join(" and "));
+    params.set("$orderby", "receivedDateTime desc");
+    url = `${GRAPH_BASE}/me/messages?${params}`;
+  }
+
+  const response = await fetch(url, { headers });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Outlook mail search failed (${response.status}): ${text.slice(0, 300)}`);
+  const data = JSON.parse(text) as {
+    value?: Array<Parameters<typeof mapGraphMessage>[0]>;
+  };
+  let messages = (data.value ?? []).map(mapGraphMessage);
+  if (options.query?.trim() && options.unreadOnly) {
+    messages = messages.filter((m) => !m.isRead);
+  }
+  if (options.from?.trim()) {
+    const needle = options.from.trim().toLowerCase();
+    messages = messages.filter((m) => {
+      const name = m.from.name?.toLowerCase() ?? "";
+      const address = m.from.address?.toLowerCase() ?? "";
+      return name.includes(needle) || address.includes(needle);
+    });
+  }
+  messages.sort((a, b) => {
+    const at = a.receivedDateTime ? new Date(a.receivedDateTime).getTime() : 0;
+    const bt = b.receivedDateTime ? new Date(b.receivedDateTime).getTime() : 0;
+    return bt - at;
+  });
+  return messages.slice(0, top);
+}
+
+export async function getMicrosoftMailMessage(
+  supabase: UserSupabaseClient,
+  userId: string,
+  messageId: string,
+) {
+  const accessToken = await getFreshMicrosoftAccessToken(supabase, userId);
+  const params = new URLSearchParams({
+    $select: "id,subject,from,receivedDateTime,sentDateTime,bodyPreview,body,isRead,webLink,toRecipients,ccRecipients",
+  });
+  const response = await fetch(`${GRAPH_BASE}/me/messages/${encodeURIComponent(messageId)}?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Outlook mail read failed (${response.status}): ${text.slice(0, 300)}`);
+  return mapGraphMessage(JSON.parse(text) as Parameters<typeof mapGraphMessage>[0]);
 }
 
 export async function listMicrosoftCalendarEvents(

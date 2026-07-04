@@ -3,7 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { gatewayHeaders } from "@/lib/jarvis-tools.server";
-import { sendOutlookMail } from "@/lib/microsoft-integration.server";
+import {
+  getMicrosoftMailMessage,
+  listMicrosoftMailMessages,
+  sendOutlookMail,
+} from "@/lib/microsoft-integration.server";
 import { scrapeWeb, searchWeb } from "@/lib/web-tools.server";
 import { marked } from "marked";
 
@@ -77,6 +81,47 @@ async function runWebScrape(args: Record<string, unknown>) {
   const p = z.object({ url: z.string().url() }).safeParse(args);
   if (!p.success) return { error: "invalid arguments for web_scrape" };
   return scrapeWeb(p.data.url);
+}
+
+async function runSearchOutlookMail(
+  supabase: ReturnType<typeof createClient<Database>>,
+  userId: string,
+  args: Record<string, unknown>,
+) {
+  const p = z
+    .object({
+      query: z.string().max(300).optional(),
+      from: z.string().max(200).optional(),
+      unreadOnly: z.boolean().optional(),
+      top: z.number().int().min(1).max(50).optional(),
+    })
+    .safeParse(args);
+  if (!p.success) return { error: "invalid arguments for search_outlook_mail" };
+  try {
+    return {
+      provider: "microsoft",
+      messages: await listMicrosoftMailMessages(supabase, userId, p.data),
+    };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
+async function runReadOutlookEmail(
+  supabase: ReturnType<typeof createClient<Database>>,
+  userId: string,
+  args: Record<string, unknown>,
+) {
+  const p = z.object({ id: z.string().min(1) }).safeParse(args);
+  if (!p.success) return { error: "invalid arguments for read_outlook_email" };
+  try {
+    return {
+      provider: "microsoft",
+      message: await getMicrosoftMailMessage(supabase, userId, p.data.id),
+    };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
 }
 
 async function runSendEmail(
@@ -243,6 +288,10 @@ export const Route = createFileRoute("/api/realtime/tool")({
               return jr(await runWebSearch(parsed.data.arguments));
             case "web_scrape":
               return jr(await runWebScrape(parsed.data.arguments));
+            case "search_outlook_mail":
+              return jr(await runSearchOutlookMail(supabase, userData.user.id, parsed.data.arguments));
+            case "read_outlook_email":
+              return jr(await runReadOutlookEmail(supabase, userData.user.id, parsed.data.arguments));
             case "send_email":
               return jr(await runSendEmail(supabase, userData.user.id, parsed.data.arguments));
             case "generate_document":

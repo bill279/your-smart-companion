@@ -5,6 +5,8 @@
 export const REALTIME_TOOL_NAMES = [
   "web_search",
   "web_scrape",
+  "search_outlook_mail",
+  "read_outlook_email",
   "send_email",
   "generate_document",
 ] as const;
@@ -34,6 +36,35 @@ export const REALTIME_TOOLS = [
       type: "object",
       properties: { url: { type: "string", description: "The absolute URL to fetch" } },
       required: ["url"],
+    },
+  },
+  {
+    type: "function",
+    name: "search_outlook_mail",
+    description:
+      "Search or list the user's connected Outlook mailbox. Use for unread summaries, latest emails, sender searches, inbox triage, and finding emails to reply to. Returns ids, sender, subject, date, read status, preview, and Outlook link.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Optional keyword search across Outlook messages" },
+        from: { type: "string", description: "Optional sender name or email filter" },
+        unreadOnly: { type: "boolean", description: "Only return unread messages" },
+        top: { type: "integer", minimum: 1, maximum: 50 },
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "read_outlook_email",
+    description:
+      "Read the full body of one Outlook email by id. Use only after search_outlook_mail returns the id and the preview is insufficient.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Outlook message id returned by search_outlook_mail" },
+      },
+      required: ["id"],
     },
   },
   {
