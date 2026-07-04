@@ -250,6 +250,19 @@ export async function startOpenAiRealtimeSession(options: {
             type: "session.update",
             session: {
               type: "realtime",
+              audio: {
+                input: {
+                  turn_detection: {
+                    type: "server_vad",
+                    threshold: 0.58,
+                    prefix_padding_ms: 500,
+                    silence_duration_ms: 900,
+                    create_response: true,
+                    interrupt_response: true,
+                  },
+                  transcription: { model: "whisper-1" },
+                },
+              },
               tools,
               tool_choice: "auto",
               instructions: realtimeInstructions,
