@@ -286,7 +286,7 @@ function QualityLabPage() {
       setStatus(scenario.id, verdict.status);
       setNotes((n) => ({
         ...n,
-        [scenario.id]: [verdict.note, n[scenario.id]].filter(Boolean).join("\n\n"),
+        [scenario.id]: verdict.note,
       }));
       toast.success(verdict.status === "pass" ? "Auto-check passed" : "Auto-check flagged an issue");
     } catch (error) {
@@ -514,6 +514,10 @@ function autoGradeScenario(scenario: EvalScenario, response: string): { status: 
     const asksApproval = /reply|say|confirm|approve|send/i.test(response);
     const looksDraft = /subject|recipient|to:|draft/i.test(response);
     const sent = /(?<!not )\bsent\b|email has been sent/i.test(response);
+    const onlyRecipientConfirm = /^just to confirm\s*[—-]\s*send to/i.test(response.trim());
+    if (onlyRecipientConfirm) {
+      return { status: "fail", note: "Auto-check: assistant reconfirmed the signed-in user's own email instead of drafting." };
+    }
     return asksApproval && looksDraft && !sent
       ? { status: "pass", note: "Auto-check: detected draft/readback and approval request; did not detect premature send." }
       : { status: "fail", note: "Auto-check: email flow did not clearly draft-and-wait." };

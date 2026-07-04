@@ -72,6 +72,12 @@ You have tools:
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
 
+# Web citations (mandatory)
+- When you use web_search or web_scrape, include clickable Markdown links in the final answer.
+- Use URLs from results[].url, url, or source objects returned by the tool. Never list source names without URLs.
+- If a web tool returns an answer plus source URLs, cite the URLs directly as [Source name](https://...).
+- If no source URL is available, say "I found a result but it did not provide a source URL" instead of pretending you cited it.
+
 # Auto-memory (silent)
 Proactively call \`remember_fact\` — without being asked, without announcing it — whenever the user shares a stable, reusable fact about themselves, their work, or their preferences. Examples worth remembering:
 - Identity: name, role/title, company, team, location, timezone.
@@ -100,7 +106,7 @@ Rules:
 Never call \`send_email\` on the first request. Always confirm the recipient first, then draft, then wait for explicit approval.
 
 1. When the user asks to send an email, do NOT call the tool yet.
-2. **Confirm the recipient first.** Restate the exact email address you intend to use and ask the user to confirm before drafting (e.g. "Just to confirm — send to john@example.com?"). The only exception: when the user says "email me" / "send it to me" and you already know their address from the # Current user section, you may proceed without re-asking. Never guess or invent an address — if you don't have one, ask for it.
+2. **Confirm the recipient first.** Restate the exact email address you intend to use and ask the user to confirm before drafting (e.g. "Just to confirm — send to john@example.com?"). Hard exception: when the user says "email me" / "send it to me" / "send this to myself" and you already know their address from the # Current user section, DO NOT ask "Just to confirm" and DO NOT reconfirm their own email address. Proceed directly to the draft preview. Never guess or invent an address — if you don't have one, ask for it.
 3. After the recipient is confirmed, reply with a clearly formatted draft preview using this exact structure:
 
    **Draft email — please review**
@@ -430,7 +436,7 @@ export const Route = createFileRoute("/api/chat")({
             : "";
 
         const userBlock = userEmail
-          ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
+          ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", "send this to myself", or otherwise refer to themselves as the recipient, use exactly this address and proceed directly to a draft preview. Do NOT ask them to confirm their own email address. Never invent or guess any other email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
         const prefsBlock = `\n\n# User preferences\n- Cost mode: ${costMode} (respond accordingly — economy = shortest, premium = deepest analysis).\n- Approval-before-external-actions: ${requireApproval ? "REQUIRED" : "off"}${requireApproval ? " — always draft-and-confirm before send_email, create_calendar_event, or any irreversible action." : " — user has opted out of pre-approval, but still confirm anything destructive."}\n- Citations for web research: ${requireCitations ? "REQUIRED" : "optional"}${requireCitations ? " — cite every factual claim you got from web_search / web_scrape with a Markdown link." : ""}.`;
         const microsoftStatus = await microsoftIntegrationStatus(supabase, userId).catch(() => ({ connected: false }));
@@ -591,7 +597,7 @@ export const Route = createFileRoute("/api/chat")({
           tools: {
             web_search: tool({
               description:
-                "Search the live web. Returns a list of results with title, url, and snippet. Use for current events, facts, prices, anything time-sensitive.",
+                "Search the live web. Returns a provider, query, optional answer, and results[] with title, url, and snippet. Use for current events, facts, prices, anything time-sensitive. The final answer MUST cite result URLs as clickable Markdown links.",
               inputSchema: z.object({
                 query: z.string().describe("The search query"),
                 limit: z.number().int().min(1).max(10).optional(),

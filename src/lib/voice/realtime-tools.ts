@@ -16,7 +16,7 @@ export const REALTIME_TOOLS = [
     type: "function",
     name: "web_search",
     description:
-      "Search the live web for current information (news, prices, companies, people, products). Returns titles, urls, and snippets.",
+      "Search the live web for current information (news, prices, companies, people, products). Returns titles, urls, and snippets. Final answers must cite returned urls as clickable Markdown links.",
     parameters: {
       type: "object",
       properties: {
