@@ -5,7 +5,9 @@ import type { Database } from "@/integrations/supabase/types";
 import { gatewayHeaders } from "@/lib/jarvis-tools.server";
 import {
   getMicrosoftMailMessage,
+  getMicrosoftMorningBriefing,
   listMicrosoftMailMessages,
+  prepareMicrosoftReplyContext,
   sendOutlookMail,
 } from "@/lib/microsoft-integration.server";
 import { scrapeWeb, searchWeb } from "@/lib/web-tools.server";
@@ -101,6 +103,51 @@ async function runSearchOutlookMail(
     return {
       provider: "microsoft",
       messages: await listMicrosoftMailMessages(supabase, userId, p.data),
+    };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
+async function runGetOutlookBriefing(
+  supabase: ReturnType<typeof createClient<Database>>,
+  userId: string,
+  args: Record<string, unknown>,
+) {
+  const p = z
+    .object({
+      mailTop: z.number().int().min(5).max(30).optional(),
+      calendarDays: z.number().int().min(1).max(7).optional(),
+    })
+    .safeParse(args);
+  if (!p.success) return { error: "invalid arguments for get_outlook_briefing" };
+  try {
+    return {
+      provider: "microsoft",
+      briefing: await getMicrosoftMorningBriefing(supabase, userId, p.data),
+    };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
+async function runPrepareOutlookReply(
+  supabase: ReturnType<typeof createClient<Database>>,
+  userId: string,
+  args: Record<string, unknown>,
+) {
+  const p = z
+    .object({
+      id: z.string().min(1).optional(),
+      query: z.string().max(300).optional(),
+      from: z.string().max(200).optional(),
+    })
+    .safeParse(args);
+  if (!p.success) return { error: "invalid arguments for prepare_outlook_reply" };
+  try {
+    return {
+      provider: "microsoft",
+      reply: await prepareMicrosoftReplyContext(supabase, userId, p.data),
     };
   } catch (error) {
     return { error: (error as Error).message };
@@ -288,6 +335,10 @@ export const Route = createFileRoute("/api/realtime/tool")({
               return jr(await runWebSearch(parsed.data.arguments));
             case "web_scrape":
               return jr(await runWebScrape(parsed.data.arguments));
+            case "get_outlook_briefing":
+              return jr(await runGetOutlookBriefing(supabase, userData.user.id, parsed.data.arguments));
+            case "prepare_outlook_reply":
+              return jr(await runPrepareOutlookReply(supabase, userData.user.id, parsed.data.arguments));
             case "search_outlook_mail":
               return jr(await runSearchOutlookMail(supabase, userData.user.id, parsed.data.arguments));
             case "read_outlook_email":

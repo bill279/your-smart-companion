@@ -5,6 +5,8 @@
 export const REALTIME_TOOL_NAMES = [
   "web_search",
   "web_scrape",
+  "get_outlook_briefing",
+  "prepare_outlook_reply",
   "search_outlook_mail",
   "read_outlook_email",
   "send_email",
@@ -50,6 +52,35 @@ export const REALTIME_TOOLS = [
         from: { type: "string", description: "Optional sender name or email filter" },
         unreadOnly: { type: "boolean", description: "Only return unread messages" },
         top: { type: "integer", minimum: 1, maximum: 50 },
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "get_outlook_briefing",
+    description:
+      "Create a concise workday briefing from the user's connected Outlook mailbox and calendar: unread/actionable emails, emails that may need replies, upcoming events, and suggested priorities.",
+    parameters: {
+      type: "object",
+      properties: {
+        mailTop: { type: "integer", minimum: 5, maximum: 30 },
+        calendarDays: { type: "integer", minimum: 1, maximum: 7 },
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "prepare_outlook_reply",
+    description:
+      "Find/read an Outlook email and return context for drafting a reply. Use when the user asks to reply to the latest email from someone or draft a response from mailbox context. Does not send.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Specific Outlook message id if already known" },
+        query: { type: "string", description: "Optional keyword search if no id is known" },
+        from: { type: "string", description: "Optional sender name or email to find the latest matching email from" },
       },
       required: [],
     },

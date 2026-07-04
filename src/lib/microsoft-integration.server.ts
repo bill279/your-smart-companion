@@ -516,6 +516,77 @@ export async function getMicrosoftMailMessage(
   return mapGraphMessage(JSON.parse(text) as Parameters<typeof mapGraphMessage>[0]);
 }
 
+function looksActionableEmail(message: {
+  subject: string;
+  bodyPreview: string | null;
+  isRead: boolean;
+}) {
+  const text = `${message.subject} ${message.bodyPreview ?? ""}`.toLowerCase();
+  if (!message.isRead) return true;
+  return /\b(question|can you|could you|please|need|needed|review|approve|approval|confirm|follow up|following up|deadline|due|urgent|asap|proposal|quote|estimate|invoice|meeting|schedule|available|availability)\b/.test(text);
+}
+
+export async function getMicrosoftMorningBriefing(
+  supabase: UserSupabaseClient,
+  userId: string,
+  options: { mailTop?: number; calendarDays?: number } = {},
+) {
+  const mailTop = Math.min(Math.max(options.mailTop ?? 15, 5), 30);
+  const calendarDays = Math.min(Math.max(options.calendarDays ?? 2, 1), 7);
+  const [unread, recent, events] = await Promise.all([
+    listMicrosoftMailMessages(supabase, userId, { unreadOnly: true, top: mailTop }),
+    listMicrosoftMailMessages(supabase, userId, { top: mailTop }),
+    listMicrosoftCalendarEvents(supabase, userId, { days: calendarDays, maxResults: 15 }),
+  ]);
+  const byId = new Map<string, (typeof recent)[number]>();
+  for (const message of [...unread, ...recent]) byId.set(message.id, message);
+  const actionable = [...byId.values()]
+    .filter(looksActionableEmail)
+    .sort((a, b) => {
+      if (!a.isRead && b.isRead) return -1;
+      if (a.isRead && !b.isRead) return 1;
+      const at = a.receivedDateTime ? new Date(a.receivedDateTime).getTime() : 0;
+      const bt = b.receivedDateTime ? new Date(b.receivedDateTime).getTime() : 0;
+      return bt - at;
+    })
+    .slice(0, 10);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    unreadCountInSample: unread.length,
+    unread,
+    actionable,
+    upcomingEvents: events,
+  };
+}
+
+export async function prepareMicrosoftReplyContext(
+  supabase: UserSupabaseClient,
+  userId: string,
+  options: { query?: string; from?: string; id?: string },
+) {
+  let targetId = options.id;
+  if (!targetId) {
+    const candidates = await listMicrosoftMailMessages(supabase, userId, {
+      query: options.query,
+      from: options.from,
+      top: 5,
+    });
+    targetId = candidates[0]?.id;
+  }
+  if (!targetId) throw new Error("No matching Outlook email found.");
+  const message = await getMicrosoftMailMessage(supabase, userId, targetId);
+  const to = message.from.address;
+  if (!to) throw new Error("The selected email does not have a replyable sender address.");
+  return {
+    original: message,
+    draftTo: to,
+    draftSubject: /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`,
+    instructions:
+      "Draft a concise professional reply. Do not send it. Show the full draft preview and wait for explicit approval.",
+  };
+}
+
 export async function listMicrosoftCalendarEvents(
   supabase: UserSupabaseClient,
   userId: string,

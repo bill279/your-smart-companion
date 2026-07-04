@@ -16,6 +16,8 @@ describe("OpenAI Realtime tools registry", () => {
     const names = realtimeToolNames();
     expect(names).toContain("web_search");
     expect(names).toContain("web_scrape");
+    expect(names).toContain("get_outlook_briefing");
+    expect(names).toContain("prepare_outlook_reply");
     expect(names).toContain("send_email");
     expect(names).toContain("generate_document");
     // No stray tools slipping in.
