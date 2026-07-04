@@ -351,6 +351,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const costMode = settingsQ.data?.cost_mode ?? "balanced";
   const openAiSessionRef = useRef<RealtimeSession | null>(null);
   const startupPromptHandledRef = useRef(false);
+  const startupVoiceHandledRef = useRef(false);
   // Voice document-intent dedupe guards (survive re-renders across a session).
   const docInFlightRef = useRef(false);
   const lastDocumentIntentKeyRef = useRef<string>("");
@@ -865,6 +866,22 @@ function ThreadView({ threadId }: { threadId: string }) {
     );
     addMut.mutate({ content: prompt, files: [] });
   }, [threadId]);
+
+  useEffect(() => {
+    if (startupVoiceHandledRef.current || settingsQ.isLoading) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("voice") !== "1") return;
+
+    startupVoiceHandledRef.current = true;
+    params.delete("voice");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`,
+    );
+    void startVoice();
+  }, [threadId, settingsQ.isLoading]);
 
   function stopGenerating() {
     abortRef.current?.abort();

@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
   Activity,
   ArrowRight,
@@ -66,8 +66,7 @@ const QUICK_ACTIONS = [
     description: "Open a clean voice-ready conversation.",
     icon: Mic,
     accent: "from-emerald-500 to-teal-400",
-    prompt:
-      "Voice mode is ready. Keep responses concise and professional. Wait for my next instruction.",
+    voice: true,
   },
 ] as const;
 
@@ -75,6 +74,7 @@ function ChatDashboard() {
   const qc = useQueryClient();
   const dashboardFn = useServerFn(getDashboard);
   const create = useServerFn(createThread);
+  const shortcutHandledRef = useRef(false);
 
   const dashboard = useQuery({
     queryKey: ["dashboard"],
@@ -97,18 +97,66 @@ function ChatDashboard() {
   });
 
   const startTask = useMutation({
-    mutationFn: async ({ title, prompt }: { title: string; prompt?: string }) => {
+    mutationFn: async ({ title, prompt, voice }: { title: string; prompt?: string; voice?: boolean }) => {
       const thread = await create({ data: { title } });
-      return { thread, prompt };
+      return { thread, prompt, voice };
     },
-    onSuccess: ({ thread, prompt }) => {
+    onSuccess: ({ thread, prompt, voice }) => {
       qc.invalidateQueries({ queryKey: ["threads"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      const search = prompt ? `?prompt=${encodeURIComponent(prompt)}` : "";
+      const params = new URLSearchParams();
+      if (prompt) params.set("prompt", prompt);
+      if (voice) params.set("voice", "1");
+      const search = params.toString() ? `?${params.toString()}` : "";
       window.location.href = `/chat/${thread.id}${search}`;
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not start a new chat.");
+    },
+  });
+  useEffect(() => {
+    if (shortcutHandledRef.current || startTask.isPending) return;
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get("action");
+    if (!action) return;
+
+    shortcutHandledRef.current = true;
+    params.delete("action");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`,
+    );
+
+    if (action === "voice") {
+      startTask.mutate({ title: "Start voice", voice: true });
+      return;
+    }
+    if (action === "morning-briefing") {
+      const briefing = QUICK_ACTIONS.find((item) => item.title === "Morning briefing");
+      if (briefing && "prompt" in briefing) {
+        startTask.mutate({ title: briefing.title, prompt: briefing.prompt });
+      }
+    }
+  }, [startTask.isPending]);
+  const connectMicrosoft = useMutation({
+    mutationFn: async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) throw new Error("Sign in again");
+      const res = await fetch("/api/integrations/microsoft/connect", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok || !json.url) throw new Error(json.error || "Could not start Outlook connection.");
+      return json.url as string;
+    },
+    onSuccess: (url) => {
+      window.location.href = url;
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Could not connect Outlook.");
     },
   });
 
@@ -119,8 +167,8 @@ function ChatDashboard() {
   const threads = dashboard.data?.threads ?? [];
 
   return (
-    <main className="min-h-dvh bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.14),transparent_32rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.45))] text-foreground">
-      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
+    <main className="safe-area-page min-h-dvh bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.14),transparent_32rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.45))] text-foreground">
+      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-6 sm:py-5 lg:px-8">
         <header className="flex flex-col gap-4 rounded-3xl border border-border/70 bg-card/80 p-5 shadow-sm backdrop-blur md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
@@ -167,7 +215,20 @@ function ChatDashboard() {
                   ? "Connected, but mail permission may need refresh."
                   : "Not connected yet. Reconnect Outlook to use email and calendar tools."
             }
+            action={
+              outlookConnected && hasMail
+                ? undefined
+                : {
+                    label: connectMicrosoft.isPending ? "Opening Microsoft…" : "Reconnect Outlook",
+                    onClick: () => connectMicrosoft.mutate(),
+                    disabled: connectMicrosoft.isPending,
+                  }
+            }
           />
+        </section>
+
+        <section className="rounded-3xl border border-primary/15 bg-primary/5 p-4 text-sm leading-6 text-muted-foreground sm:hidden">
+          Tip: in Safari, tap <span className="font-semibold text-foreground">Share → Add to Home Screen</span> to use this like an iPhone app.
         </section>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -177,7 +238,7 @@ function ChatDashboard() {
               <button
                 key={action.title}
                 type="button"
-                onClick={() => startTask.mutate({ title: action.title, prompt: action.prompt })}
+                onClick={() => startTask.mutate({ title: action.title, prompt: "prompt" in action ? action.prompt : undefined, voice: "voice" in action ? action.voice : undefined })}
                 disabled={startTask.isPending}
                 className="group rounded-3xl border border-border/70 bg-card p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md disabled:opacity-60"
               >
@@ -275,7 +336,17 @@ function ChatDashboard() {
   );
 }
 
-function StatusCard({ connected, title, detail }: { connected: boolean; title: string; detail: string }) {
+function StatusCard({
+  connected,
+  title,
+  detail,
+  action,
+}: {
+  connected: boolean;
+  title: string;
+  detail: string;
+  action?: { label: string; onClick: () => void; disabled?: boolean };
+}) {
   return (
     <div className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm">
       <div className="flex items-start gap-4">
@@ -298,6 +369,16 @@ function StatusCard({ connected, title, detail }: { connected: boolean; title: s
             </span>
           </div>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">{detail}</p>
+          {action && (
+            <button
+              type="button"
+              onClick={action.onClick}
+              disabled={action.disabled}
+              className="mt-3 inline-flex items-center rounded-full bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            >
+              {action.label}
+            </button>
+          )}
         </div>
       </div>
     </div>
