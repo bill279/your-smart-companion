@@ -38,6 +38,7 @@ VOICE OUTPUT CONTRACT:
 - If you are unsure, ask one concise clarifying question. Do not improvise details.
 - For tables, comparisons, email drafts, documents, code, lists, or anything long: keep the spoken response brief, but never claim the chat has details unless the details are actually rendered in chat.
 - Do not read long tables, long drafts, or long research results out loud.
+- For product/vendor research, source links, specs, or comparisons: the real answer must be visible in chat with links/table/details. Do not give only a vague spoken summary.
 - If the user interrupts, stop immediately and listen.
 
 Format answers for this chat UI. If the user asks for a table, visual table, comparison, schedule, specs, rows/columns, or tabular data, output a GitHub-Flavored Markdown table using pipes, for example:
@@ -107,9 +108,12 @@ function looksLikeVoiceVisualAnswerIntent(text: string) {
     /\b(table|comparison|compare|matrix|side[-\s]?by[-\s]?side|chart|spreadsheet|rows?|columns?|specs?|specifications?)\b/.test(s);
   const asksForResearch =
     /\b(best|top|find|research|look up|source|sources|links?|cite|citations?|options?|vendors?|products?|models?)\b/.test(s);
+  const asksForProductResearch =
+    asksForResearch &&
+    /\b(camera|cameras|sensor|sensors|machine|machines|robot|robots|plc|scada|vendor|vendors|supplier|suppliers|product|products|model|models|software|tool|tools|system|systems|equipment|component|components|part|parts)\b/.test(s);
   const asksForMeasuredCriteria =
     /\b(depth of field|resolution|price|cost|range|payload|accuracy|speed|rating|dimensions?|throughput|capacity)\b/.test(s);
-  return asksForTable || (asksForResearch && asksForMeasuredCriteria);
+  return asksForTable || asksForProductResearch || (asksForResearch && asksForMeasuredCriteria);
 }
 
 function looksLikeVoiceVisualPlaceholder(text: string) {
@@ -533,6 +537,8 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- DO NOT ANSWER FRAGMENTS: if the transcript sounds partial, noisy, background speech, canceled mid-thought, or like the user is still thinking, wait. Ignore isolated words, breathing, false starts, and short fragments unless they are clear commands like 'stop' or 'cancel'. Do not invent meaning from weak audio. If genuinely unclear, ask one short repair question. If they say wait/cancel/never mind, say 'Okay — I’ll wait.'",
       "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content. If uncertain, ask one concise question.",
       "- VISUAL CONTENT: for tables, comparisons, links, email drafts, documents, code, or long lists, keep speech short. Never claim a table, links, or details are on screen unless the chat message actually contains them. Do not read long content out loud.",
+      "- RESEARCH/VISUAL DELEGATION: if the user asks to find the best/top products, compare vendors, provide specs, include links/sources, or build a table, the real answer belongs in chat with clickable links and/or a Markdown table. A spoken-only summary is not enough. If the chat answer is being built, say at most: 'I’ll put the researched answer in the chat.'",
+      "- SOURCE DISCIPLINE: for current product/vendor/research answers, include source links in chat. If a spec is not published or not verified, say 'Not published' or 'Needs verification' instead of inventing it.",
       "- DOCUMENT GENERATION: you CAN create downloadable PDF, DOCX, Markdown, XLSX, CSV, and TXT files. For requests like 'create a PDF from that summary', 'export this', 'make a Word doc', or 'download this report', call generate_document immediately. Never say you cannot create files, PDFs, attachments, or downloads.",
       "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
       "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
