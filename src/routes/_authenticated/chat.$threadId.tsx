@@ -1164,6 +1164,14 @@ function ThreadView({ threadId }: { threadId: string }) {
     voiceUiState === "starting";
   const voiceConnecting = voiceUiState === "starting";
   const voiceReconnecting = voiceUiState === "reconnecting";
+  const hasVisibleConversation =
+    messages.length > 0 ||
+    Boolean(pendingUser) ||
+    pendingAssistant.trim().length > 0 ||
+    pendingUserVoice.trim().length > 0 ||
+    voiceActive ||
+    messagesQ.isLoading ||
+    messagesQ.isFetching;
 
   return (
     <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
@@ -1416,7 +1424,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         {/* Messages */}
         <div ref={scrollRef} className="chat-mobile-scroll relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pb-6">
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 space-y-6">
-            {messages.length === 0 && !pendingUser && !pendingAssistant && (
+            {!hasVisibleConversation && (
               <div className="pt-16 md:pt-24 flex flex-col items-center text-center">
                 <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
                   BP
@@ -1457,6 +1465,14 @@ function ThreadView({ threadId }: { threadId: string }) {
                 />
               );
             })}
+            {voiceActive && messages.length === 0 && !pendingUser && !pendingUserVoice.trim() && !pendingAssistant.trim() && (
+              <div className="pt-16 flex flex-col items-center text-center">
+                <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
+                  BP
+                </div>
+                <p className="text-sm text-muted-foreground">Voice is live — listening…</p>
+              </div>
+            )}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
             {pendingUserVoice.trim() && (
               <Bubble role="user" content={pendingUserVoice + " …"} streaming />
@@ -1497,7 +1513,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         {/* Composer */}
-        {(messages.length > 0 || pendingUser || pendingAssistant) && (
+        {hasVisibleConversation && (
           <button
             type="button"
             onClick={scrollToLatest}
