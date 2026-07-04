@@ -255,6 +255,12 @@ const SAFETY_GUARDRAILS = `
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
+function isHighReasoningRequest(text: string, opts?: { voiceVisualIntent?: boolean; voiceDocIntent?: boolean }) {
+  const s = text.toLowerCase();
+  if (opts?.voiceVisualIntent || opts?.voiceDocIntent) return true;
+  return /\b(compare|comparison|table|matrix|research|look up|find the best|best .* for|top .* for|evaluate|analy[sz]e|recommend|recommendation|strategy|proposal|report|pdf|document|spreadsheet|cite|sources?|links?|specs?|specifications?|requirements?|technical|vendor|product)\b/.test(s);
+}
+
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
@@ -435,12 +441,6 @@ export const Route = createFileRoute("/api/chat")({
           | "premium";
         const requireApproval = settingsRow?.require_approval ?? true;
         const requireCitations = settingsRow?.require_citations ?? true;
-        const modelId =
-          costMode === "economy"
-            ? "gpt-5-nano"
-            : costMode === "premium"
-              ? "gpt-5"
-              : "gpt-5-mini";
 
         // Helper: log an agent action (best-effort, never throws)
         const logAction = async (
@@ -476,6 +476,19 @@ export const Route = createFileRoute("/api/chat")({
           return new Response("Bad request", { status: 400 });
         }
         const userText = body.content?.trim() ?? "";
+        const highReasoning = isHighReasoningRequest(userText, {
+          voiceVisualIntent: body.voiceVisualIntent,
+          voiceDocIntent: body.voiceDocIntent,
+        });
+        const modelId =
+          costMode === "economy"
+            ? highReasoning
+              ? "gpt-5-mini"
+              : "gpt-5-nano"
+            : costMode === "premium" || highReasoning
+              ? "gpt-5"
+              : "gpt-5-mini";
+        const reasoningEffort = highReasoning ? "medium" : "minimal";
 
         // Save user message (with attachments metadata). Skip when regenerating —
         // we re-use the existing last user turn and just produce a new assistant reply.
@@ -804,7 +817,7 @@ Do not say it was sent. Do not call or mention tools.`,
                 ...baseMessages.slice(0, -1),
                 { role: "user", content: composePrompt },
               ],
-              providerOptions: { openai: { reasoningEffort: "minimal" } },
+              providerOptions: { openai: { reasoningEffort } },
             });
             const bodyMd = composed.text.trim() || `# ${docIntent.title}\n\n(No content generated.)`;
 
@@ -908,7 +921,7 @@ Do not say it was sent. Do not call or mention tools.`,
           stopWhen: stepCountIs(12),
           providerOptions: {
             openai: {
-              reasoningEffort: "minimal",
+              reasoningEffort,
             },
           },
           onError: ({ error }) => {

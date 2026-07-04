@@ -131,6 +131,26 @@ const SCENARIOS: EvalScenario[] = [
     ],
   },
   {
+    id: "visual-answer-contract",
+    mode: "both",
+    title: "Tables and links actually render",
+    goal: "Prevent phantom UI claims like 'links/table are on screen' when the chat does not contain them.",
+    prompt:
+      "Find the best stereoscopic cameras for underground drilling/mining, then build a comparison table based on depth of field and resolution with source links.",
+    runPrompt:
+      "Find the best stereoscopic cameras for underground drilling/mining, then build a comparison table based on depth of field and resolution with source links.",
+    expected: [
+      "Includes an actual Markdown table.",
+      "Includes clickable source links.",
+      "Uses 'Not published' or 'Needs verification' for specs it cannot verify.",
+    ],
+    failureSigns: [
+      "Says links/details/table are on screen but does not include them.",
+      "Invents exact specs without sources.",
+      "Only gives a vague spoken summary.",
+    ],
+  },
+  {
     id: "unclear-audio",
     mode: "voice",
     title: "Unclear audio repair is professional",
@@ -555,6 +575,15 @@ function autoGradeScenario(scenario: EvalScenario, response: string): { status: 
     return hasSource
       ? { status: "pass", note: "Auto-check: detected source links for current web-research answer." }
       : { status: "fail", note: "Auto-check: did not detect source links for current web-research answer." };
+  }
+
+  if (scenario.id === "visual-answer-contract") {
+    const hasTable = /\|.+\|[\r\n]+\|[\s:-]+\|/m.test(response);
+    const hasLink = /\[[^\]]+\]\(https?:\/\//.test(response);
+    const phantom = /\b(on screen|links? to each|source links?|details are listed|you['’]ll see)\b/i.test(response) && (!hasTable || !hasLink);
+    return hasTable && hasLink && !phantom
+      ? { status: "pass", note: "Auto-check: detected actual table and clickable links." }
+      : { status: "fail", note: "Auto-check: response did not include both a rendered table and clickable links." };
   }
 
   if (scenario.id === "voice-no-fragments") {

@@ -27,13 +27,11 @@ export function buildRealtimeSessionPayload({
       audio: {
         input: {
           turn_detection: {
-            type: "server_vad" as const,
-            // Wait a little longer before deciding the user is done. The
-            // default VAD can jump in while the user is pausing mid-thought,
-            // which makes the assistant feel random or unprofessional.
-            threshold: 0.65,
-            prefix_padding_ms: 450,
-            silence_duration_ms: 1200,
+            // Semantic VAD is closer to ChatGPT-style voice behavior: it
+            // waits through "umm..." / mid-thought pauses and is less likely
+            // to cut the user off than raw silence thresholds.
+            type: "semantic_vad" as const,
+            eagerness: "low" as const,
             create_response: true,
             interrupt_response: true,
           },
