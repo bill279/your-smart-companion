@@ -390,6 +390,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const visualInFlightRef = useRef(false);
   const lastVisualIntentKeyRef = useRef("");
   const lastVisualIntentCompletedAtRef = useRef(0);
+  const suppressRealtimeAssistantUntilRef = useRef(0);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -624,6 +625,41 @@ function ThreadView({ threadId }: { threadId: string }) {
 	    const isDocumentLimboReply = (t: string) =>
 	      /\b(?:i can|i will|i'll|would you like|need .*overview|cannot|can't|unable)\b/i.test(t) &&
 	      /\b(?:pdf|document|file|summary|report)\b/i.test(t);
+	    const buildSpokenBrief = (markdown: string) => {
+	      const cleaned = cleanAssistantText(markdown)
+	        .replace(/```bpa-artifact[\s\S]*?```/gi, " ")
+	        .replace(/```[\s\S]*?```/g, " ")
+	        .split(/\r?\n/)
+	        .filter((line) => {
+	          const t = line.trim();
+	          if (!t) return false;
+	          if (/^\|/.test(t)) return false;
+	          if (/^[-:|\s]+$/.test(t)) return false;
+	          if (/^#{1,6}\s/.test(t)) return false;
+	          return true;
+	        })
+	        .join(" ")
+	        .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+	        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+	        .replace(/[*_`>#~-]+/g, " ")
+	        .replace(/\s+/g, " ")
+	        .trim();
+	      if (!cleaned) return "";
+	      const firstSentence = cleaned.match(/^.{20,220}?[.!?](?:\s|$)/)?.[0]?.trim();
+	      return (firstSentence || cleaned.slice(0, 180).trim()).replace(/\s+[,;:]?$/, "");
+	    };
+	    const speakChatResultBriefly = (markdown: string) => {
+	      const brief = buildSpokenBrief(markdown);
+	      if (!brief || !openAiSessionRef.current) return;
+	      suppressRealtimeAssistantUntilRef.current = Date.now() + 12_000;
+	      openAiSessionRef.current.sendEvent({
+	        type: "response.create",
+	        response: {
+	          instructions:
+	            `Say this result out loud in one short, natural sentence and do not call tools: ${brief}`,
+	        },
+	      });
+	    };
 	    const runDeterministicVoiceVisualAnswer = async (text: string) => {
 	      const currentInfo = /\b(weather|temperature|forecast|rain|snow|wind|humidity|air quality|aqi|stock price|exchange rate|current time|time in|latest score|traffic)\b/i.test(text);
 	      setPendingAssistant(currentInfo ? "Checking the latest info…" : "Building the table and source-backed details…");
@@ -656,6 +692,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 	          acc += decoder.decode(value, { stream: true });
 	          setPendingAssistant(cleanAssistantText(acc));
 	        }
+	        speakChatResultBriefly(acc);
 	        lastVisualIntentCompletedAtRef.current = Date.now();
 	      } catch (err) {
 	        toast.error(err instanceof Error ? err.message : "Visual answer failed.");
@@ -790,7 +827,8 @@ function ThreadView({ threadId }: { threadId: string }) {
       session.onTranscript((role, text, done) => {
 	        if (role === "assistant") {
 	          assistantBuf = text;
-	          if (!docInFlightRef.current && !visualInFlightRef.current && !looksLikeVoiceVisualPlaceholder(text)) {
+	          const suppressAssistantTranscript = Date.now() < suppressRealtimeAssistantUntilRef.current;
+	          if (!suppressAssistantTranscript && !docInFlightRef.current && !visualInFlightRef.current && !looksLikeVoiceVisualPlaceholder(text)) {
 	            setPendingAssistant(text);
 	          }
 	          if (done && text.trim()) {
@@ -799,6 +837,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 	            if (
 	              docInFlightRef.current ||
 	              visualInFlightRef.current ||
+	              suppressAssistantTranscript ||
 	              looksLikeVoiceVisualPlaceholder(text) ||
 	              (recentlyHandledDoc && isDocumentLimboReply(text))
 	            ) {
