@@ -7,7 +7,6 @@ import remarkGfm from "remark-gfm";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Settings as SettingsIcon, FlaskConical } from "lucide-react";
 import { exportToPdf, exportToDocx, exportToXlsx, exportToCsv } from "@/lib/chat-export";
 import { toast } from "sonner";
-import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
   addMessage,
   createThread,
@@ -28,6 +27,8 @@ import {
 } from "@/lib/voice/openai-realtime";
 import { looksLikeDocumentIntent } from "@/lib/doc-intent";
 import { filterOutTransientVoiceErrors } from "@/lib/voice/transient-errors";
+
+const BPA_LOGO_SRC = "/icon-512.png";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
@@ -954,7 +955,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         <div className="p-5 border-b border-border">
           <div className="flex items-start justify-between">
             <div>
-              <img src={bpaLogo.url} alt="BP Automation" className="h-8 w-auto mb-2" />
+              <img src={BPA_LOGO_SRC} alt="BP Automation" className="h-8 w-auto mb-2" />
               <div className="text-base font-semibold text-foreground">BPA Bot</div>
               <div className="text-[11px] text-muted-foreground mt-0.5">
                 BP Automation assistant

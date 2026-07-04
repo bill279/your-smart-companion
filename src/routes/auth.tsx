@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { toast } from "sonner";
-import bpaLogo from "@/assets/bpa-logo.png.asset.json";
+
+const BPA_LOGO_SRC = "/icon-512.png";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -71,7 +72,7 @@ function AuthPage() {
       <div className="hud-panel hud-corner w-full max-w-md p-8 rounded-lg">
         <div className="text-center mb-8">
           <img
-            src={bpaLogo.url}
+            src={BPA_LOGO_SRC}
             alt="BP Automation logo"
             className="mx-auto mb-4 h-16 w-auto"
           />
