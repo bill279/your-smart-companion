@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { createThread, getDashboard } from "@/lib/jarvis.functions";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/chat/")({
   ssr: false,
@@ -79,6 +80,21 @@ function ChatDashboard() {
     queryKey: ["dashboard"],
     queryFn: () => dashboardFn({}),
   });
+  const microsoftQ = useQuery({
+    queryKey: ["microsoft-integration-status"],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) throw new Error("Sign in again");
+      const res = await fetch("/api/integrations/microsoft/status", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load Microsoft status");
+      return json as { connected: boolean; email: string | null; scopes: string[] };
+    },
+    retry: 1,
+  });
 
   const startTask = useMutation({
     mutationFn: async ({ title, prompt }: { title: string; prompt?: string }) => {
@@ -96,9 +112,9 @@ function ChatDashboard() {
     },
   });
 
-  const microsoft = dashboard.data?.microsoft;
+  const microsoft = microsoftQ.data;
   const outlookConnected = !!microsoft?.connected;
-  const hasMail = microsoft?.scopes?.some((s) => /mail\./i.test(s)) ?? false;
+  const hasMail = microsoft?.scopes?.some((scope) => scope.toLowerCase() === "mail.read") ?? false;
   const actions = dashboard.data?.actions ?? [];
   const threads = dashboard.data?.threads ?? [];
 
