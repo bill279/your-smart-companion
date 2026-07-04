@@ -254,9 +254,9 @@ export async function startOpenAiRealtimeSession(options: {
                 input: {
                   turn_detection: {
                     type: "server_vad",
-                    threshold: 0.58,
-                    prefix_padding_ms: 500,
-                    silence_duration_ms: 900,
+                    threshold: 0.65,
+                    prefix_padding_ms: 450,
+                    silence_duration_ms: 1200,
                     create_response: true,
                     interrupt_response: true,
                   },

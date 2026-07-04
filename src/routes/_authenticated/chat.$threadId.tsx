@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Settings as SettingsIcon, FlaskConical } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Settings as SettingsIcon, FlaskConical, LayoutDashboard } from "lucide-react";
 import { exportToPdf, exportToDocx, exportToXlsx, exportToCsv } from "@/lib/chat-export";
 import { toast } from "sonner";
 import {
@@ -507,7 +507,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
       "- BE CONCISE: keep spoken replies to 1-2 short sentences and under 25 words by default. Avoid long monologues so the user can interject naturally.",
       "- PROFESSIONAL INTELLIGENCE: behave like a competent chief-of-staff assistant. Lead with the useful answer/action, not filler. Avoid 'sure thing', 'absolutely', rambling, jokes, apologies loops, and casual throwaway phrases.",
-      "- DO NOT ANSWER FRAGMENTS: if the transcript sounds partial, noisy, canceled mid-thought, or like the user is still thinking, wait. Do not invent meaning from weak audio. If genuinely unclear, ask one short repair question. If they say wait/cancel/never mind, say 'Okay — I’ll wait.'",
+      "- DO NOT ANSWER FRAGMENTS: if the transcript sounds partial, noisy, background speech, canceled mid-thought, or like the user is still thinking, wait. Ignore isolated words, breathing, false starts, and short fragments unless they are clear commands like 'stop' or 'cancel'. Do not invent meaning from weak audio. If genuinely unclear, ask one short repair question. If they say wait/cancel/never mind, say 'Okay — I’ll wait.'",
       "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content. If uncertain, ask one concise question.",
       "- VISUAL CONTENT: for tables, comparisons, email drafts, documents, code, or long lists, keep speech short and let the chat transcript carry the text. Do not read long content out loud.",
       "- DOCUMENT GENERATION: you CAN create downloadable PDF, DOCX, Markdown, XLSX, CSV, and TXT files. For requests like 'create a PDF from that summary', 'export this', 'make a Word doc', or 'download this report', call generate_document immediately. Never say you cannot create files, PDFs, attachments, or downloads.",
@@ -1074,7 +1074,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         <div className="p-5 border-b border-border">
           <div className="flex items-start justify-between">
             <div>
-              <img src={BPA_LOGO_SRC} alt="BP Automation" className="h-8 w-auto mb-2" />
+              <img src={BPA_LOGO_SRC} alt="BP Automation" className="h-12 w-auto mb-3" />
               <div className="text-base font-semibold text-foreground">BPA Bot</div>
               <div className="text-[11px] text-muted-foreground mt-0.5">
                 BP Automation assistant
@@ -1167,9 +1167,16 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         <Link
-          to="/contacts"
+          to="/dashboard"
           onClick={() => setSidebarOpen(false)}
           className="mx-4 mt-3 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          <LayoutDashboard size={12} /> Dashboard
+        </Link>
+        <Link
+          to="/contacts"
+          onClick={() => setSidebarOpen(false)}
+          className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
         >
           <Users size={12} /> Saved contacts
         </Link>
@@ -1260,7 +1267,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           </div>
         </div>
         {/* Mobile header */}
-        <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 py-2 border-b border-border bg-card/95 backdrop-blur">
+        <div className="chat-mobile-header md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pb-2 border-b border-border bg-card/95 backdrop-blur">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 rounded-md hover:bg-secondary text-foreground"
@@ -1268,6 +1275,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           >
             <Menu size={20} />
           </button>
+          <img src={BPA_LOGO_SRC} alt="BP Automation" className="h-8 w-8 rounded-lg object-contain" />
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
           {voiceProvider === "openai_realtime" ? (
             <span
@@ -1297,7 +1305,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           </div>
         </div>
         {/* Messages */}
-        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pt-16 md:pt-6 pb-6">
+        <div ref={scrollRef} className="chat-mobile-scroll relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pb-6">
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 space-y-6">
             {messages.length === 0 && !pendingUser && !pendingAssistant && (
               <div className="pt-16 md:pt-24 flex flex-col items-center text-center">
@@ -1734,6 +1742,7 @@ function ArtifactCard({
 }: {
   data: { title?: string; format?: string; filename?: string; url?: string; createdAt?: string };
 }) {
+  const [downloading, setDownloading] = useState(false);
   const fmt = (data.format ?? "").toUpperCase();
   const created = data.createdAt ? new Date(data.createdAt) : null;
   const createdLabel = created
@@ -1761,9 +1770,12 @@ function ArtifactCard({
           {data.filename && <span className="truncate">{data.filename}</span>}
           {createdLabel && <span>· {createdLabel}</span>}
         </div>
+        <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
+          If preview fails on mobile, use Download. It saves from a fresh file fetch.
+        </div>
       </div>
       {data.url && (
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
           <a
             href={data.url}
             target="_blank"
@@ -1772,13 +1784,49 @@ function ArtifactCard({
           >
             Open
           </a>
-          <a
-            href={data.url}
-            download={data.filename}
+          <button
+            type="button"
+            onClick={async () => {
+              if (!data.url || downloading) return;
+              setDownloading(true);
+              try {
+                const response = await fetch(data.url);
+                if (!response.ok) throw new Error(`Download failed (${response.status})`);
+                const blob = await response.blob();
+                const objectUrl = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = objectUrl;
+                a.download = data.filename || `bpa-document.${(data.format || "file").toLowerCase()}`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "Download failed. Opening source link instead.");
+                window.location.href = data.url;
+              } finally {
+                setDownloading(false);
+              }
+            }}
+            disabled={downloading}
             className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
           >
-            <Download size={12} /> Download
-          </a>
+            <Download size={12} /> {downloading ? "Downloading…" : "Download"}
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(data.url || "");
+                toast.success("File link copied.");
+              } catch {
+                toast.error("Could not copy link.");
+              }
+            }}
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+          >
+            Copy link
+          </button>
         </div>
       )}
     </div>

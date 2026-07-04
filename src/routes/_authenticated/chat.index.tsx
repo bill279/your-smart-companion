@@ -1,544 +1,104 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useRef, type ReactNode } from "react";
-import {
-  Activity,
-  ArrowRight,
-  Bot,
-  CalendarCheck,
-  CheckCircle2,
-  ClipboardList,
-  Clock,
-  FileText,
-  FileSpreadsheet,
-  Inbox,
-  MailPlus,
-  Mic,
-  Plus,
-  Search,
-  Settings,
-  Sparkles,
-  Users,
-  Wifi,
-  WifiOff,
-} from "lucide-react";
-import { toast } from "sonner";
-import { createThread, getDashboard } from "@/lib/jarvis.functions";
-import { supabase } from "@/integrations/supabase/client";
+import { useEffect, useMemo, useRef } from "react";
+import { Bot, LayoutDashboard, Loader2, Plus } from "lucide-react";
+import { createThread, listThreads } from "@/lib/jarvis.functions";
 
 export const Route = createFileRoute("/_authenticated/chat/")({
   ssr: false,
-  head: () => ({ meta: [{ title: "BPA Bot Dashboard" }] }),
-  component: ChatDashboard,
+  head: () => ({ meta: [{ title: "BPA Bot" }] }),
+  component: ChatLauncher,
 });
 
-const QUICK_ACTIONS = [
-  {
+const STARTUP_ACTIONS: Record<string, { title: string; prompt?: string; voice?: boolean }> = {
+  voice: { title: "Voice conversation", voice: true },
+  "morning-briefing": {
     title: "Morning briefing",
-    description: "Inbox, calendar, priorities, and next steps.",
-    icon: Sparkles,
-    accent: "from-primary to-blue-500",
     prompt:
       "Give me an Outlook morning briefing. Executive style only: high-level priorities, emails needing action, calendar, and next steps. Do not include sender email addresses.",
   },
-  {
-    title: "Check inbox",
-    description: "Find what needs attention without the noise.",
-    icon: Inbox,
-    accent: "from-sky-500 to-cyan-400",
-    prompt:
-      "Check my Outlook inbox and tell me what needs attention. Keep it high-level and group by action.",
-  },
-  {
-    title: "Draft reply",
-    description: "Prepare a professional response for review.",
-    icon: MailPlus,
-    accent: "from-violet-500 to-fuchsia-500",
-    prompt:
-      "Help me draft a reply to the latest Outlook email that needs a response. If you need a sender or message, ask one focused question.",
-  },
-  {
-    title: "Create report",
-    description: "Make a PDF, Word doc, spreadsheet, or summary.",
-    icon: FileText,
-    accent: "from-amber-500 to-orange-500",
-    prompt:
-      "Create a polished one-page report. Ask me one focused question if you need to know the topic or format.",
-  },
-  {
-    title: "Start voice",
-    description: "Open a clean voice-ready conversation.",
-    icon: Mic,
-    accent: "from-emerald-500 to-teal-400",
-    voice: true,
-  },
-] as const;
+};
 
-const WORKFLOW_TEMPLATES = [
-  {
-    title: "Client follow-up",
-    category: "Email",
-    description: "Draft a polished follow-up email and wait for approval before sending.",
-    icon: MailPlus,
-    prompt:
-      "Help me send a professional client follow-up from Outlook. First identify the recipient, context, and goal if they are not already clear. Draft the email in clean formatting, show me the full draft, and wait for my approval before sending.",
-  },
-  {
-    title: "Unread inbox triage",
-    category: "Outlook",
-    description: "Sort unread emails into urgent, needs reply, waiting, and FYI.",
-    icon: Inbox,
-    prompt:
-      "Triage my unread Outlook emails. Group them into Urgent, Needs reply, Waiting/blockers, and FYI. Keep it concise, high-level, and include suggested next actions. Do not expose sender email addresses unless needed.",
-  },
-  {
-    title: "Prepare my day",
-    category: "Chief of staff",
-    description: "Build a practical plan from email, calendar, and open loops.",
-    icon: CalendarCheck,
-    prompt:
-      "Prepare my day like an executive assistant. Use Outlook email and calendar context. Give me: Top priorities, meetings to prepare for, emails needing action, risks/blockers, and a suggested schedule. Keep it practical and concise.",
-  },
-  {
-    title: "BP Automation report",
-    category: "Documents",
-    description: "Create a client-ready PDF or Word summary for BP Automation work.",
-    icon: FileText,
-    prompt:
-      "Create a client-ready BP Automation report. Ask one focused question if you need the topic. Otherwise produce a polished one-page PDF with a short executive summary, bullet points, and clear next steps.",
-  },
-  {
-    title: "Vendor comparison",
-    category: "Research",
-    description: "Research options, cite sources, and compare in a table.",
-    icon: Search,
-    prompt:
-      "Research and compare vendor or product options for me. Ask for the product/category if missing. Use current web research with source links, create a comparison table, explain the tradeoffs, and end with a recommendation.",
-  },
-  {
-    title: "Quote/proposal starter",
-    category: "Sales",
-    description: "Turn rough notes into a proposal outline or customer email.",
-    icon: FileSpreadsheet,
-    prompt:
-      "Help me prepare a quote or proposal starter. Ask one focused question if the project scope is missing. Then create a structured outline with scope, assumptions, deliverables, timeline, risks, and next steps. If I ask, export it as PDF or Word.",
-  },
-  {
-    title: "Contact history",
-    category: "Outlook",
-    description: "Find recent communication with a person or company.",
-    icon: Users,
-    prompt:
-      "Look up my Outlook history with a person or company. Ask for the name if missing. Summarize the relationship, latest messages, open loops, commitments, and recommended follow-up. Keep it executive-level.",
-  },
-  {
-    title: "Meeting notes to actions",
-    category: "Operations",
-    description: "Convert raw notes or transcript into owners and next steps.",
-    icon: ClipboardList,
-    prompt:
-      "Turn meeting notes into an action plan. If I have not provided notes yet, ask me to paste them or upload a file. Then extract decisions, action items, owners, due dates, risks, and a short follow-up email draft.",
-  },
-] as const;
-
-function ChatDashboard() {
+function ChatLauncher() {
   const qc = useQueryClient();
-  const dashboardFn = useServerFn(getDashboard);
+  const list = useServerFn(listThreads);
   const create = useServerFn(createThread);
-  const shortcutHandledRef = useRef(false);
+  const handledRef = useRef(false);
+  const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
 
-  const dashboard = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: () => dashboardFn({}),
-  });
-  const microsoftQ = useQuery({
-    queryKey: ["microsoft-integration-status"],
-    queryFn: async () => {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token;
-      if (!token) throw new Error("Sign in again");
-      const res = await fetch("/api/integrations/microsoft/status", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load Microsoft status");
-      return json as { connected: boolean; email: string | null; scopes: string[] };
-    },
-    retry: 1,
-  });
+  const startupAction = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const action = new URLSearchParams(window.location.search).get("action");
+    return action ? STARTUP_ACTIONS[action] ?? null : null;
+  }, []);
 
-  const startTask = useMutation({
-    mutationFn: async ({ title, prompt, voice }: { title: string; prompt?: string; voice?: boolean }) => {
-      const thread = await create({ data: { title } });
-      return { thread, prompt, voice };
+  const createMut = useMutation({
+    mutationFn: async (payload?: { title?: string; prompt?: string; voice?: boolean }) => {
+      const thread = await create({ data: { title: payload?.title } });
+      return { thread, prompt: payload?.prompt, voice: payload?.voice };
     },
     onSuccess: ({ thread, prompt, voice }) => {
       qc.invalidateQueries({ queryKey: ["threads"] });
-      qc.invalidateQueries({ queryKey: ["dashboard"] });
       const params = new URLSearchParams();
       if (prompt) params.set("prompt", prompt);
       if (voice) params.set("voice", "1");
       const search = params.toString() ? `?${params.toString()}` : "";
-      window.location.href = `/chat/${thread.id}${search}`;
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Could not start a new chat.");
+      window.location.replace(`/chat/${thread.id}${search}`);
     },
   });
+
   useEffect(() => {
-    if (shortcutHandledRef.current || startTask.isPending) return;
-    const params = new URLSearchParams(window.location.search);
-    const action = params.get("action");
-    if (!action) return;
+    if (handledRef.current || !threads.data) return;
+    handledRef.current = true;
 
-    shortcutHandledRef.current = true;
-    params.delete("action");
-    const nextSearch = params.toString();
-    window.history.replaceState(
-      {},
-      "",
-      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`,
-    );
-
-    if (action === "voice") {
-      startTask.mutate({ title: "Start voice", voice: true });
+    if (startupAction) {
+      createMut.mutate(startupAction);
       return;
     }
-    if (action === "morning-briefing") {
-      const briefing = QUICK_ACTIONS.find((item) => item.title === "Morning briefing");
-      if (briefing && "prompt" in briefing) {
-        startTask.mutate({ title: briefing.title, prompt: briefing.prompt });
-      }
-    }
-  }, [startTask.isPending]);
-  const connectMicrosoft = useMutation({
-    mutationFn: async () => {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token;
-      if (!token) throw new Error("Sign in again");
-      const res = await fetch("/api/integrations/microsoft/connect", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (!res.ok || !json.url) throw new Error(json.error || "Could not start Outlook connection.");
-      return json.url as string;
-    },
-    onSuccess: (url) => {
-      window.location.href = url;
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Could not connect Outlook.");
-    },
-  });
 
-  const microsoft = microsoftQ.data;
-  const outlookConnected = !!microsoft?.connected;
-  const hasMail = microsoft?.scopes?.some((scope) => scope.toLowerCase() === "mail.read") ?? false;
-  const actions = dashboard.data?.actions ?? [];
-  const threads = dashboard.data?.threads ?? [];
+    const latest = threads.data[0];
+    if (latest) {
+      window.location.replace(`/chat/${latest.id}`);
+      return;
+    }
+
+    createMut.mutate({ title: "New conversation" });
+  }, [threads.data, startupAction]);
 
   return (
-    <main className="safe-area-page min-h-dvh bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.14),transparent_32rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.45))] text-foreground">
-      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-6 sm:py-5 lg:px-8">
-        <header className="flex flex-col gap-4 rounded-3xl border border-border/70 bg-card/80 p-5 shadow-sm backdrop-blur md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
-              <Bot size={28} />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">BP Automation assistant</p>
-              <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">What should BPA Bot handle?</h1>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              to="/settings"
-              className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
-            >
-              <Settings size={16} />
-              Settings
-            </Link>
-            <button
-              type="button"
-              onClick={() => startTask.mutate({ title: "New conversation" })}
-              disabled={startTask.isPending}
-              className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-60"
-            >
-              <Plus size={16} />
-              New chat
-            </button>
-          </div>
-        </header>
-
-        <section className="grid gap-3 md:grid-cols-2">
-          <StatusCard
-            connected
-            title="OpenAI Realtime"
-            detail="Chat, voice, and document generation are running through OpenAI."
-          />
-          <StatusCard
-            connected={outlookConnected && hasMail}
-            title="Outlook"
-            detail={
-              outlookConnected && hasMail
-                ? `Connected${microsoft?.email ? ` as ${microsoft.email}` : ""}. Email tools are ready.`
-                : outlookConnected
-                  ? "Connected, but mail permission may need refresh."
-                  : "Not connected yet. Reconnect Outlook to use email and calendar tools."
-            }
-            action={
-              outlookConnected && hasMail
-                ? undefined
-                : {
-                    label: connectMicrosoft.isPending ? "Opening Microsoft…" : "Reconnect Outlook",
-                    onClick: () => connectMicrosoft.mutate(),
-                    disabled: connectMicrosoft.isPending,
-                  }
-            }
-          />
-        </section>
-
-        <section className="rounded-3xl border border-primary/15 bg-primary/5 p-4 text-sm leading-6 text-muted-foreground sm:hidden">
-          Tip: in Safari, tap <span className="font-semibold text-foreground">Share → Add to Home Screen</span> to use this like an iPhone app.
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          {QUICK_ACTIONS.map((action) => {
-            const Icon = action.icon;
-            return (
-              <button
-                key={action.title}
-                type="button"
-                onClick={() => startTask.mutate({ title: action.title, prompt: "prompt" in action ? action.prompt : undefined, voice: "voice" in action ? action.voice : undefined })}
-                disabled={startTask.isPending}
-                className="group rounded-3xl border border-border/70 bg-card p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md disabled:opacity-60"
-              >
-                <span className={`mb-5 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${action.accent} text-white shadow-sm`}>
-                  <Icon size={23} />
-                </span>
-                <h2 className="text-lg font-semibold">{action.title}</h2>
-                <p className="mt-2 min-h-12 text-sm leading-6 text-muted-foreground">{action.description}</p>
-                <span className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-                  Start
-                  <ArrowRight size={15} className="transition group-hover:translate-x-0.5" />
-                </span>
-              </button>
-            );
-          })}
-        </section>
-
-        <section className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Reusable workflows</p>
-              <h2 className="text-xl font-semibold tracking-tight">Client-ready task templates</h2>
-            </div>
-            <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-              These guide BPA Bot into the right process: ask only what is missing, use connected tools, and wait for approval on email/calendar actions.
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {WORKFLOW_TEMPLATES.map((workflow) => {
-              const Icon = workflow.icon;
-              return (
-                <button
-                  key={workflow.title}
-                  type="button"
-                  onClick={() => startTask.mutate({ title: workflow.title, prompt: workflow.prompt })}
-                  disabled={startTask.isPending}
-                  className="group rounded-2xl border border-border/70 bg-background/70 p-4 text-left transition hover:border-primary/50 hover:bg-muted/50 disabled:opacity-60"
-                >
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                      <Icon size={20} />
-                    </span>
-                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
-                      {workflow.category}
-                    </span>
-                  </div>
-                  <h3 className="font-semibold">{workflow.title}</h3>
-                  <p className="mt-2 min-h-12 text-sm leading-6 text-muted-foreground">{workflow.description}</p>
-                  <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-                    Run workflow
-                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="grid flex-1 gap-5 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">Recent activity</h2>
-                <p className="text-sm text-muted-foreground">Latest assistant actions and tool results.</p>
-              </div>
-              <Link to="/activity" className="text-sm font-medium text-primary hover:underline">
-                View all
-              </Link>
-            </div>
-            {dashboard.isLoading ? (
-              <SkeletonRows />
-            ) : actions.length ? (
-              <div className="space-y-3">
-                {actions.map((action) => (
-                  <div key={action.id} className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold capitalize">{action.action.replace(/_/g, " ")}</p>
-                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{action.summary || "No summary recorded."}</p>
-                      </div>
-                      <StatusPill status={action.status} />
-                    </div>
-                    <p className="mt-3 flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock size={12} />
-                      {formatTime(action.created_at)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                icon={<Activity size={22} />}
-                title="No activity yet"
-                detail="Run a briefing, send an email, or create a document and it will show up here."
-              />
-            )}
-          </div>
-
-          <div className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">Recent conversations</h2>
-                <p className="text-sm text-muted-foreground">Jump back into anything you were working on.</p>
-              </div>
-            </div>
-            {dashboard.isLoading ? (
-              <SkeletonRows />
-            ) : threads.length ? (
-              <div className="space-y-2">
-                {threads.map((thread) => (
-                  <Link
-                    key={thread.id}
-                    to="/chat/$threadId"
-                    params={{ threadId: thread.id }}
-                    className="block rounded-2xl border border-border/70 bg-background/70 p-4 transition hover:border-primary/50 hover:bg-muted/50"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="truncate text-sm font-semibold">{thread.title || "New conversation"}</p>
-                      <ArrowRight size={15} className="shrink-0 text-muted-foreground" />
-                    </div>
-                    <p className="mt-2 text-xs text-muted-foreground">{formatTime(thread.updated_at)}</p>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                icon={<Bot size={22} />}
-                title="No chats yet"
-                detail="Start with a briefing or create a new conversation."
-              />
-            )}
-          </div>
-        </section>
+    <main className="safe-area-page flex min-h-dvh items-center justify-center bg-background px-4 text-foreground">
+      <div className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center shadow-sm">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-primary/10">
+          <img src="/icon-192.png" alt="BP Automation" className="h-14 w-14 object-contain" />
+        </div>
+        <h1 className="text-xl font-semibold">Opening BPA Bot</h1>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {startupAction ? `Starting ${startupAction.title.toLowerCase()}…` : "Loading your latest conversation…"}
+        </p>
+        <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 size={16} className="animate-spin" />
+          Preparing chat
+        </div>
+        <div className="mt-6 flex justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => createMut.mutate({ title: "New conversation" })}
+            className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus size={15} />
+            New chat
+          </button>
+          <Link
+            to="/dashboard"
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold hover:bg-muted"
+          >
+            <LayoutDashboard size={15} />
+            Dashboard
+          </Link>
+        </div>
+        <Bot className="mx-auto mt-5 text-muted-foreground" size={18} />
       </div>
     </main>
   );
-}
-
-function StatusCard({
-  connected,
-  title,
-  detail,
-  action,
-}: {
-  connected: boolean;
-  title: string;
-  detail: string;
-  action?: { label: string; onClick: () => void; disabled?: boolean };
-}) {
-  return (
-    <div className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm">
-      <div className="flex items-start gap-4">
-        <div
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
-            connected ? "bg-emerald-500/12 text-emerald-600" : "bg-destructive/10 text-destructive"
-          }`}
-        >
-          {connected ? <Wifi size={22} /> : <WifiOff size={22} />}
-        </div>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-semibold">{title}</h2>
-            <span
-              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                connected ? "bg-emerald-500/12 text-emerald-700" : "bg-destructive/10 text-destructive"
-              }`}
-            >
-              {connected ? "Ready" : "Needs attention"}
-            </span>
-          </div>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">{detail}</p>
-          {action && (
-            <button
-              type="button"
-              onClick={action.onClick}
-              disabled={action.disabled}
-              className="mt-3 inline-flex items-center rounded-full bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-            >
-              {action.label}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const ok = /success|complete|sent|done/i.test(status);
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
-        ok ? "bg-emerald-500/12 text-emerald-700" : "bg-muted text-muted-foreground"
-      }`}
-    >
-      {ok && <CheckCircle2 size={12} />}
-      {status || "recorded"}
-    </span>
-  );
-}
-
-function EmptyState({ icon, title, detail }: { icon: ReactNode; title: string; detail: string }) {
-  return (
-    <div className="flex min-h-44 flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-background/60 p-6 text-center">
-      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-muted text-muted-foreground">{icon}</div>
-      <p className="font-semibold">{title}</p>
-      <p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">{detail}</p>
-    </div>
-  );
-}
-
-function SkeletonRows() {
-  return (
-    <div className="space-y-3">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="h-20 animate-pulse rounded-2xl bg-muted" />
-      ))}
-    </div>
-  );
-}
-
-function formatTime(value: string) {
-  const date = new Date(value);
-  const diff = Date.now() - date.getTime();
-  const mins = Math.max(0, Math.round(diff / 60_000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
