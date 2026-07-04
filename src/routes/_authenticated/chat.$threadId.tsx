@@ -53,6 +53,24 @@ const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, stru
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
 type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
+type ApprovalCardData =
+  | {
+      kind: "email";
+      title: string;
+      to?: string;
+      cc?: string;
+      subject?: string;
+      body?: string;
+    }
+  | {
+      kind: "calendar";
+      title: string;
+      eventTitle?: string;
+      dateTime?: string;
+      attendees?: string;
+      location?: string;
+      description?: string;
+    };
 
 function cleanAssistantText(text: string) {
   return text
@@ -81,6 +99,68 @@ function looksUnstableVoiceText(text: string) {
   if (/(.)\1{15,}/.test(s)) return true;
   if (/\blorem ipsum\b/i.test(s)) return true;
   return false;
+}
+
+function parseBoldField(text: string, label: string) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^\\s*-?\\s*(?:\\*\\*)?${escaped}(?:\\*\\*)?\\s*:\\s*(.+?)\\s*$`, "im");
+  return text.match(re)?.[1]?.trim();
+}
+
+function parseApprovalCard(content: string): ApprovalCardData | null {
+  const text = cleanAssistantText(content);
+  if (!text || /\b(generated and sent|email(?: has been)? sent|scheduled|created)\b/i.test(text)) return null;
+
+  const emailLike =
+    /\bdraft email\b/i.test(text) ||
+    /\breply ["“']?send["”']? to send/i.test(text) ||
+    /^\s*-?\s*(?:\*\*)?to(?:\*\*)?:/im.test(text);
+  if (emailLike) {
+    const to = parseBoldField(text, "To");
+    const cc = parseBoldField(text, "Cc");
+    const subject = parseBoldField(text, "Subject");
+    if (to || subject) {
+      const dividerParts = text.split(/\n\s*---+\s*\n/);
+      const body = dividerParts.length >= 3 ? dividerParts[1].trim() : undefined;
+      return {
+        kind: "email",
+        title: "Email ready for approval",
+        to,
+        cc: cc && cc !== "(none)" ? cc : undefined,
+        subject,
+        body,
+      };
+    }
+  }
+
+  const calendarLike =
+    /\b(calendar event|draft for the calendar|draft preview|please confirm.*(?:event|meeting)|reply ["“']?(create|schedule))/i.test(text);
+  if (calendarLike) {
+    const eventTitle = parseBoldField(text, "Title");
+    const dateTime =
+      parseBoldField(text, "Date & time") ??
+      parseBoldField(text, "Date/time") ??
+      parseBoldField(text, "Time") ??
+      parseBoldField(text, "Date");
+    const attendees = parseBoldField(text, "Attendees");
+    const location = parseBoldField(text, "Location");
+    const description =
+      parseBoldField(text, "Description") ??
+      parseBoldField(text, "Agenda");
+    if (eventTitle || dateTime || attendees) {
+      return {
+        kind: "calendar",
+        title: "Calendar event ready for approval",
+        eventTitle,
+        dateTime,
+        attendees,
+        location,
+        description,
+      };
+    }
+  }
+
+  return null;
 }
 
 function groupThreadsByDate<T extends { updated_at: string }>(items: T[]): Array<{ label: string; items: T[] }> {
@@ -1216,6 +1296,8 @@ function ThreadView({ threadId }: { threadId: string }) {
                   content={m.content}
                   messageId={m.id}
                   attachments={Array.isArray(att) ? att : []}
+                  onQuickReply={(text) => addMut.mutate({ content: text, files: [] })}
+                  onPrefill={setInput}
                 />
               );
             })}
@@ -1488,15 +1570,20 @@ function Bubble({
   attachments = [],
   streaming = false,
   messageId,
+  onQuickReply,
+  onPrefill,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
   streaming?: boolean;
   messageId?: string;
+  onQuickReply?: (text: string) => void;
+  onPrefill?: (text: string) => void;
 }) {
   const isUser = role === "user";
   const displayContent = isUser ? content : cleanAssistantText(content);
+  const approvalCard = !isUser && !streaming ? parseApprovalCard(displayContent) : null;
   if (isUser) {
     return (
       <div className="group flex flex-col items-end gap-1">
@@ -1544,6 +1631,13 @@ function Bubble({
         <div
           className="prose prose-sm max-w-none text-foreground prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-pre:rounded-md prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.9em] prose-a:text-accent prose-a:underline-offset-2 prose-blockquote:border-l-primary prose-blockquote:text-muted-foreground"
         >
+          {approvalCard && (
+            <ApprovalCard
+              data={approvalCard}
+              onQuickReply={onQuickReply}
+              onPrefill={onPrefill}
+            />
+          )}
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -1648,6 +1742,104 @@ function ArtifactCard({
           </a>
         </div>
       )}
+    </div>
+  );
+}
+
+function ApprovalCard({
+  data,
+  onQuickReply,
+  onPrefill,
+}: {
+  data: ApprovalCardData;
+  onQuickReply?: (text: string) => void;
+  onPrefill?: (text: string) => void;
+}) {
+  const isEmail = data.kind === "email";
+  const approveText = isEmail ? "send" : "create";
+  const editText = isEmail
+    ? `Change this email: `
+    : `Change this calendar event: `;
+  return (
+    <div className="not-prose my-3 overflow-hidden rounded-xl border border-primary/25 bg-card shadow-sm">
+      <div className="flex items-center gap-3 border-b border-border bg-primary/5 px-3 py-2.5">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          {isEmail ? <Mail size={18} /> : <Check size={18} />}
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-foreground">{data.title}</div>
+          <div className="text-xs text-muted-foreground">
+            Review it, then approve once. No repeated confirmation loop.
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-2 px-3 py-3 text-sm">
+        {isEmail ? (
+          <>
+            <ApprovalRow label="To" value={data.to} />
+            <ApprovalRow label="Cc" value={data.cc} />
+            <ApprovalRow label="Subject" value={data.subject} />
+            {data.body && (
+              <div className="mt-1 rounded-md border border-border bg-background p-2">
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Body preview
+                </div>
+                <div className="max-h-32 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-foreground">
+                  {data.body}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <ApprovalRow label="Title" value={data.eventTitle} />
+            <ApprovalRow label="When" value={data.dateTime} />
+            <ApprovalRow label="Attendees" value={data.attendees} />
+            <ApprovalRow label="Location" value={data.location} />
+            <ApprovalRow label="Description" value={data.description} />
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2 border-t border-border bg-background/60 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={() => onQuickReply?.(approveText)}
+          disabled={!onQuickReply}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          <Check size={13} /> {isEmail ? "Send email" : "Create event"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onPrefill?.(editText)}
+          disabled={!onPrefill}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-50"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => onQuickReply?.("cancel")}
+          disabled={!onQuickReply}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+        >
+          <X size={13} /> Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ApprovalRow({ label, value }: { label: string; value?: string }) {
+  if (!value || value === "(none specified)" || value === "(none)") return null;
+  return (
+    <div className="grid grid-cols-[5.5rem_1fr] gap-2">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="min-w-0 break-words text-foreground">{value}</div>
     </div>
   );
 }

@@ -264,6 +264,36 @@ function isExplicitEmailApproval(text: string) {
   return /^(yes|yep|yeah|ok|okay|sure),?\s+(send|send it|please send|go ahead|approved|confirm)\b/.test(normalized);
 }
 
+function isExplicitCalendarApproval(text: string) {
+  const s = text.trim().toLowerCase();
+  if (!s) return false;
+  if (/\b(don't|do not|dont|cancel|stop|wait|hold off|nevermind|never mind)\b/.test(s)) {
+    return false;
+  }
+  const normalized = s.replace(/[.!?]+$/g, "").replace(/\s+/g, " ");
+  const exactApprovals = new Set([
+    "create",
+    "create it",
+    "schedule",
+    "schedule it",
+    "book it",
+    "yes",
+    "yep",
+    "yeah",
+    "ok",
+    "okay",
+    "sure",
+    "approved",
+    "approve",
+    "confirmed",
+    "confirm",
+    "looks good",
+    "go ahead",
+  ]);
+  if (exactApprovals.has(normalized)) return true;
+  return /^(yes|yep|yeah|ok|okay|sure),?\s+(create|schedule|book|go ahead|approved|confirm)\b/.test(normalized);
+}
+
 function isCapabilitiesQuestion(text: string) {
   return /\b(what can you help(?: me)? with|what can you do|what do you do|your capabilities|how can you help(?: me)?)\b/i.test(text);
 }
@@ -1064,6 +1094,20 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 timezone: z.string().optional().describe("IANA timezone, e.g. America/New_York"),
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone }) => {
+                if (!isExplicitCalendarApproval(userText)) {
+                  await logAction(
+                    "create_calendar_event",
+                    `Blocked premature calendar create "${title}"`,
+                    { title, start, end, attendees, location, timezone, reason: "approval_required" },
+                    "error",
+                  );
+                  return {
+                    error: "approval_required",
+                    message:
+                      "Calendar event was not created. Present the complete event preview to the user and wait for explicit approval like 'create' or 'schedule it' before calling create_calendar_event again.",
+                    draft: { title, start, end, description, location, attendees, timezone },
+                  };
+                }
                 try {
                   const event = await createMicrosoftCalendarEvent(supabase, userId, {
                     title,
