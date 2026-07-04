@@ -5,12 +5,17 @@ import {
   CheckCircle2,
   Clipboard,
   FlaskConical,
+  Loader2,
   MessageSquareText,
   Mic,
+  PlayCircle,
   RotateCcw,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useServerFn } from "@tanstack/react-start";
+import { createThread } from "@/lib/jarvis.functions";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/quality")({
   ssr: false,
@@ -26,6 +31,7 @@ type EvalScenario = {
   title: string;
   goal: string;
   prompt: string;
+  runPrompt?: string;
   expected: string[];
   failureSigns: string[];
 };
@@ -38,6 +44,8 @@ const SCENARIOS: EvalScenario[] = [
     goal: "Make sure BPA Bot waits while you pause mid-thought instead of blurting out random content.",
     prompt:
       "Start voice and say slowly: “Can you email…” then pause for 2 seconds, then continue: “actually, write a short follow-up email to myself about BP Automation services.”",
+    runPrompt:
+      "Voice transcript simulation: Can you email… actually, write a short follow-up email to myself about BP Automation services.",
     expected: [
       "Does not respond during the 2-second pause.",
       "Understands the full final request.",
@@ -129,6 +137,8 @@ const SCENARIOS: EvalScenario[] = [
     goal: "Make sure noisy voice input produces one clean clarification, not hallucinated action.",
     prompt:
       "Start voice and mumble or intentionally say an incomplete request like: “send the thing to… uh… never mind wait.”",
+    runPrompt:
+      "Voice transcript simulation: send the thing to… uh… never mind wait.",
     expected: [
       "Does not invent a recipient or task.",
       "Asks one short clarification or waits quietly.",
@@ -165,6 +175,7 @@ const SCENARIOS: EvalScenario[] = [
     goal: "Check tone: useful, concise, professional, and not overly casual.",
     prompt:
       "Ask in voice: “What can you help me with today?”",
+    runPrompt: "What can you help me with today?",
     expected: [
       "Answers in 1–2 short sentences.",
       "Mentions practical capabilities: research, email, calendar, documents, comparisons.",
@@ -179,8 +190,11 @@ const SCENARIOS: EvalScenario[] = [
 ];
 
 function QualityLabPage() {
+  const create = useServerFn(createThread);
   const [results, setResults] = useState<Record<string, EvalStatus>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [responses, setResponses] = useState<Record<string, string>>({});
+  const [running, setRunning] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     try {
@@ -189,17 +203,19 @@ function QualityLabPage() {
       const parsed = JSON.parse(raw) as {
         results?: Record<string, EvalStatus>;
         notes?: Record<string, string>;
+        responses?: Record<string, string>;
       };
       setResults(parsed.results ?? {});
       setNotes(parsed.notes ?? {});
+      setResponses(parsed.responses ?? {});
     } catch {
       /* ignore invalid saved state */
     }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("bpa-quality-lab", JSON.stringify({ results, notes }));
-  }, [results, notes]);
+    window.localStorage.setItem("bpa-quality-lab", JSON.stringify({ results, notes, responses }));
+  }, [results, notes, responses]);
 
   const score = useMemo(() => {
     const tested = SCENARIOS.filter((s) => results[s.id] && results[s.id] !== "untested");
@@ -220,7 +236,49 @@ function QualityLabPage() {
     if (!confirm("Reset all Quality Lab results?")) return;
     setResults({});
     setNotes({});
+    setResponses({});
     toast.success("Quality Lab reset");
+  };
+
+  const runScenario = async (scenario: EvalScenario) => {
+    setRunning((r) => ({ ...r, [scenario.id]: true }));
+    setResponses((r) => ({ ...r, [scenario.id]: "" }));
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) throw new Error("Sign in again, then rerun the test.");
+
+      const thread = await create({
+        data: { title: `Quality Lab — ${scenario.title}` },
+      });
+      const prompt = buildAutomatedPrompt(scenario);
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ threadId: thread.id, content: prompt }),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text || `Test failed (${res.status})`);
+      const cleaned = text.trim();
+      setResponses((r) => ({ ...r, [scenario.id]: cleaned }));
+      const verdict = autoGradeScenario(scenario, cleaned);
+      setStatus(scenario.id, verdict.status);
+      setNotes((n) => ({
+        ...n,
+        [scenario.id]: [verdict.note, n[scenario.id]].filter(Boolean).join("\n\n"),
+      }));
+      toast.success(verdict.status === "pass" ? "Auto-check passed" : "Auto-check flagged an issue");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Test run failed";
+      setStatus(scenario.id, "fail");
+      setNotes((n) => ({ ...n, [scenario.id]: `Runner error: ${message}` }));
+      toast.error(message);
+    } finally {
+      setRunning((r) => ({ ...r, [scenario.id]: false }));
+    }
   };
 
   return (
@@ -290,6 +348,18 @@ function QualityLabPage() {
                       <Clipboard size={13} /> Copy prompt
                     </button>
                     <button
+                      onClick={() => runScenario(scenario)}
+                      disabled={Boolean(running[scenario.id])}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-primary bg-primary px-3 py-2 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+                    >
+                      {running[scenario.id] ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <PlayCircle size={13} />
+                      )}
+                      Run test
+                    </button>
+                    <button
                       onClick={() => setStatus(scenario.id, "pass")}
                       className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs ${
                         status === "pass"
@@ -317,6 +387,11 @@ function QualityLabPage() {
                     Say / type this
                   </div>
                   <p className="text-sm leading-relaxed">{scenario.prompt}</p>
+                  {scenario.runPrompt && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Automated runner uses transcript simulation: {scenario.runPrompt}
+                    </p>
+                  )}
                 </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -335,6 +410,16 @@ function QualityLabPage() {
                     className="mt-1 min-h-20 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
                   />
                 </label>
+                {responses[scenario.id] && (
+                  <div className="mt-4 rounded-lg border border-border bg-background p-3">
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-2">
+                      Last automated response
+                    </div>
+                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed">
+                      {responses[scenario.id]}
+                    </pre>
+                  </div>
+                )}
               </article>
             );
           })}
@@ -342,6 +427,98 @@ function QualityLabPage() {
       </main>
     </div>
   );
+}
+
+function buildAutomatedPrompt(scenario: EvalScenario) {
+  const userPrompt = scenario.runPrompt ?? scenario.prompt;
+  return [
+    "QUALITY LAB AUTOMATED TEST.",
+    "Respond naturally to the user request below. Do not mention that this is a test. Follow your normal product behavior exactly.",
+    "",
+    "User request:",
+    userPrompt,
+  ].join("\n");
+}
+
+function autoGradeScenario(scenario: EvalScenario, response: string): { status: EvalStatus; note: string } {
+  const s = response.toLowerCase();
+  const failPatterns = [
+    /cannot (?:directly )?(?:create|generate|attach|send).*pdf/i,
+    /can't (?:directly )?(?:create|generate|attach|send).*pdf/i,
+    /unable to (?:create|generate|attach|send).*pdf/i,
+    /copy and paste/i,
+    /as a text-based ai/i,
+    /i will generate/i,
+    /let me (?:search|look|check|gather)/i,
+    /would you like me to try/i,
+  ];
+  if (failPatterns.some((p) => p.test(response))) {
+    return { status: "fail", note: "Auto-check: flagged a forbidden/refusal/filler phrase." };
+  }
+
+  if (scenario.id === "pdf-direct") {
+    const hasArtifact = /```bpa-artifact|https?:\/\/.*\.pdf|generated \*\*.*\.pdf/i.test(response);
+    return hasArtifact
+      ? { status: "pass", note: "Auto-check: detected generated PDF artifact/link." }
+      : { status: "fail", note: "Auto-check: did not detect a generated PDF artifact/link." };
+  }
+
+  if (scenario.id === "comparison-format") {
+    const hasTable = /\|.+\|[\r\n]+\|[\s:-]+\|/m.test(response);
+    const hasRecap = /recap|bottom line|best fit|recommend/i.test(response);
+    return hasTable && hasRecap
+      ? { status: "pass", note: "Auto-check: detected table plus recap/recommendation language." }
+      : { status: "fail", note: "Auto-check: comparison did not clearly include both a table and recap." };
+  }
+
+  if (scenario.id === "email-approval-once") {
+    const asksApproval = /reply|say|confirm|approve|send/i.test(response);
+    const looksDraft = /subject|recipient|to:|draft/i.test(response);
+    const sent = /\bsent\b|email has been sent/i.test(response);
+    return asksApproval && looksDraft && !sent
+      ? { status: "pass", note: "Auto-check: detected draft/readback and approval request; did not detect premature send." }
+      : { status: "fail", note: "Auto-check: email flow did not clearly draft-and-wait." };
+  }
+
+  if (scenario.id === "calendar-safe") {
+    const previewOrQuestion = /confirm|approve|attendee|timezone|preview|schedule it|create/i.test(response);
+    const created = /created|scheduled|calendar event has been/i.test(response);
+    return previewOrQuestion && !created
+      ? { status: "pass", note: "Auto-check: detected safe calendar preview/clarification without creation." }
+      : { status: "fail", note: "Auto-check: calendar response may have skipped safe confirmation." };
+  }
+
+  if (scenario.id === "unclear-audio") {
+    const safeClarify = /caught part|clarify|what should|who should|not sent|cancel|wait/i.test(s);
+    const unsafe = /@|sent|recipient:|subject:/i.test(response);
+    return safeClarify && !unsafe
+      ? { status: "pass", note: "Auto-check: unclear transcript handled without inventing/sending." }
+      : { status: "fail", note: "Auto-check: unclear transcript did not produce a clean repair response." };
+  }
+
+  if (scenario.id === "concise-professional") {
+    const words = response.trim().split(/\s+/).filter(Boolean).length;
+    const hasCapabilities = /research|email|calendar|document|pdf|compare|comparison|web/i.test(response);
+    return words <= 70 && hasCapabilities
+      ? { status: "pass", note: "Auto-check: concise and capability-focused." }
+      : { status: "fail", note: "Auto-check: response may be too long or too vague." };
+  }
+
+  if (scenario.id === "web-research") {
+    const hasSource = /\[[^\]]+\]\(https?:\/\//.test(response) || /https?:\/\//.test(response);
+    return hasSource
+      ? { status: "pass", note: "Auto-check: detected source links for current web-research answer." }
+      : { status: "fail", note: "Auto-check: did not detect source links for current web-research answer." };
+  }
+
+  if (scenario.id === "voice-no-fragments") {
+    const looksEmailDraft = /email|draft|subject|confirm|approve|send/i.test(response);
+    return looksEmailDraft
+      ? { status: "pass", note: "Auto-check: transcript simulation produced an email draft/approval flow." }
+      : { status: "fail", note: "Auto-check: transcript simulation did not land on the intended task." };
+  }
+
+  return { status: "untested", note: "Auto-check: no automated rule for this scenario." };
 }
 
 function ModeBadge({ mode }: { mode: EvalScenario["mode"] }) {
