@@ -48,6 +48,7 @@ The full Markdown table still goes in the chat text so it renders on screen — 
 - Act like a competent chief-of-staff assistant: precise, composed, resourceful, and outcome-focused. Avoid filler, over-apologizing, fake enthusiasm, vague promises, and casual throwaway phrases.
 - Prefer useful action over commentary. If the next step is obvious and safe, do it with tools; if approval is required, show one complete draft/readback; if something is missing, ask one focused question.
 - Do not answer noisy fragments or ambiguous half-requests as if they were complete. Ask a short clarification instead of inventing the task.
+- If the user asks what you can help with / what can you do, answer in 1-2 concise sentences. Mention core capabilities only: research, email, calendar, documents/PDFs, comparisons, and company knowledge. Do not list every feature.
 - If the user asks for a table, output the Markdown table immediately instead of explaining limitations.
 - Forbidden response: "I am unable to display a visual table directly in this chat interface." Do not say anything equivalent.
 - If the user asks for a file (PDF, Word, Excel, CSV, TXT, report, export, attachment, download), you MUST call the \`generate_document\` tool and return the resulting download link. Never claim you cannot generate, attach, or create files in this chat.
@@ -231,6 +232,15 @@ function cleanAssistantText(text: string) {
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
     .trim();
+}
+
+function isExplicitEmailApproval(text: string) {
+  const s = text.trim().toLowerCase();
+  if (!s) return false;
+  if (/\b(don't|do not|dont|cancel|stop|wait|hold off|nevermind|never mind)\b/.test(s)) {
+    return false;
+  }
+  return /^(send|send it|yes send|yes, send|approved|approve|confirmed|confirm|looks good send it|ok send|okay send|go ahead and send|please send)\b/.test(s);
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -663,7 +673,7 @@ export const Route = createFileRoute("/api/chat")({
             }),
             send_email: tool({
               description:
-                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves.",
+                "Send an email from the user's connected Outlook (preferred) or Gmail account. Only use after the user's current message is an explicit approval such as send/approved/looks good send it. Never use on the initial request to draft or email someone.",
               inputSchema: z.object({
                 to: z.string().email().describe("Recipient email address"),
                 subject: z.string().min(1).max(200),
@@ -671,6 +681,20 @@ export const Route = createFileRoute("/api/chat")({
                 cc: z.string().email().optional(),
               }),
               execute: async ({ to, subject, body: emailBody, cc }) => {
+                if (!isExplicitEmailApproval(userText)) {
+                  await logAction(
+                    "send_email",
+                    `Blocked premature email send to ${to} — ${subject}`,
+                    { to, cc, subject, reason: "approval_required" },
+                    "error",
+                  );
+                  return {
+                    error: "approval_required",
+                    message:
+                      "Email was not sent. Present the full draft preview to the user and wait for an explicit approval like 'send' before calling send_email again.",
+                    draft: { to, cc, subject, body: emailBody },
+                  };
+                }
                 try {
                   await sendOutlookMail(supabase, userId, { to, subject, body: emailBody, cc });
                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "microsoft" });
