@@ -768,10 +768,22 @@ function ThreadView({ threadId }: { threadId: string }) {
 	              return;
 	            }
 	            setPendingUserVoice("");
-	            void add({ data: { threadId, role: "assistant", content: text } }).then(() => {
-	              qc.invalidateQueries({ queryKey: ["messages", threadId] });
-            });
-            setPendingAssistant("");
+	            const finalAssistantText = cleanAssistantText(text);
+	            // Keep the live transcript bubble visible until the persisted
+	            // message/refetch catches up. Clearing immediately creates a
+	            // mobile-visible blink where the assistant text appears for a
+	            // second, disappears, then reappears as a saved message.
+	            setPendingAssistant(finalAssistantText);
+	            void add({ data: { threadId, role: "assistant", content: finalAssistantText } })
+	              .then(() => {
+	                qc.invalidateQueries({ queryKey: ["messages", threadId] });
+	                qc.invalidateQueries({ queryKey: ["threads"] });
+	              })
+	              .finally(() => {
+	                setPendingAssistant((current) =>
+	                  cleanAssistantText(current) === finalAssistantText ? "" : current,
+	                );
+	              });
             assistantBuf = "";
           }
         } else if (role === "user" && !done) {
