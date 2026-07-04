@@ -526,6 +526,49 @@ function looksActionableEmail(message: {
   return /\b(question|can you|could you|please|need|needed|review|approve|approval|confirm|follow up|following up|deadline|due|urgent|asap|proposal|quote|estimate|invoice|meeting|schedule|available|availability)\b/.test(text);
 }
 
+function emailActionCategory(message: {
+  subject: string;
+  bodyPreview: string | null;
+  isRead: boolean;
+}) {
+  const text = `${message.subject} ${message.bodyPreview ?? ""}`.toLowerCase();
+  if (/\b(urgent|asap|deadline|due|overdue|expires?|renewal|invoice|payment)\b/.test(text)) {
+    return "Review today";
+  }
+  if (/\b(question|can you|could you|please|need|needed|approve|approval|confirm|available|availability|schedule|meeting)\b/.test(text)) {
+    return "Likely needs reply";
+  }
+  if (!message.isRead) return "Unread triage";
+  return "Review when convenient";
+}
+
+function safeEmailBrief(message: {
+  id: string;
+  subject: string;
+  bodyPreview: string | null;
+  receivedDateTime: string | null;
+  isRead: boolean;
+}) {
+  return {
+    id: message.id,
+    category: emailActionCategory(message),
+    subject: message.subject,
+    receivedDateTime: message.receivedDateTime,
+    readStatus: message.isRead ? "read" : "unread",
+    suggestedAction: message.isRead
+      ? "Review if it matches today’s priorities."
+      : "Triage, then reply/flag/archive.",
+    note: "Sender details intentionally omitted from default briefing. Use search/read mail tools if the user asks for specifics.",
+  };
+}
+
+function groupByCategory(items: Array<ReturnType<typeof safeEmailBrief>>) {
+  return items.reduce<Record<string, number>>((acc, item) => {
+    acc[item.category] = (acc[item.category] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
 export async function getMicrosoftMorningBriefing(
   supabase: UserSupabaseClient,
   userId: string,
@@ -550,13 +593,25 @@ export async function getMicrosoftMorningBriefing(
       return bt - at;
     })
     .slice(0, 10);
+  const actionableBriefs = actionable.map(safeEmailBrief);
+  const unreadBriefs = unread.slice(0, 8).map(safeEmailBrief);
 
   return {
     generatedAt: new Date().toISOString(),
-    unreadCountInSample: unread.length,
-    unread,
-    actionable,
+    mode: "executive_briefing",
+    privacy:
+      "Default briefing intentionally omits sender email addresses and message bodies. Use search/read tools only if the user asks for details.",
+    counts: {
+      unreadInSample: unread.length,
+      actionableInSample: actionable.length,
+      upcomingEvents: events.length,
+    },
+    categoryCounts: groupByCategory(actionableBriefs),
+    priorities: actionableBriefs.slice(0, 5),
+    unreadTriage: unreadBriefs,
     upcomingEvents: events,
+    suggestedBriefingFormat:
+      "Answer with: 1) Top 3 priorities, 2) Emails needing action, 3) Calendar, 4) Suggested next steps. Keep it concise. Do not include sender email addresses unless explicitly requested.",
   };
 }
 

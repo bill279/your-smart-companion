@@ -498,7 +498,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
       "- EMAIL SIGNATURE: Microsoft Graph usually does not apply the user's Outlook UI signature, so include an appropriate sign-off in the email body unless the user asks not to.",
       "- EMAIL APPROVAL: present one complete concise readback/draft, then wait. If the next reply is yes, ok, sure, send, confirm, or approved, call send_email immediately with approved: true. Do not ask again. Never call send_email unless the immediately previous assistant turn was the draft/readback.",
-      "- OUTLOOK BRIEFING: for morning briefing, catch me up, what needs a reply, or priorities, use get_outlook_briefing and speak only the top 2-3 priorities; keep the details on screen.",
+      "- OUTLOOK BRIEFING: for morning briefing, catch me up, what needs a reply, or priorities, use get_outlook_briefing. Speak only the top 2-3 priorities; in chat use Top priorities / Emails needing action / Calendar / Next steps. Keep it high-level and avoid sender email addresses unless asked.",
       "- OUTLOOK REPLIES: for reply to latest email from someone, use prepare_outlook_reply, draft the reply, then wait for approval before sending.",
       "- EMAIL SILENCE: if the user is silent or audio is unclear after an email readback, wait quietly. Do not repeat the same confirmation prompt over and over.",
       "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
