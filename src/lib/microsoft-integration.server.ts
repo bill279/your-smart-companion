@@ -44,6 +44,7 @@ type IntegrationRow = {
 
 type UserSupabaseClient = ReturnType<typeof createClient<Database>>;
 const MICROSOFT_FACT_KEY = "microsoft_integration";
+export const MICROSOFT_OAUTH_COOKIE = "bpa_ms_oauth";
 
 function requiredEnv(name: string) {
   const value = process.env[name];
@@ -99,6 +100,43 @@ function decryptJson<T>(value: string): T {
     decipher.final(),
   ]);
   return JSON.parse(decrypted.toString("utf8")) as T;
+}
+
+export function createMicrosoftOAuthCookie(
+  request: Request,
+  accessToken: string,
+  userId: string,
+) {
+  const value = encryptJson({
+    accessToken,
+    userId,
+    exp: Date.now() + 10 * 60 * 1000,
+  });
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${MICROSOFT_OAUTH_COOKIE}=${encodeURIComponent(value)}; Path=/api/integrations/microsoft; Max-Age=600; HttpOnly; SameSite=Lax${secure}`;
+}
+
+export function clearMicrosoftOAuthCookie(request: Request) {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${MICROSOFT_OAUTH_COOKIE}=; Path=/api/integrations/microsoft; Max-Age=0; HttpOnly; SameSite=Lax${secure}`;
+}
+
+export function readMicrosoftOAuthCookie(request: Request) {
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const cookie = cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${MICROSOFT_OAUTH_COOKIE}=`));
+  if (!cookie) throw new Error("Microsoft connection session expired. Please try Connect Microsoft again.");
+  const value = decodeURIComponent(cookie.slice(MICROSOFT_OAUTH_COOKIE.length + 1));
+  const payload = decryptJson<{ accessToken?: string; userId?: string; exp?: number }>(value);
+  if (!payload.accessToken || !payload.userId || !payload.exp) {
+    throw new Error("Microsoft connection session is invalid. Please try again.");
+  }
+  if (Date.now() > payload.exp) {
+    throw new Error("Microsoft connection session expired. Please try again.");
+  }
+  return { accessToken: payload.accessToken, userId: payload.userId };
 }
 
 export function createMicrosoftOAuthState(userId: string) {

@@ -1,4 +1,23 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
+import {
+  clearMicrosoftOAuthCookie,
+  exchangeMicrosoftCode,
+  readMicrosoftOAuthCookie,
+  saveMicrosoftIntegration,
+  verifyMicrosoftOAuthState,
+} from "@/lib/microsoft-integration.server";
+
+function redirectWithClearedCookie(request: Request, path: string) {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: new URL(path, request.url).toString(),
+      "Set-Cookie": clearMicrosoftOAuthCookie(request),
+    },
+  });
+}
 
 export const Route = createFileRoute("/api/integrations/microsoft/callback")({
   server: {
@@ -9,17 +28,43 @@ export const Route = createFileRoute("/api/integrations/microsoft/callback")({
         const state = url.searchParams.get("state");
         const error = url.searchParams.get("error");
         if (error) {
-          return Response.redirect(new URL(`/settings?microsoft=error&message=${encodeURIComponent(error)}`, request.url));
+          return redirectWithClearedCookie(
+            request,
+            `/settings?microsoft=error&message=${encodeURIComponent(error)}`,
+          );
         }
         if (!code || !state) {
-          return Response.redirect(new URL("/settings?microsoft=missing_code", request.url));
+          return redirectWithClearedCookie(request, "/settings?microsoft=missing_code");
         }
-        const params = new URLSearchParams({
-          microsoft: "complete",
-          microsoft_code: code,
-          microsoft_state: state,
-        });
-        return Response.redirect(new URL(`/settings?${params}`, request.url));
+        try {
+          const { userId } = verifyMicrosoftOAuthState(state);
+          const handoff = readMicrosoftOAuthCookie(request);
+          if (handoff.userId !== userId) {
+            throw new Error("Microsoft connection session does not match the signed-in user.");
+          }
+          const supabase = createClient<Database>(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_PUBLISHABLE_KEY!,
+            {
+              global: { headers: { Authorization: `Bearer ${handoff.accessToken}` } },
+              auth: { persistSession: false, autoRefreshToken: false },
+            },
+          );
+          const { data: userData, error: userError } = await supabase.auth.getUser();
+          if (userError || userData.user?.id !== userId) {
+            throw new Error("Sign-in expired while connecting Microsoft. Please try again.");
+          }
+          const token = await exchangeMicrosoftCode(request, code);
+          await saveMicrosoftIntegration(supabase, userId, token);
+          return redirectWithClearedCookie(request, "/settings?microsoft=connected");
+        } catch (err) {
+          const message = (err as Error).message.slice(0, 240);
+          console.error("[microsoft callback] connection failed", { message });
+          return redirectWithClearedCookie(
+            request,
+            `/settings?microsoft=error&message=${encodeURIComponent(message)}`,
+          );
+        }
       },
     },
   },

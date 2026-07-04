@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { buildMicrosoftAuthUrl } from "@/lib/microsoft-integration.server";
+import {
+  buildMicrosoftAuthUrl,
+  createMicrosoftOAuthCookie,
+} from "@/lib/microsoft-integration.server";
 
 export const Route = createFileRoute("/api/integrations/microsoft/connect")({
   server: {
@@ -22,7 +25,14 @@ export const Route = createFileRoute("/api/integrations/microsoft/connect")({
         const { data, error } = await supabase.auth.getUser();
         if (error || !data.user) return Response.json({ error: "unauthorized" }, { status: 401 });
         try {
-          return Response.json({ url: buildMicrosoftAuthUrl(request, data.user.id) });
+          return Response.json(
+            { url: buildMicrosoftAuthUrl(request, data.user.id) },
+            {
+              headers: {
+                "Set-Cookie": createMicrosoftOAuthCookie(request, auth.slice(7), data.user.id),
+              },
+            },
+          );
         } catch (error) {
           return Response.json({ error: (error as Error).message }, { status: 500 });
         }
