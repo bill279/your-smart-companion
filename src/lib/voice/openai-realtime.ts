@@ -3,6 +3,7 @@
 // voice provider.
 
 import { supabase } from "@/integrations/supabase/client";
+import { transcriptEventFromRealtime } from "./realtime-transcript-events";
 
 export type RealtimePhase =
   | "preflight"
@@ -116,9 +117,10 @@ export async function startOpenAiRealtimeSession(options: {
     err.retryable = retryable;
     throw err;
   }
-  const { clientSecret, model, tools, registeredToolNames, documentToolRegistered, instructions } = (await resp.json()) as {
+  const { clientSecret, model, voice, tools, registeredToolNames, documentToolRegistered, instructions } = (await resp.json()) as {
     clientSecret: string;
     model: string;
+    voice?: string;
     tools?: unknown[];
     registeredToolNames?: string[];
     documentToolRegistered?: boolean;
@@ -237,6 +239,17 @@ export async function startOpenAiRealtimeSession(options: {
     lastFinalUserAt = now;
     return true;
   };
+  const emitParsedTranscript = (msg: unknown) => {
+    const parsed = transcriptEventFromRealtime(msg as Parameters<typeof transcriptEventFromRealtime>[0], {
+      assistant: assistantBuf,
+      user: userInterimBuf,
+    });
+    assistantBuf = parsed.next.assistant;
+    userInterimBuf = parsed.next.user;
+    if (!parsed.transcript) return;
+    if (parsed.transcript.done && !shouldEmitFinal(parsed.transcript.role, parsed.transcript.text)) return;
+    onTranscriptCb?.(parsed.transcript.role, parsed.transcript.text, parsed.transcript.done);
+  };
   dc.addEventListener("open", () => {
     phase("live");
     // Defensively (re)register tools via session.update so document/email/web
@@ -262,6 +275,7 @@ export async function startOpenAiRealtimeSession(options: {
                   },
                   transcription: { model: "whisper-1" },
                 },
+                output: { voice: voice ?? "alloy" },
               },
               tools,
               tool_choice: "auto",
@@ -288,6 +302,7 @@ export async function startOpenAiRealtimeSession(options: {
         arguments?: string;
         item?: {
           type?: string;
+          role?: string;
           call_id?: string;
           name?: string;
           arguments?: string;
@@ -299,19 +314,6 @@ export async function startOpenAiRealtimeSession(options: {
           }>;
         };
       };
-      const assistantTextFromMessage = () =>
-        msg.transcript ??
-        msg.text ??
-        msg.response?.output
-          ?.flatMap((item) => item.content ?? [])
-          .map((content) => content.transcript ?? content.text ?? "")
-          .filter(Boolean)
-          .join("\n") ??
-        msg.item?.content
-          ?.map((content) => content.transcript ?? content.text ?? "")
-          .filter(Boolean)
-          .join("\n") ??
-        "";
       switch (msg.type) {
         case "session.created":
         case "session.updated": {
@@ -330,41 +332,30 @@ export async function startOpenAiRealtimeSession(options: {
         case "response.output_audio_transcript.delta":
         case "response.text.delta":
         case "response.output_text.delta":
-          assistantBuf += msg.delta ?? "";
-          onTranscriptCb?.("assistant", assistantBuf, false);
+          emitParsedTranscript(msg);
           break;
         case "response.audio_transcript.done":
         case "response.output_audio_transcript.done":
         case "response.text.done":
         case "response.output_text.done": {
-          const finalText = assistantTextFromMessage() || assistantBuf;
-          if (shouldEmitFinal("assistant", finalText)) onTranscriptCb?.("assistant", finalText, true);
-          assistantBuf = "";
+          emitParsedTranscript(msg);
           break;
         }
+        case "conversation.item.created":
+        case "conversation.item.completed":
         case "response.done": {
-          const finalText = assistantTextFromMessage();
-          if (finalText && shouldEmitFinal("assistant", finalText)) {
-            onTranscriptCb?.("assistant", finalText, true);
-            assistantBuf = "";
-          }
+          emitParsedTranscript(msg);
           break;
         }
         case "conversation.item.input_audio_transcription.completed":
         case "input_audio_transcription.completed":
         case "conversation.item.input_audio_transcription.done": {
-          const finalText = msg.transcript ?? msg.text ?? userInterimBuf;
-          if (finalText && shouldEmitFinal("user", finalText)) onTranscriptCb?.("user", finalText, true);
-          userInterimBuf = "";
+          emitParsedTranscript(msg);
           break;
         }
         case "conversation.item.input_audio_transcription.delta":
         case "input_audio_transcription.delta":
-          // Newer Realtime API emits interim user transcript deltas. Buffer
-          // them so the chat page can render a live "you're saying…" bubble
-          // while the user is still speaking.
-          userInterimBuf += msg.delta ?? "";
-          if (userInterimBuf) onTranscriptCb?.("user", userInterimBuf, false);
+          emitParsedTranscript(msg);
           break;
         case "response.function_call_arguments.delta": {
           const id = msg.call_id ?? "";
@@ -391,7 +382,9 @@ export async function startOpenAiRealtimeSession(options: {
           if (item?.type === "function_call" && item.call_id && item.name && !dispatchedCalls.has(item.call_id)) {
             dispatchedCalls.add(item.call_id);
             void runTool(item.name, item.arguments ?? "", item.call_id);
+            break;
           }
+          emitParsedTranscript(msg);
           break;
         }
         case "error":
