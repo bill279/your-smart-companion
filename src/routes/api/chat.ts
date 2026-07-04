@@ -240,11 +240,42 @@ function isExplicitEmailApproval(text: string) {
   if (/\b(don't|do not|dont|cancel|stop|wait|hold off|nevermind|never mind)\b/.test(s)) {
     return false;
   }
-  return /^(send|send it|yes send|yes, send|approved|approve|confirmed|confirm|looks good send it|ok send|okay send|go ahead and send|please send)\b/.test(s);
+  const normalized = s.replace(/[.!?]+$/g, "").replace(/\s+/g, " ");
+  const exactApprovals = new Set([
+    "send",
+    "send it",
+    "yes",
+    "yep",
+    "yeah",
+    "ok",
+    "okay",
+    "sure",
+    "approved",
+    "approve",
+    "confirmed",
+    "confirm",
+    "looks good",
+    "looks good send it",
+    "go ahead",
+    "go ahead and send",
+    "please send",
+  ]);
+  if (exactApprovals.has(normalized)) return true;
+  return /^(yes|yep|yeah|ok|okay|sure),?\s+(send|send it|please send|go ahead|approved|confirm)\b/.test(normalized);
 }
 
 function isCapabilitiesQuestion(text: string) {
   return /\b(what can you help(?: me)? with|what can you do|what do you do|your capabilities|how can you help(?: me)?)\b/i.test(text);
+}
+
+function detectEmailDraftIntent(text: string, userEmail: string | null) {
+  const s = text.trim();
+  if (!/\b(email|e-mail|mail|send)\b/i.test(s)) return null;
+  const explicit = s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? null;
+  const toSelf = /\b(me|myself|to me|for me|my email)\b/i.test(s);
+  const to = explicit ?? (toSelf ? userEmail : null);
+  if (!to) return null;
+  return { to };
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -495,6 +526,58 @@ export const Route = createFileRoute("/api/chat")({
             content: r.content,
           };
         });
+
+        const deterministicEmailDraft =
+          !body.regenerate && attachments.length === 0 && !isExplicitEmailApproval(userText)
+            ? detectEmailDraftIntent(userText, userEmail)
+            : null;
+        if (deterministicEmailDraft) {
+          const draft = await generateText({
+            model: gateway(modelId),
+            system: systemWithUser,
+            messages: [
+              ...baseMessages.slice(0, -1),
+              {
+                role: "user",
+                content: `Create a concise professional email draft for this request: ${userText}
+
+Recipient: ${deterministicEmailDraft.to}
+
+Return EXACTLY this Markdown structure:
+**Draft email — please review**
+
+- **To:** ${deterministicEmailDraft.to}
+- **Subject:** <short subject>
+
+---
+
+<email body, under 120 words unless the user asked otherwise>
+
+---
+
+Reply "send" to send it, or tell me what to change.
+
+Do not say it was sent. Do not call or mention tools.`,
+              },
+            ],
+            providerOptions: { openai: { reasoningEffort: "minimal" } },
+          });
+          const assistantText = cleanAssistantText(draft.text.trim());
+          await supabase.from("messages").insert({
+            thread_id: body.threadId!,
+            user_id: userId,
+            role: "assistant",
+            content: assistantText,
+          });
+          await supabase
+            .from("threads")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", body.threadId!);
+          return new Response(assistantText, {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        }
+
         // ── Deterministic document-generation shortcut ─────────────────────
         // The model unreliably chooses generate_document (especially on mobile),
         // often replying with prose or a Markdown link instead of the artifact
