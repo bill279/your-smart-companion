@@ -246,6 +246,16 @@ This request came from voice mode, but the user needs the full visual answer ren
 - If exact values are unavailable, write "Not published" or "Needs verification" rather than inventing them.
 - Keep it concise but complete enough that the user can act from the chat without needing the spoken audio.`;
 
+const VOICE_CHAT_ANSWER_CONTRACT = `
+
+# Voice chat answer contract
+This request came from voice mode, but it should be answered by the full chat brain.
+- Output the actual answer now, not a status update or placeholder.
+- Do not say "I'll check", "I'll prepare", "I'll share it in chat", or "one moment" unless you immediately provide the result in the same response.
+- For complex requests, be concise but complete: give the decision, the reasoning, and the next action.
+- If the request needs current information, use web_search and include clickable Markdown source links.
+- For email, calendar, or other external actions, show one clear draft/preview and wait for the user's explicit approval before taking the irreversible action. Do not ask for the same approval repeatedly.`;
+
 const SAFETY_GUARDRAILS = `
 
 # Safety & guardrails (mandatory)
@@ -256,9 +266,9 @@ const SAFETY_GUARDRAILS = `
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
-function isHighReasoningRequest(text: string, opts?: { voiceVisualIntent?: boolean; voiceDocIntent?: boolean }) {
+function isHighReasoningRequest(text: string, opts?: { voiceVisualIntent?: boolean; voiceDocIntent?: boolean; voiceChatIntent?: boolean }) {
   const s = text.toLowerCase();
-  if (opts?.voiceVisualIntent || opts?.voiceDocIntent) return true;
+  if (opts?.voiceVisualIntent || opts?.voiceDocIntent || opts?.voiceChatIntent) return true;
   return /\b(compare|comparison|table|matrix|research|look up|find the best|best .* for|top .* for|evaluate|analy[sz]e|recommend|recommendation|strategy|proposal|report|pdf|document|spreadsheet|cite|sources?|links?|specs?|specifications?|requirements?|technical|vendor|product)\b/.test(s);
 }
 
@@ -471,6 +481,7 @@ export const Route = createFileRoute("/api/chat")({
           regenerate?: boolean;
           voiceDocIntent?: boolean;
           voiceVisualIntent?: boolean;
+          voiceChatIntent?: boolean;
         };
         const attachments = body.attachments ?? [];
         if (!body.threadId || (!body.regenerate && !body.content?.trim() && attachments.length === 0)) {
@@ -480,6 +491,7 @@ export const Route = createFileRoute("/api/chat")({
         const highReasoning = isHighReasoningRequest(userText, {
           voiceVisualIntent: body.voiceVisualIntent,
           voiceDocIntent: body.voiceDocIntent,
+          voiceChatIntent: body.voiceChatIntent,
         });
         const modelId =
           costMode === "economy"
@@ -507,7 +519,7 @@ export const Route = createFileRoute("/api/chat")({
           if (lastAssistant?.id) {
             await supabase.from("messages").delete().eq("id", lastAssistant.id);
           }
-        } else if (body.voiceDocIntent || body.voiceVisualIntent) {
+        } else if (body.voiceDocIntent || body.voiceVisualIntent || body.voiceChatIntent) {
           // Voice path already inserted the user's spoken turn; do not double-insert.
         } else {
         const { error: insErr } = await supabase.from("messages").insert({
@@ -634,7 +646,7 @@ export const Route = createFileRoute("/api/chat")({
         const emailConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY)));
         const calendarConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY)));
         const integrationsBlock = `\n\n# Connected integration status\n- OpenAI chat, voice, web search, web scrape, and document generation: CONNECTED.\n- Email sending: ${emailConfigured ? "CONNECTED" : "NOT CONNECTED yet. Do not promise to send email. You may draft the email body, but say the email account must be connected before sending."}\n- Calendar read/create: ${calendarConfigured ? "CONNECTED" : "NOT CONNECTED yet. Do not promise to read or create calendar events. You may draft event details, but say the calendar account must be connected first."}`;
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${OUTPUT_HYGIENE}${body.voiceVisualIntent ? VOICE_VISUAL_ANSWER_CONTRACT : ""}${SAFETY_GUARDRAILS}${userBlock}${prefsBlock}${integrationsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${OUTPUT_HYGIENE}${body.voiceVisualIntent ? VOICE_VISUAL_ANSWER_CONTRACT : ""}${body.voiceChatIntent ? VOICE_CHAT_ANSWER_CONTRACT : ""}${SAFETY_GUARDRAILS}${userBlock}${prefsBlock}${integrationsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
@@ -654,12 +666,14 @@ export const Route = createFileRoute("/api/chat")({
             content: r.content,
           };
         });
-        const activeMessages = body.voiceVisualIntent && userText
+        const activeMessages = (body.voiceVisualIntent || body.voiceChatIntent) && userText
           ? [
               ...baseMessages,
               {
                 role: "user" as const,
-                content: `${userText}\n\nReturn the complete visual answer in chat. If this asks for a table, include the actual Markdown table. If this requires sources/links, include clickable Markdown links.`,
+                content: body.voiceVisualIntent
+                  ? `${userText}\n\nReturn the complete visual answer in chat. If this asks for a table, include the actual Markdown table. If this requires sources/links, include clickable Markdown links.`
+                  : `${userText}\n\nReturn the complete answer in chat now. Do not reply with a status-only placeholder. If this needs current information, use web_search and cite clickable Markdown links.`,
               },
             ]
           : baseMessages;

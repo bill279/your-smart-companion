@@ -118,6 +118,13 @@ function looksLikeVoiceVisualAnswerIntent(text: string) {
   return asksForCurrentSimpleFact || asksForTable || asksForProductResearch || (asksForResearch && asksForMeasuredCriteria);
 }
 
+function looksLikeVoiceBrainAnswerIntent(text: string) {
+  const s = text.toLowerCase();
+  const words = s.trim().split(/\s+/).filter(Boolean).length;
+  if (words >= 35 || text.length >= 220) return true;
+  return /\b(explain|walk me through|plan|strategy|summari[sz]e|summary|draft|write|create|analy[sz]e|recommend|proposal|compare|research|find|look up|email|reply|calendar|schedule|what should|how can|make it better)\b/.test(s);
+}
+
 function looksLikeVoiceVisualPlaceholder(text: string) {
   const s = text.toLowerCase();
   return (
@@ -660,9 +667,10 @@ function ThreadView({ threadId }: { threadId: string }) {
 	        },
 	      });
 	    };
-	    const runDeterministicVoiceVisualAnswer = async (text: string) => {
+	    const runDeterministicVoiceVisualAnswer = async (text: string, opts?: { visual?: boolean }) => {
+	      const visual = opts?.visual ?? true;
 	      const currentInfo = /\b(weather|temperature|forecast|rain|snow|wind|humidity|air quality|aqi|stock price|exchange rate|current time|time in|latest score|traffic)\b/i.test(text);
-	      setPendingAssistant(currentInfo ? "Checking the latest info…" : "Building the table and source-backed details…");
+	      setPendingAssistant(currentInfo ? "Checking the latest info…" : visual ? "Building the table and source-backed details…" : "Thinking through that…");
 	      try {
 	        const { data: sess } = await supabase.auth.getSession();
 	        const token = sess.session?.access_token;
@@ -677,11 +685,11 @@ function ThreadView({ threadId }: { threadId: string }) {
 	            threadId,
 	            content: text,
 	            attachments: [],
-	            voiceVisualIntent: true,
+	            ...(visual ? { voiceVisualIntent: true } : { voiceChatIntent: true }),
 	          }),
 	        });
 	        if (!res.ok || !res.body) {
-	          throw new Error((await res.text().catch(() => "")) || `Visual answer failed (${res.status}).`);
+	          throw new Error((await res.text().catch(() => "")) || `Voice answer failed (${res.status}).`);
 	        }
 	        const reader = res.body.getReader();
 	        const decoder = new TextDecoder();
@@ -695,7 +703,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 	        speakChatResultBriefly(acc);
 	        lastVisualIntentCompletedAtRef.current = Date.now();
 	      } catch (err) {
-	        toast.error(err instanceof Error ? err.message : "Visual answer failed.");
+	        toast.error(err instanceof Error ? err.message : "Voice answer failed.");
 	      } finally {
 	        visualInFlightRef.current = false;
 	        setPendingAssistant("");
@@ -874,7 +882,10 @@ function ThreadView({ threadId }: { threadId: string }) {
           }).catch((err) => {
             console.warn("[voice] failed to persist user transcript", err);
           });
-          if (looksLikeVoiceVisualAnswerIntent(text) && !looksLikeDocumentIntent(text)) {
+          const isDocumentIntent = looksLikeDocumentIntent(text);
+          const isVisualAnswerIntent = !isDocumentIntent && looksLikeVoiceVisualAnswerIntent(text);
+          const isBrainAnswerIntent = !isDocumentIntent && !isVisualAnswerIntent && looksLikeVoiceBrainAnswerIntent(text);
+          if (isVisualAnswerIntent || isBrainAnswerIntent) {
             const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
             const completedRecently =
               key === lastVisualIntentKeyRef.current &&
@@ -883,10 +894,10 @@ function ThreadView({ threadId }: { threadId: string }) {
               visualInFlightRef.current = true;
               lastVisualIntentKeyRef.current = key;
               openAiSessionRef.current?.sendEvent({ type: "response.cancel" });
-              void runDeterministicVoiceVisualAnswer(text);
+              void runDeterministicVoiceVisualAnswer(text, { visual: isVisualAnswerIntent });
               setTimeout(() => {
                 if (visualInFlightRef.current) {
-                  console.warn("[realtime] visual-intent lock released by timeout");
+                  console.warn("[realtime] deterministic voice-answer lock released by timeout");
                   visualInFlightRef.current = false;
                   lastVisualIntentCompletedAtRef.current = Date.now();
                   setPendingAssistant("");
@@ -894,7 +905,7 @@ function ThreadView({ threadId }: { threadId: string }) {
               }, 45_000);
             }
           }
-          if (looksLikeDocumentIntent(text)) {
+          if (isDocumentIntent) {
             const key = normalizeIntent(text);
             const now = Date.now();
             const completedRecently =
