@@ -42,7 +42,7 @@ This assistant is also spoken aloud. Long replies break voice mode. Always:
 When the user asked for a table/list/comparison and you also have to speak the answer aloud, do NOT read the table. Present it like a smart human executive walking a colleague through a slide:
 - Open with a one-sentence headline of the takeaway (e.g. "Tesla wins on range, Rivian wins on payload — here's the breakdown.").
 - Then give 2–4 sentences of natural spoken analysis: the key contrasts, what stands out, and your recommendation for different use cases.
-- Refer to the table as a visual ("you'll see in the table…", "the table on screen shows…") instead of reading rows and cells.
+- Only say a table, links, or details are "on screen" if your same final answer actually contains the Markdown table, clickable links, or detailed list.
 - NEVER speak column headers, pipe characters, dashes, or row-by-row cell values aloud. Never narrate "Feature: pricing. Product A: ten dollars. Product B: twelve dollars." That sounds robotic.
 - End with one crisp recommendation or follow-up question. Keep the whole spoken portion under ~80 words.
 The full Markdown table still goes in the chat text so it renders on screen — but your spoken delivery is the executive summary, not the read-aloud.
@@ -54,6 +54,8 @@ The full Markdown table still goes in the chat text so it renders on screen — 
 - Do not answer noisy fragments or ambiguous half-requests as if they were complete. Ask a short clarification instead of inventing the task.
 - If the user asks what you can help with / what can you do, answer in 1-2 concise sentences. Mention core capabilities only: research, email, calendar, documents/PDFs, comparisons, and company knowledge. Do not list every feature.
 - If the user asks for a table, output the Markdown table immediately instead of explaining limitations.
+- If the user says they do not see links/details/table, fix the previous answer by outputting the actual clickable links/details/table. Do not restate that they are on screen unless you include them.
+- Never claim "details are on screen", "links to each", "source links", "shown below", or "the table is on screen" unless the response visibly contains those details.
 - Forbidden response: "I am unable to display a visual table directly in this chat interface." Do not say anything equivalent.
 - If the user asks for a file (PDF, Word, Excel, CSV, TXT, report, export, attachment, download), you MUST call the \`generate_document\` tool and return the resulting download link. Never claim you cannot generate, attach, or create files in this chat.
 - Forbidden responses (and any paraphrase): "I cannot generate a downloadable .pdf file directly in this chat", "I am unable to create files", "I can't attach files", "as a text-based AI I cannot…". If you catch yourself about to say one of these, call \`generate_document\` instead.
@@ -196,7 +198,8 @@ Efficiency first — minimize tool calls and latency.
 - Never end a research answer with "Would you like me to…". End with the result.
 
 # Tables — build them, don't refuse
-- When the user asks for a comparison table (or says "make the table", "build me a table", "compare X by Y"), OUTPUT the Markdown table NOW using your own knowledge + whatever you already gathered this conversation. Fill in plausible, well-known spec values for mainstream products; mark genuinely unknown cells as "N/A" or "varies".
+- When the user asks for a comparison table (or says "make the table", "build me a table", "compare X by Y"), OUTPUT the Markdown table NOW using your own knowledge + whatever you already gathered this conversation. Do not invent exact specifications. If a spec is not found or not known, write "Not published", "Varies by model", or "Needs verification".
+- For product/vendor comparisons, include a "Source" column with clickable Markdown links when you searched or already have URLs. If you do not have URLs, do not say links are included.
 - NEVER reply with "my search did not yield specific models", "I need specific models to compare", or "would you like me to search for…". That is a refusal and is forbidden.
 - If you truly have zero candidates, pick the 4–6 most relevant well-known products in the category yourself and build the table. Do not ask the user to supply models.
 - A table response is: a one-line intro (optional), the Markdown table, and nothing else. No follow-up question.
@@ -230,6 +233,17 @@ const OUTPUT_HYGIENE = `
 - For longer responses, break into coherent small paragraphs of ≤120 words each and stream them incrementally.
 - Before returning, self-check for encoding or rendering errors. If the output looks corrupted or gibberish, regenerate it cleanly (up to 2 internal retries). If it still looks corrupted, reply exactly: "Output corrupted — please try again" and offer to retry.
 - Tone: professional, precise, no filler. Ensure replies read naturally when spoken aloud.`;
+
+const VOICE_VISUAL_ANSWER_CONTRACT = `
+
+# Voice visual answer contract
+This request came from voice mode, but the user needs the full visual answer rendered in chat.
+- Output the actual answer, not a spoken placeholder.
+- If the user asked for a table/comparison/specs, include a GitHub-Flavored Markdown table in this response.
+- If the user asked for links/sources or current products/vendors, use web_search when needed and include clickable Markdown source links.
+- Never say "it's on screen", "links to each", "details are below", or "the table is on screen" unless this exact response contains the visible table/details/links.
+- If exact values are unavailable, write "Not published" or "Needs verification" rather than inventing them.
+- Keep it concise but complete enough that the user can act from the chat without needing the spoken audio.`;
 
 const SAFETY_GUARDRAILS = `
 
@@ -455,6 +469,7 @@ export const Route = createFileRoute("/api/chat")({
           attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
           regenerate?: boolean;
           voiceDocIntent?: boolean;
+          voiceVisualIntent?: boolean;
         };
         const attachments = body.attachments ?? [];
         if (!body.threadId || (!body.regenerate && !body.content?.trim() && attachments.length === 0)) {
@@ -478,7 +493,7 @@ export const Route = createFileRoute("/api/chat")({
           if (lastAssistant?.id) {
             await supabase.from("messages").delete().eq("id", lastAssistant.id);
           }
-        } else if (body.voiceDocIntent) {
+        } else if (body.voiceDocIntent || body.voiceVisualIntent) {
           // Voice path already inserted the user's spoken turn; do not double-insert.
         } else {
         const { error: insErr } = await supabase.from("messages").insert({
@@ -605,7 +620,7 @@ export const Route = createFileRoute("/api/chat")({
         const emailConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY)));
         const calendarConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY)));
         const integrationsBlock = `\n\n# Connected integration status\n- OpenAI chat, voice, web search, web scrape, and document generation: CONNECTED.\n- Email sending: ${emailConfigured ? "CONNECTED" : "NOT CONNECTED yet. Do not promise to send email. You may draft the email body, but say the email account must be connected before sending."}\n- Calendar read/create: ${calendarConfigured ? "CONNECTED" : "NOT CONNECTED yet. Do not promise to read or create calendar events. You may draft event details, but say the calendar account must be connected first."}`;
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${OUTPUT_HYGIENE}${SAFETY_GUARDRAILS}${userBlock}${prefsBlock}${integrationsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${OUTPUT_HYGIENE}${body.voiceVisualIntent ? VOICE_VISUAL_ANSWER_CONTRACT : ""}${SAFETY_GUARDRAILS}${userBlock}${prefsBlock}${integrationsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
@@ -625,6 +640,15 @@ export const Route = createFileRoute("/api/chat")({
             content: r.content,
           };
         });
+        const activeMessages = body.voiceVisualIntent && userText
+          ? [
+              ...baseMessages,
+              {
+                role: "user" as const,
+                content: `${userText}\n\nReturn the complete visual answer in chat. If this asks for a table, include the actual Markdown table. If this requires sources/links, include clickable Markdown links.`,
+              },
+            ]
+          : baseMessages;
         const pendingEmailDraft = latestPendingEmailDraft(history);
 
         if (!body.regenerate && attachments.length === 0 && isCancellationOrHold(userText) && pendingEmailDraft) {
@@ -880,7 +904,7 @@ Do not say it was sent. Do not call or mention tools.`,
         const result = streamText({
           model: gateway(modelId),
           system: systemWithUser,
-          messages: baseMessages,
+          messages: activeMessages,
           stopWhen: stepCountIs(12),
           providerOptions: {
             openai: {

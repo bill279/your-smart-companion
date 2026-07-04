@@ -36,7 +36,7 @@ VOICE OUTPUT CONTRACT:
 - Speak in 1-2 short sentences by default. Keep spoken answers under 25 words unless the user explicitly asks for detail.
 - Never think out loud, fill silence, narrate internal steps, ramble, repeat yourself, or say unrelated/random words.
 - If you are unsure, ask one concise clarifying question. Do not improvise details.
-- For tables, comparisons, email drafts, documents, code, lists, or anything long: keep the spoken response brief; the chat transcript will show the text.
+- For tables, comparisons, email drafts, documents, code, lists, or anything long: keep the spoken response brief, but never claim the chat has details unless the details are actually rendered in chat.
 - Do not read long tables, long drafts, or long research results out loud.
 - If the user interrupts, stop immediately and listen.
 
@@ -99,6 +99,26 @@ function looksUnstableVoiceText(text: string) {
   if (/(.)\1{15,}/.test(s)) return true;
   if (/\blorem ipsum\b/i.test(s)) return true;
   return false;
+}
+
+function looksLikeVoiceVisualAnswerIntent(text: string) {
+  const s = text.toLowerCase();
+  const asksForTable =
+    /\b(table|comparison|compare|matrix|side[-\s]?by[-\s]?side|chart|spreadsheet|rows?|columns?|specs?|specifications?)\b/.test(s);
+  const asksForResearch =
+    /\b(best|top|find|research|look up|source|sources|links?|cite|citations?|options?|vendors?|products?|models?)\b/.test(s);
+  const asksForMeasuredCriteria =
+    /\b(depth of field|resolution|price|cost|range|payload|accuracy|speed|rating|dimensions?|throughput|capacity)\b/.test(s);
+  return asksForTable || (asksForResearch && asksForMeasuredCriteria);
+}
+
+function looksLikeVoiceVisualPlaceholder(text: string) {
+  const s = text.toLowerCase();
+  return (
+    /\b(on screen|shown below|see below|you['’]ll see|details are listed|links? to each|source links?)\b/.test(s) &&
+    !/\|.+\|/.test(text) &&
+    !/\[[^\]]+\]\(https?:\/\//i.test(text)
+  );
 }
 
 function parseBoldField(text: string, label: string) {
@@ -361,6 +381,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   // generator is down.
   const docIntentFailureCountRef = useRef<Map<string, number>>(new Map());
   const DOC_MAX_FAILURES_PER_INTENT = 2;
+  const visualInFlightRef = useRef(false);
+  const lastVisualIntentKeyRef = useRef("");
+  const lastVisualIntentCompletedAtRef = useRef(0);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -509,7 +532,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- PROFESSIONAL INTELLIGENCE: behave like a competent chief-of-staff assistant. Lead with the useful answer/action, not filler. Avoid 'sure thing', 'absolutely', rambling, jokes, apologies loops, and casual throwaway phrases.",
       "- DO NOT ANSWER FRAGMENTS: if the transcript sounds partial, noisy, background speech, canceled mid-thought, or like the user is still thinking, wait. Ignore isolated words, breathing, false starts, and short fragments unless they are clear commands like 'stop' or 'cancel'. Do not invent meaning from weak audio. If genuinely unclear, ask one short repair question. If they say wait/cancel/never mind, say 'Okay — I’ll wait.'",
       "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content. If uncertain, ask one concise question.",
-      "- VISUAL CONTENT: for tables, comparisons, email drafts, documents, code, or long lists, keep speech short and let the chat transcript carry the text. Do not read long content out loud.",
+      "- VISUAL CONTENT: for tables, comparisons, links, email drafts, documents, code, or long lists, keep speech short. Never claim a table, links, or details are on screen unless the chat message actually contains them. Do not read long content out loud.",
       "- DOCUMENT GENERATION: you CAN create downloadable PDF, DOCX, Markdown, XLSX, CSV, and TXT files. For requests like 'create a PDF from that summary', 'export this', 'make a Word doc', or 'download this report', call generate_document immediately. Never say you cannot create files, PDFs, attachments, or downloads.",
       "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
       "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
@@ -559,6 +582,47 @@ function ThreadView({ threadId }: { threadId: string }) {
 	    const isDocumentLimboReply = (t: string) =>
 	      /\b(?:i can|i will|i'll|would you like|need .*overview|cannot|can't|unable)\b/i.test(t) &&
 	      /\b(?:pdf|document|file|summary|report)\b/i.test(t);
+	    const runDeterministicVoiceVisualAnswer = async (text: string) => {
+	      setPendingAssistant("Building the table and source-backed details…");
+	      try {
+	        const { data: sess } = await supabase.auth.getSession();
+	        const token = sess.session?.access_token;
+	        if (!token) throw new Error("Session expired. Please sign in again.");
+	        const res = await fetch("/api/chat", {
+	          method: "POST",
+	          headers: {
+	            "Content-Type": "application/json",
+	            Authorization: `Bearer ${token}`,
+	          },
+	          body: JSON.stringify({
+	            threadId,
+	            content: text,
+	            attachments: [],
+	            voiceVisualIntent: true,
+	          }),
+	        });
+	        if (!res.ok || !res.body) {
+	          throw new Error((await res.text().catch(() => "")) || `Visual answer failed (${res.status}).`);
+	        }
+	        const reader = res.body.getReader();
+	        const decoder = new TextDecoder();
+	        let acc = "";
+	        while (true) {
+	          const { value, done } = await reader.read();
+	          if (done) break;
+	          acc += decoder.decode(value, { stream: true });
+	          setPendingAssistant(cleanAssistantText(acc));
+	        }
+	        lastVisualIntentCompletedAtRef.current = Date.now();
+	      } catch (err) {
+	        toast.error(err instanceof Error ? err.message : "Visual answer failed.");
+	      } finally {
+	        visualInFlightRef.current = false;
+	        setPendingAssistant("");
+	        qc.invalidateQueries({ queryKey: ["messages", threadId] });
+	        qc.invalidateQueries({ queryKey: ["threads"] });
+	      }
+	    };
 	    const runDeterministicVoiceDocument = async (text: string, key: string) => {
 	      setVoicePhase("generating-document");
 	      setPendingAssistant(`Generating ${detectFormat(text).toUpperCase() === "AUTO" ? "document" : detectFormat(text).toUpperCase()}…`);
@@ -681,11 +745,18 @@ function ThreadView({ threadId }: { threadId: string }) {
       session.onTranscript((role, text, done) => {
 	        if (role === "assistant") {
 	          assistantBuf = text;
-	          if (!docInFlightRef.current) setPendingAssistant(text);
+	          if (!docInFlightRef.current && !visualInFlightRef.current && !looksLikeVoiceVisualPlaceholder(text)) {
+	            setPendingAssistant(text);
+	          }
 	          if (done && text.trim()) {
 	            const recentlyHandledDoc =
 	              Date.now() - lastDocumentIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
-	            if (docInFlightRef.current || (recentlyHandledDoc && isDocumentLimboReply(text))) {
+	            if (
+	              docInFlightRef.current ||
+	              visualInFlightRef.current ||
+	              looksLikeVoiceVisualPlaceholder(text) ||
+	              (recentlyHandledDoc && isDocumentLimboReply(text))
+	            ) {
 	              setPendingAssistant("");
 	              assistantBuf = "";
 	              return;
@@ -706,6 +777,26 @@ function ThreadView({ threadId }: { threadId: string }) {
           void add({ data: { threadId, role: "user", content: text } }).then(() => {
             qc.invalidateQueries({ queryKey: ["messages", threadId] });
           });
+          if (looksLikeVoiceVisualAnswerIntent(text) && !looksLikeDocumentIntent(text)) {
+            const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
+            const completedRecently =
+              key === lastVisualIntentKeyRef.current &&
+              Date.now() - lastVisualIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
+            if (!visualInFlightRef.current && !completedRecently) {
+              visualInFlightRef.current = true;
+              lastVisualIntentKeyRef.current = key;
+              openAiSessionRef.current?.sendEvent({ type: "response.cancel" });
+              void runDeterministicVoiceVisualAnswer(text);
+              setTimeout(() => {
+                if (visualInFlightRef.current) {
+                  console.warn("[realtime] visual-intent lock released by timeout");
+                  visualInFlightRef.current = false;
+                  lastVisualIntentCompletedAtRef.current = Date.now();
+                  setPendingAssistant("");
+                }
+              }, 45_000);
+            }
+          }
           if (looksLikeDocumentIntent(text)) {
             const key = normalizeIntent(text);
             const now = Date.now();
