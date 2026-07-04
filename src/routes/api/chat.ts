@@ -274,6 +274,19 @@ function isExplicitEmailApproval(text: string) {
   return /^(yes|yep|yeah|ok|okay|sure),?\s+(send|send it|please send|go ahead|approved|confirm)\b/.test(normalized);
 }
 
+function isCancellationOrHold(text: string) {
+  return /\b(don't|do not|dont|cancel|stop|wait|hold off|nevermind|never mind|not now)\b/i.test(text);
+}
+
+function looksLikeUnclearAudioFragment(text: string) {
+  const s = text.trim().toLowerCase();
+  if (!s) return false;
+  if (/\b(uh|um|umm|hmm|thing|stuff|whatever)\b/.test(s) && /\b(wait|never mind|nevermind|to|send)\b/.test(s)) {
+    return true;
+  }
+  return /\bsend the thing\b/.test(s) || /\b(can you email|can you send)\s*[.…-]*$/i.test(text.trim());
+}
+
 function isExplicitCalendarApproval(text: string) {
   const s = text.trim().toLowerCase();
   if (!s) return false;
@@ -316,6 +329,45 @@ function detectEmailDraftIntent(text: string, userEmail: string | null) {
   const to = explicit ?? (toSelf ? userEmail : null);
   if (!to) return null;
   return { to };
+}
+
+type PendingEmailDraft = {
+  to: string;
+  cc?: string;
+  subject: string;
+  body: string;
+};
+
+function parsePendingEmailDraft(content: string): PendingEmailDraft | null {
+  if (!/\*\*Draft email\s*—\s*please review\*\*/i.test(content)) return null;
+  if (!/reply\s+["“]?send["”]?\s+to send it/i.test(content)) return null;
+  const to = content.match(/-\s*\*\*To:\*\*\s*([^\n]+)/i)?.[1]?.trim();
+  const ccRaw = content.match(/-\s*\*\*Cc:\*\*\s*([^\n]+)/i)?.[1]?.trim();
+  const subject = content.match(/-\s*\*\*Subject:\*\*\s*([^\n]+)/i)?.[1]?.trim();
+  const sections = content.split(/\n-{3,}\n/);
+  const body = sections.length >= 3 ? sections.slice(1, -1).join("\n---\n").trim() : "";
+  if (!to || !subject || !body) return null;
+  if (!z.string().email().safeParse(to).success) return null;
+  const cc = ccRaw && ccRaw !== "(none)" && z.string().email().safeParse(ccRaw).success ? ccRaw : undefined;
+  return {
+    to,
+    cc,
+    subject: subject.slice(0, 200),
+    body,
+  };
+}
+
+function latestPendingEmailDraft(rows: Array<{ role: string; content: string }>): PendingEmailDraft | null {
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row.role === "assistant") {
+      const draft = parsePendingEmailDraft(row.content);
+      if (draft) return draft;
+      // A non-draft assistant answer after an older draft means the task likely moved on.
+      if (row.content.trim()) return null;
+    }
+  }
+  return null;
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -566,6 +618,88 @@ export const Route = createFileRoute("/api/chat")({
             content: r.content,
           };
         });
+        const pendingEmailDraft = latestPendingEmailDraft(history);
+
+        if (!body.regenerate && attachments.length === 0 && isCancellationOrHold(userText) && pendingEmailDraft) {
+          const assistantText = "Cancelled. The email was not sent.";
+          await supabase.from("messages").insert({
+            thread_id: body.threadId!,
+            user_id: userId,
+            role: "assistant",
+            content: assistantText,
+          });
+          await supabase
+            .from("threads")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", body.threadId!);
+          return new Response(assistantText, {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        }
+
+        if (!body.regenerate && attachments.length === 0 && looksLikeUnclearAudioFragment(userText)) {
+          const assistantText = "I caught part of that — what should I send, and to whom?";
+          await supabase.from("messages").insert({
+            thread_id: body.threadId!,
+            user_id: userId,
+            role: "assistant",
+            content: assistantText,
+          });
+          await supabase
+            .from("threads")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", body.threadId!);
+          return new Response(assistantText, {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        }
+
+        if (!body.regenerate && attachments.length === 0 && isExplicitEmailApproval(userText) && pendingEmailDraft) {
+          try {
+            await sendOutlookMail(supabase, userId, pendingEmailDraft);
+            await logAction("send_email", `Sent email to ${pendingEmailDraft.to} — ${pendingEmailDraft.subject}`, {
+              ...pendingEmailDraft,
+              provider: "microsoft",
+              source: "pending_draft_approval",
+            });
+            const assistantText = `Sent — I emailed **${pendingEmailDraft.subject}** to **${pendingEmailDraft.to}**.`;
+            await supabase.from("messages").insert({
+              thread_id: body.threadId!,
+              user_id: userId,
+              role: "assistant",
+              content: assistantText,
+            });
+            await supabase
+              .from("threads")
+              .update({ updated_at: new Date().toISOString() })
+              .eq("id", body.threadId!);
+            return new Response(assistantText, {
+              headers: { "Content-Type": "text/plain; charset=utf-8" },
+            });
+          } catch (error) {
+            const message = (error as Error).message;
+            await logAction(
+              "send_email",
+              `Failed to send approved draft to ${pendingEmailDraft.to}`,
+              { ...pendingEmailDraft, provider: "microsoft", error: message },
+              "error",
+            );
+            const assistantText = `I couldn't send it: ${message}`;
+            await supabase.from("messages").insert({
+              thread_id: body.threadId!,
+              user_id: userId,
+              role: "assistant",
+              content: assistantText,
+            });
+            await supabase
+              .from("threads")
+              .update({ updated_at: new Date().toISOString() })
+              .eq("id", body.threadId!);
+            return new Response(assistantText, {
+              headers: { "Content-Type": "text/plain; charset=utf-8" },
+            });
+          }
+        }
 
         const deterministicEmailDraft =
           !body.regenerate && attachments.length === 0 && !isExplicitEmailApproval(userText)
@@ -874,17 +1008,19 @@ Do not say it was sent. Do not call or mention tools.`,
                 cc: z.string().email().optional(),
               }),
               execute: async ({ to, subject, body: emailBody, cc }) => {
-                if (!isExplicitEmailApproval(userText)) {
+                if (!isExplicitEmailApproval(userText) || !pendingEmailDraft) {
                   await logAction(
                     "send_email",
                     `Blocked premature email send to ${to} — ${subject}`,
-                    { to, cc, subject, reason: "approval_required" },
+                    { to, cc, subject, reason: pendingEmailDraft ? "approval_required" : "no_pending_draft" },
                     "error",
                   );
                   return {
                     error: "approval_required",
                     message:
-                      "Email was not sent. Present the full draft preview to the user and wait for an explicit approval like 'send' before calling send_email again.",
+                      pendingEmailDraft
+                        ? "Email was not sent. Present the full draft preview to the user and wait for an explicit approval like 'send' before calling send_email again."
+                        : "Email was not sent. There is no pending draft in this thread. Create the draft preview first, then wait for explicit approval.",
                     draft: { to, cc, subject, body: emailBody },
                   };
                 }

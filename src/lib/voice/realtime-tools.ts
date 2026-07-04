@@ -71,7 +71,7 @@ export const REALTIME_TOOLS = [
     type: "function",
     name: "send_email",
     description:
-      "Send an email from the user's connected Outlook/Gmail account. Only call after the user has verbally approved the draft. Include approved: true only when the user's latest reply is an explicit approval such as send, yes send, confirm, approved, or looks good send it.",
+      "Send an email from the user's connected Outlook/Gmail account. Only call after the immediately previous assistant turn presented a complete draft/readback and the user's latest reply explicitly approved it. Include approved: true only for clear approvals such as send, yes send, confirm, approved, or looks good send it. Never call from the initial email request.",
     parameters: {
       type: "object",
       properties: {
