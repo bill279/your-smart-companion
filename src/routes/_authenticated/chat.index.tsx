@@ -6,15 +6,20 @@ import {
   Activity,
   ArrowRight,
   Bot,
+  CalendarCheck,
   CheckCircle2,
+  ClipboardList,
   Clock,
   FileText,
+  FileSpreadsheet,
   Inbox,
   MailPlus,
   Mic,
   Plus,
+  Search,
   Settings,
   Sparkles,
+  Users,
   Wifi,
   WifiOff,
 } from "lucide-react";
@@ -67,6 +72,73 @@ const QUICK_ACTIONS = [
     icon: Mic,
     accent: "from-emerald-500 to-teal-400",
     voice: true,
+  },
+] as const;
+
+const WORKFLOW_TEMPLATES = [
+  {
+    title: "Client follow-up",
+    category: "Email",
+    description: "Draft a polished follow-up email and wait for approval before sending.",
+    icon: MailPlus,
+    prompt:
+      "Help me send a professional client follow-up from Outlook. First identify the recipient, context, and goal if they are not already clear. Draft the email in clean formatting, show me the full draft, and wait for my approval before sending.",
+  },
+  {
+    title: "Unread inbox triage",
+    category: "Outlook",
+    description: "Sort unread emails into urgent, needs reply, waiting, and FYI.",
+    icon: Inbox,
+    prompt:
+      "Triage my unread Outlook emails. Group them into Urgent, Needs reply, Waiting/blockers, and FYI. Keep it concise, high-level, and include suggested next actions. Do not expose sender email addresses unless needed.",
+  },
+  {
+    title: "Prepare my day",
+    category: "Chief of staff",
+    description: "Build a practical plan from email, calendar, and open loops.",
+    icon: CalendarCheck,
+    prompt:
+      "Prepare my day like an executive assistant. Use Outlook email and calendar context. Give me: Top priorities, meetings to prepare for, emails needing action, risks/blockers, and a suggested schedule. Keep it practical and concise.",
+  },
+  {
+    title: "BP Automation report",
+    category: "Documents",
+    description: "Create a client-ready PDF or Word summary for BP Automation work.",
+    icon: FileText,
+    prompt:
+      "Create a client-ready BP Automation report. Ask one focused question if you need the topic. Otherwise produce a polished one-page PDF with a short executive summary, bullet points, and clear next steps.",
+  },
+  {
+    title: "Vendor comparison",
+    category: "Research",
+    description: "Research options, cite sources, and compare in a table.",
+    icon: Search,
+    prompt:
+      "Research and compare vendor or product options for me. Ask for the product/category if missing. Use current web research with source links, create a comparison table, explain the tradeoffs, and end with a recommendation.",
+  },
+  {
+    title: "Quote/proposal starter",
+    category: "Sales",
+    description: "Turn rough notes into a proposal outline or customer email.",
+    icon: FileSpreadsheet,
+    prompt:
+      "Help me prepare a quote or proposal starter. Ask one focused question if the project scope is missing. Then create a structured outline with scope, assumptions, deliverables, timeline, risks, and next steps. If I ask, export it as PDF or Word.",
+  },
+  {
+    title: "Contact history",
+    category: "Outlook",
+    description: "Find recent communication with a person or company.",
+    icon: Users,
+    prompt:
+      "Look up my Outlook history with a person or company. Ask for the name if missing. Summarize the relationship, latest messages, open loops, commitments, and recommended follow-up. Keep it executive-level.",
+  },
+  {
+    title: "Meeting notes to actions",
+    category: "Operations",
+    description: "Convert raw notes or transcript into owners and next steps.",
+    icon: ClipboardList,
+    prompt:
+      "Turn meeting notes into an action plan. If I have not provided notes yet, ask me to paste them or upload a file. Then extract decisions, action items, owners, due dates, risks, and a short follow-up email draft.",
   },
 ] as const;
 
@@ -254,6 +326,47 @@ function ChatDashboard() {
               </button>
             );
           })}
+        </section>
+
+        <section className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Reusable workflows</p>
+              <h2 className="text-xl font-semibold tracking-tight">Client-ready task templates</h2>
+            </div>
+            <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+              These guide BPA Bot into the right process: ask only what is missing, use connected tools, and wait for approval on email/calendar actions.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {WORKFLOW_TEMPLATES.map((workflow) => {
+              const Icon = workflow.icon;
+              return (
+                <button
+                  key={workflow.title}
+                  type="button"
+                  onClick={() => startTask.mutate({ title: workflow.title, prompt: workflow.prompt })}
+                  disabled={startTask.isPending}
+                  className="group rounded-2xl border border-border/70 bg-background/70 p-4 text-left transition hover:border-primary/50 hover:bg-muted/50 disabled:opacity-60"
+                >
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                      <Icon size={20} />
+                    </span>
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+                      {workflow.category}
+                    </span>
+                  </div>
+                  <h3 className="font-semibold">{workflow.title}</h3>
+                  <p className="mt-2 min-h-12 text-sm leading-6 text-muted-foreground">{workflow.description}</p>
+                  <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
+                    Run workflow
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </section>
 
         <section className="grid flex-1 gap-5 lg:grid-cols-[1.15fr_0.85fr]">
