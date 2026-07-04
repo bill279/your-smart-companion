@@ -1,4 +1,4 @@
-const CACHE_NAME = "bpa-bot-shell-v1";
+const CACHE_NAME = "bpa-bot-shell-v2";
 const APP_SHELL = [
   "/manifest.webmanifest",
   "/icon-192.png",
