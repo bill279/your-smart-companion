@@ -167,11 +167,12 @@
   }
 
   .chat-mobile-header {
-    padding-top: max(env(safe-area-inset-top), 0.5rem);
+    padding-top: max(calc(env(safe-area-inset-top) + 0.35rem), 1rem);
+    min-height: calc(4.75rem + env(safe-area-inset-top));
   }
 
   .chat-mobile-scroll {
-    padding-top: calc(4.25rem + env(safe-area-inset-top));
+    padding-top: calc(5.1rem + env(safe-area-inset-top));
   }
 
   @media (min-width: 768px) {

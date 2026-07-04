@@ -1478,13 +1478,13 @@ function ThreadView({ threadId }: { threadId: string }) {
         <div className="chat-mobile-header md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pb-2 border-b border-border bg-card/95 backdrop-blur">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-2 rounded-md hover:bg-secondary text-foreground"
+            className="p-2.5 rounded-md hover:bg-secondary text-foreground"
             aria-label="Open menu"
           >
-            <Menu size={20} />
+            <Menu size={22} />
           </button>
-          <img src={BPA_LOGO_SRC} alt="BP Automation" className="h-8 w-8 rounded-lg object-contain" />
-          <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
+          <img src={BPA_LOGO_SRC} alt="BP Automation" className="h-9 w-14 rounded-md object-contain" />
+          <div className="text-base font-semibold text-foreground truncate">BPA Bot</div>
           {voiceProvider === "openai_realtime" ? (
             <span
               title={voiceActive ? `OpenAI Voice live · ${fmtElapsed(voiceElapsed)}` : `OpenAI Voice idle · ${costMode}`}
@@ -1500,14 +1500,14 @@ function ThreadView({ threadId }: { threadId: string }) {
               Voice off
             </span>
           )}
-          <div className="relative ml-1">
+          <div className="relative ml-0.5">
             <button
               onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
-              className="p-2 rounded-md hover:bg-secondary text-foreground"
+              className="p-2.5 rounded-md hover:bg-secondary text-foreground"
               aria-label="Export chat"
               title="Export chat"
             >
-              <MoreVertical size={18} />
+              <MoreVertical size={20} />
             </button>
             {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} onPdf={exportPdf} onDocx={exportDocx} onXlsx={exportXlsx} onCsv={exportCsv} />}
           </div>
@@ -1516,30 +1516,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         <div ref={scrollRef} className="chat-mobile-scroll relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pb-6">
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 space-y-6">
             {!hasVisibleConversation && (
-              <div className="pt-16 md:pt-24 flex flex-col items-center text-center">
-                <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
-                  BP
-                </div>
-                <h2 className="text-xl md:text-2xl font-semibold text-foreground">Hey, I'm BPA Bot.</h2>
-                <p className="text-sm text-muted-foreground mt-1">I can research, compare options, draft emails, create files, and help you get work done. What do you want to tackle?</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-6 w-full max-w-xl">
-                  {[
-                    { title: "Draft an email", body: "Draft a professional email to a client following up on our last meeting." },
-                    { title: "Compare options", body: "Compare the pros and cons of three CRMs for a small B2B team in a table." },
-                    { title: "Summarize a topic", body: "Give me a brief, executive-level summary of BP Automation's industry." },
-                    { title: "Export a report", body: "Create a one-page PDF report titled \"Weekly Update\" with sample sections." },
-                  ].map((p) => (
-                    <button
-                      key={p.title}
-                      type="button"
-                      onClick={() => setInput(p.body)}
-                      className="text-left rounded-lg border border-border bg-card hover:bg-secondary/60 transition p-3"
-                    >
-                      <div className="text-sm font-medium text-foreground">{p.title}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{p.body}</div>
-                    </button>
-                  ))}
-                </div>
+              <div className="pt-20 md:pt-24 flex flex-col items-center text-center">
+                <img src={BPA_LOGO_SRC} alt="BP Automation" className="mb-4 h-16 w-auto object-contain md:h-20" />
+                <h2 className="text-xl md:text-2xl font-semibold text-foreground">How can I help?</h2>
+                <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                  Ask in chat or tap the mic. I can research, compare, email, schedule, and create files.
+                </p>
               </div>
             )}
             {messages.map((m) => {
@@ -1634,7 +1616,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         )}
         <form
           onSubmit={onSubmit}
-          className="relative z-10 mx-auto w-full max-w-3xl px-4 md:px-6 mb-6"
+          className="relative z-10 mx-auto mb-[calc(1.25rem+env(safe-area-inset-bottom))] w-full max-w-3xl px-4 md:mb-6 md:px-6"
         >
           <div className="rounded-2xl border border-border bg-card shadow-sm p-2 flex flex-col gap-2">
           {attachments.length > 0 && (
@@ -1981,30 +1963,32 @@ function ArtifactCard({
           ? FileSpreadsheet
           : FileText;
   return (
-    <div className="not-prose my-3 flex items-center gap-3 rounded-lg border border-border bg-card p-3 shadow-sm">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-        <Icon size={20} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-foreground">
-          {data.title || data.filename || "Document"}
+    <div className="not-prose my-3 rounded-xl border border-primary/20 bg-card p-3 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon size={21} />
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-          {fmt && <span className="rounded bg-secondary px-1.5 py-0.5 font-medium">{fmt}</span>}
-          {data.filename && <span className="truncate">{data.filename}</span>}
-          {createdLabel && <span>· {createdLabel}</span>}
-        </div>
-        <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
-          If preview fails on mobile, use Download. It saves from a fresh file fetch.
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-foreground">
+            {data.title || data.filename || "Document"}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            {fmt && <span className="rounded bg-secondary px-1.5 py-0.5 font-semibold text-foreground">{fmt}</span>}
+            {data.filename && <span className="max-w-full truncate">{data.filename}</span>}
+            {createdLabel && <span>· {createdLabel}</span>}
+          </div>
+          <div className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
+            File is ready. On iPhone, Download is usually more reliable than browser preview.
+          </div>
         </div>
       </div>
       {data.url && (
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
           <a
             href={data.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80"
+            className="inline-flex items-center justify-center gap-1 rounded-md border border-border bg-secondary px-3 py-2 text-xs font-semibold text-foreground hover:bg-secondary/80"
           >
             Open
           </a>
@@ -2033,7 +2017,7 @@ function ArtifactCard({
               }
             }}
             disabled={downloading}
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            className="inline-flex items-center justify-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-70"
           >
             <Download size={12} /> {downloading ? "Downloading…" : "Download"}
           </button>
@@ -2047,7 +2031,7 @@ function ArtifactCard({
                 toast.error("Could not copy link.");
               }
             }}
-            className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+            className="col-span-2 inline-flex items-center justify-center gap-1 rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary sm:col-span-1"
           >
             Copy link
           </button>
