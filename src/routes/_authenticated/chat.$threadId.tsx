@@ -442,6 +442,40 @@ function ThreadView({ threadId }: { threadId: string }) {
   // path may have persisted as assistant messages. See
   // src/lib/voice/transient-errors.ts for the pattern list.
   const messages = filterOutTransientVoiceErrors(rawMessages);
+  type LocalVoiceMessage = { id: string; role: "user" | "assistant"; content: string };
+  const [localVoiceMessages, setLocalVoiceMessages] = useState<LocalVoiceMessage[]>([]);
+  const normMessage = (s: string) => cleanAssistantText(s).trim().replace(/\s+/g, " ");
+  const addLocalVoiceMessage = (role: "user" | "assistant", content: string) => {
+    const cleaned = role === "assistant" ? cleanAssistantText(content) : content.trim();
+    if (!cleaned) return;
+    const normalized = normMessage(cleaned);
+    setLocalVoiceMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === role && normMessage(last.content) === normalized) return prev;
+      return [
+        ...prev,
+        {
+          id: `voice-${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role,
+          content: cleaned,
+        },
+      ].slice(-12);
+    });
+  };
+  const visibleLocalVoiceMessages = localVoiceMessages.filter((local) => {
+    const ln = normMessage(local.content);
+    if (!ln) return false;
+    return !messages.some((m) => m.role === local.role && normMessage(m.content || "") === ln);
+  });
+  useEffect(() => {
+    if (localVoiceMessages.length === 0 || messages.length === 0) return;
+    setLocalVoiceMessages((prev) =>
+      prev.filter((local) => {
+        const ln = normMessage(local.content);
+        return !messages.some((m) => m.role === local.role && normMessage(m.content || "") === ln);
+      }),
+    );
+  }, [messages.length, localVoiceMessages.length]);
 
   // Live voice session timer (used for OpenAI Realtime widget where we don't
   // have a server-reported usage percent to show).
@@ -742,10 +776,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         // Success — clear failure counter for this key.
         docIntentFailureCountRef.current.delete(lastDocumentIntentKeyRef.current);
         const block = "```bpa-artifact\n" + JSON.stringify(r.artifact) + "\n```";
-        const content = `Generated ${(r.artifact.filename as string) ?? "document"}.\n\n${block}`;
-        void add({ data: { threadId, role: "assistant", content } }).then(() => {
-          qc.invalidateQueries({ queryKey: ["messages", threadId] });
-        });
+	        const content = `Generated ${(r.artifact.filename as string) ?? "document"}.\n\n${block}`;
+	        addLocalVoiceMessage("assistant", content);
+	        void add({ data: { threadId, role: "assistant", content } }).then(() => {
+	          qc.invalidateQueries({ queryKey: ["messages", threadId] });
+	        });
         // Keep lastDocumentIntentKey set; completed-TTL blocks repeats for 60s.
       });
       session.onTranscript((role, text, done) => {
@@ -769,20 +804,18 @@ function ThreadView({ threadId }: { threadId: string }) {
 	            }
 	            setPendingUserVoice("");
 	            const finalAssistantText = cleanAssistantText(text);
-	            // Keep the live transcript bubble visible until the persisted
-	            // message/refetch catches up. Clearing immediately creates a
-	            // mobile-visible blink where the assistant text appears for a
-	            // second, disappears, then reappears as a saved message.
-	            setPendingAssistant(finalAssistantText);
+	            // Render the completed voice turn locally immediately. The
+	            // database save/refetch then catches up in the background, so
+	            // the chat never blinks empty or drops the text mid-session.
+	            addLocalVoiceMessage("assistant", finalAssistantText);
+	            setPendingAssistant("");
 	            void add({ data: { threadId, role: "assistant", content: finalAssistantText } })
 	              .then(() => {
 	                qc.invalidateQueries({ queryKey: ["messages", threadId] });
 	                qc.invalidateQueries({ queryKey: ["threads"] });
 	              })
-	              .finally(() => {
-	                setPendingAssistant((current) =>
-	                  cleanAssistantText(current) === finalAssistantText ? "" : current,
-	                );
+	              .catch((err) => {
+	                console.warn("[voice] failed to persist assistant transcript", err);
 	              });
             assistantBuf = "";
           }
@@ -792,8 +825,11 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUserVoice(text);
         } else if (role === "user" && done && text.trim()) {
           setPendingUserVoice("");
+          addLocalVoiceMessage("user", text);
           void add({ data: { threadId, role: "user", content: text } }).then(() => {
             qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          }).catch((err) => {
+            console.warn("[voice] failed to persist user transcript", err);
           });
           if (looksLikeVoiceVisualAnswerIntent(text) && !looksLikeDocumentIntent(text)) {
             const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
@@ -1166,6 +1202,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const voiceReconnecting = voiceUiState === "reconnecting";
   const hasVisibleConversation =
     messages.length > 0 ||
+    visibleLocalVoiceMessages.length > 0 ||
     Boolean(pendingUser) ||
     pendingAssistant.trim().length > 0 ||
     pendingUserVoice.trim().length > 0 ||
@@ -1465,7 +1502,15 @@ function ThreadView({ threadId }: { threadId: string }) {
                 />
               );
             })}
-            {voiceActive && messages.length === 0 && !pendingUser && !pendingUserVoice.trim() && !pendingAssistant.trim() && (
+            {visibleLocalVoiceMessages.map((m) => (
+              <Bubble
+                key={m.id}
+                role={m.role}
+                content={m.content}
+                streaming={voiceActive}
+              />
+            ))}
+            {voiceActive && messages.length === 0 && visibleLocalVoiceMessages.length === 0 && !pendingUser && !pendingUserVoice.trim() && !pendingAssistant.trim() && (
               <div className="pt-16 flex flex-col items-center text-center">
                 <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
                   BP
