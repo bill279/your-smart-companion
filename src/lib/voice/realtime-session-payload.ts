@@ -25,7 +25,10 @@ export function buildRealtimeSessionPayload({
       model,
       instructions,
       audio: {
-        input: { turn_detection: { type: "server_vad" as const } },
+        input: {
+          turn_detection: { type: "server_vad" as const },
+          transcription: { model: "whisper-1" as const },
+        },
         output: { voice },
       },
       tools: REALTIME_TOOLS,

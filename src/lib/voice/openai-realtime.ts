@@ -218,6 +218,25 @@ export async function startOpenAiRealtimeSession(options: {
 
   let assistantBuf = "";
   let userInterimBuf = "";
+  let lastFinalAssistant = "";
+  let lastFinalUser = "";
+  let lastFinalAssistantAt = 0;
+  let lastFinalUserAt = 0;
+  const shouldEmitFinal = (role: "user" | "assistant", text: string) => {
+    const normalized = text.trim().replace(/\s+/g, " ");
+    if (!normalized) return false;
+    const now = Date.now();
+    if (role === "assistant") {
+      if (normalized === lastFinalAssistant && now - lastFinalAssistantAt < 3000) return false;
+      lastFinalAssistant = normalized;
+      lastFinalAssistantAt = now;
+      return true;
+    }
+    if (normalized === lastFinalUser && now - lastFinalUserAt < 3000) return false;
+    lastFinalUser = normalized;
+    lastFinalUserAt = now;
+    return true;
+  };
   dc.addEventListener("open", () => {
     phase("live");
     // Defensively (re)register tools via session.update so document/email/web
@@ -248,13 +267,38 @@ export async function startOpenAiRealtimeSession(options: {
       const msg = JSON.parse(evt.data as string) as {
         type: string;
         delta?: string;
+        text?: string;
         transcript?: string;
         error?: { message?: string };
         call_id?: string;
         name?: string;
         arguments?: string;
-        item?: { type?: string; call_id?: string; name?: string; arguments?: string };
+        item?: {
+          type?: string;
+          call_id?: string;
+          name?: string;
+          arguments?: string;
+          content?: Array<{ type?: string; text?: string; transcript?: string }>;
+        };
+        response?: {
+          output?: Array<{
+            content?: Array<{ type?: string; text?: string; transcript?: string }>;
+          }>;
+        };
       };
+      const assistantTextFromMessage = () =>
+        msg.transcript ??
+        msg.text ??
+        msg.response?.output
+          ?.flatMap((item) => item.content ?? [])
+          .map((content) => content.transcript ?? content.text ?? "")
+          .filter(Boolean)
+          .join("\n") ??
+        msg.item?.content
+          ?.map((content) => content.transcript ?? content.text ?? "")
+          .filter(Boolean)
+          .join("\n") ??
+        "";
       switch (msg.type) {
         case "session.created":
         case "session.updated": {
@@ -270,18 +314,39 @@ export async function startOpenAiRealtimeSession(options: {
           break;
         }
         case "response.audio_transcript.delta":
+        case "response.output_audio_transcript.delta":
+        case "response.text.delta":
+        case "response.output_text.delta":
           assistantBuf += msg.delta ?? "";
           onTranscriptCb?.("assistant", assistantBuf, false);
           break;
         case "response.audio_transcript.done":
-          onTranscriptCb?.("assistant", assistantBuf, true);
+        case "response.output_audio_transcript.done":
+        case "response.text.done":
+        case "response.output_text.done": {
+          const finalText = assistantTextFromMessage() || assistantBuf;
+          if (shouldEmitFinal("assistant", finalText)) onTranscriptCb?.("assistant", finalText, true);
           assistantBuf = "";
           break;
+        }
+        case "response.done": {
+          const finalText = assistantTextFromMessage();
+          if (finalText && shouldEmitFinal("assistant", finalText)) {
+            onTranscriptCb?.("assistant", finalText, true);
+            assistantBuf = "";
+          }
+          break;
+        }
         case "conversation.item.input_audio_transcription.completed":
-          if (msg.transcript) onTranscriptCb?.("user", msg.transcript, true);
+        case "input_audio_transcription.completed":
+        case "conversation.item.input_audio_transcription.done": {
+          const finalText = msg.transcript ?? msg.text ?? userInterimBuf;
+          if (finalText && shouldEmitFinal("user", finalText)) onTranscriptCb?.("user", finalText, true);
           userInterimBuf = "";
           break;
+        }
         case "conversation.item.input_audio_transcription.delta":
+        case "input_audio_transcription.delta":
           // Newer Realtime API emits interim user transcript deltas. Buffer
           // them so the chat page can render a live "you're saying…" bubble
           // while the user is still speaking.

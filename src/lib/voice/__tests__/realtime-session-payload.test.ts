@@ -45,6 +45,15 @@ describe("buildRealtimeSessionPayload", () => {
     expect(parsed.session.tools.some((t: { name: string }) => t.name === "generate_document")).toBe(true);
   });
 
+  it("requests input audio transcription so voice turns can sync into chat", () => {
+    const payload = buildRealtimeSessionPayload({
+      model: "gpt-realtime",
+      instructions: "test",
+      voice: "alloy",
+    });
+    expect(payload.session.audio.input.transcription.model).toBe("whisper-1");
+  });
+
   it("client-side session.update also includes session.type", () => {
     expect(CLIENT_SESSION_UPDATE.session.type).toBe("realtime");
   });

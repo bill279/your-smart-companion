@@ -17,6 +17,17 @@ import {
   type VoiceProvider,
 } from "@/lib/assistant/types";
 
+async function getSessionTokenWithRetry(maxMs = 5000) {
+  const started = Date.now();
+  while (Date.now() - started < maxMs) {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (token) return token;
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+  return null;
+}
+
 export const Route = createFileRoute("/_authenticated/settings")({
   ssr: false,
   head: () => ({ meta: [{ title: "Assistant settings — BPA Bot" }] }),
@@ -34,6 +45,10 @@ function SettingsPage() {
   });
 
   const [form, setForm] = useState<AssistantSettings>(DEFAULT_ASSISTANT_SETTINGS);
+  const [microsoftConnectState, setMicrosoftConnectState] = useState<
+    "idle" | "completing" | "connected" | "error"
+  >("idle");
+  const [microsoftConnectError, setMicrosoftConnectError] = useState<string | null>(null);
   const microsoftQ = useQuery({
     queryKey: ["microsoft-integration-status"],
     queryFn: async () => {
@@ -54,17 +69,28 @@ function SettingsPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("microsoft") !== "complete") return;
+    const status = params.get("microsoft");
+    if (status === "error") {
+      setMicrosoftConnectState("error");
+      setMicrosoftConnectError(params.get("message") || "Microsoft sign-in was cancelled or failed.");
+      return;
+    }
+    if (status === "connected") {
+      setMicrosoftConnectState("connected");
+      return;
+    }
+    if (status !== "complete") return;
     const code = params.get("microsoft_code");
     const state = params.get("microsoft_state");
     if (!code || !state) return;
 
     let cancelled = false;
+    setMicrosoftConnectState("completing");
+    setMicrosoftConnectError(null);
     (async () => {
       try {
-        const { data } = await supabase.auth.getSession();
-        const token = data.session?.access_token;
-        if (!token) throw new Error("Sign in again");
+        const token = await getSessionTokenWithRetry();
+        if (!token) throw new Error("Sign in again, then reconnect Microsoft.");
         const res = await fetch("/api/integrations/microsoft/complete", {
           method: "POST",
           headers: {
@@ -76,14 +102,23 @@ function SettingsPage() {
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error || "Microsoft connection failed");
         if (!cancelled) {
+          setMicrosoftConnectState("connected");
           toast.success("Microsoft connected");
-          qc.invalidateQueries({ queryKey: ["microsoft-integration-status"] });
+          await qc.invalidateQueries({ queryKey: ["microsoft-integration-status"] });
+          await qc.refetchQueries({ queryKey: ["microsoft-integration-status"] });
           window.history.replaceState({}, "", "/settings?microsoft=connected");
         }
       } catch (error) {
         if (!cancelled) {
-          toast.error((error as Error).message);
-          window.history.replaceState({}, "", "/settings?microsoft=error");
+          const message = (error as Error).message;
+          setMicrosoftConnectState("error");
+          setMicrosoftConnectError(message);
+          toast.error(message);
+          window.history.replaceState(
+            {},
+            "",
+            `/settings?microsoft=error&message=${encodeURIComponent(message)}`,
+          );
         }
       }
     })();
@@ -267,7 +302,11 @@ function SettingsPage() {
                     : "Microsoft not connected"}
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">
-                {microsoftQ.data?.connected
+                {microsoftConnectState === "completing"
+                  ? "Finishing Microsoft sign-in and saving the connection…"
+                  : microsoftConnectState === "error"
+                    ? microsoftConnectError ?? "Microsoft connection failed."
+                    : microsoftQ.data?.connected
                   ? `Connected as ${microsoftQ.data.email ?? "Microsoft account"}`
                   : "Required for real Outlook email sending and calendar actions."}
               </div>
@@ -285,9 +324,10 @@ function SettingsPage() {
               <button
                 type="button"
                 onClick={connectMicrosoft}
+                disabled={microsoftConnectState === "completing"}
                 className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90"
               >
-                Connect Microsoft
+                {microsoftConnectState === "completing" ? "Connecting…" : "Connect Microsoft"}
               </button>
             )}
           </div>
