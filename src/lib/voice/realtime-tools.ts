@@ -40,7 +40,7 @@ export const REALTIME_TOOLS = [
     type: "function",
     name: "send_email",
     description:
-      "Send an email from the user's connected Outlook/Gmail account. Only call after the user has verbally approved the draft.",
+      "Send an email from the user's connected Outlook/Gmail account. Only call after the user has verbally approved the draft. Include approved: true only when the user's latest reply is an explicit approval such as send, yes send, confirm, approved, or looks good send it.",
     parameters: {
       type: "object",
       properties: {
@@ -48,8 +48,13 @@ export const REALTIME_TOOLS = [
         subject: { type: "string" },
         body: { type: "string", description: "Email body in Markdown" },
         cc: { type: "string", description: "Optional Cc email address" },
+        approved: {
+          type: "boolean",
+          description:
+            "Must be true only after explicit approval from the user's latest reply. Omit or false when drafting or asking for approval.",
+        },
       },
-      required: ["to", "subject", "body"],
+      required: ["to", "subject", "body", "approved"],
     },
   },
   {

@@ -243,6 +243,10 @@ function isExplicitEmailApproval(text: string) {
   return /^(send|send it|yes send|yes, send|approved|approve|confirmed|confirm|looks good send it|ok send|okay send|go ahead and send|please send)\b/.test(s);
 }
 
+function isCapabilitiesQuestion(text: string) {
+  return /\b(what can you help(?: me)? with|what can you do|what do you do|your capabilities|how can you help(?: me)?)\b/i.test(text);
+}
+
 export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
@@ -359,6 +363,24 @@ export const Route = createFileRoute("/api/chat")({
           attachments,
         });
         if (insErr) return new Response(insErr.message, { status: 400 });
+        }
+
+        if (!body.regenerate && attachments.length === 0 && isCapabilitiesQuestion(userText)) {
+          const assistantText =
+            "I can help with research, email, calendar scheduling, PDFs/documents, comparisons, and BP Automation company knowledge — tell me the task and I’ll handle the next step.";
+          await supabase.from("messages").insert({
+            thread_id: body.threadId!,
+            user_id: userId,
+            role: "assistant",
+            content: assistantText,
+          });
+          await supabase
+            .from("threads")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", body.threadId!);
+          return new Response(assistantText, {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
         }
 
         // Generate signed URLs for any attachments on the just-sent message

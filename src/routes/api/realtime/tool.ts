@@ -90,9 +90,24 @@ async function runSendEmail(
       subject: z.string().min(1).max(200),
       body: z.string().min(1).max(20000),
       cc: z.string().email().optional(),
+      approved: z.boolean().optional(),
     })
     .safeParse(args);
   if (!p.success) return { error: "invalid arguments for send_email" };
+
+  if (p.data.approved !== true) {
+    return {
+      error: "approval_required",
+      message:
+        "Email was not sent. Present the draft preview and wait for the user's explicit approval. After they approve, call send_email again with approved: true.",
+      draft: {
+        to: p.data.to,
+        cc: p.data.cc,
+        subject: p.data.subject,
+        body: p.data.body,
+      },
+    };
+  }
 
   try {
     await sendOutlookMail(supabase, userId, p.data);
