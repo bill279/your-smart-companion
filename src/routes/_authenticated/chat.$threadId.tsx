@@ -732,6 +732,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoicePhase("idle");
       });
       session.onError((message) => {
+        if (/cancellation failed:\s*no active response found/i.test(message)) return;
         toast.error(message);
         setVoiceError(message);
         if (docInFlightRef.current) {

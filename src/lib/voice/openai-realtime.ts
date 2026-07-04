@@ -23,6 +23,10 @@ export type RealtimeSession = {
   forceGenerateDocument: (hint?: string) => boolean;
 };
 
+function isBenignRealtimeError(message: string) {
+  return /cancellation failed:\s*no active response found/i.test(message);
+}
+
 export async function preflightOpenAiRealtime(): Promise<{
   ok: boolean;
   message?: string;
@@ -386,7 +390,14 @@ export async function startOpenAiRealtimeSession(options: {
           break;
         }
         case "error":
-          onErrorCb?.(msg.error?.message ?? "OpenAI Realtime error");
+          {
+            const message = msg.error?.message ?? "OpenAI Realtime error";
+            if (isBenignRealtimeError(message)) {
+              console.debug("[realtime] ignored benign error:", message);
+              break;
+            }
+            onErrorCb?.(message);
+          }
           break;
       }
     } catch { /* ignore non-JSON frames */ }
