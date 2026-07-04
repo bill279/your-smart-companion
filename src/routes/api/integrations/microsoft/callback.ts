@@ -27,10 +27,16 @@ export const Route = createFileRoute("/api/integrations/microsoft/callback")({
         const code = url.searchParams.get("code");
         const state = url.searchParams.get("state");
         const error = url.searchParams.get("error");
+        const errorDescription = url.searchParams.get("error_description");
         if (error) {
+          const message = [error, errorDescription].filter(Boolean).join(": ").slice(0, 500);
+          console.error("[microsoft callback] microsoft returned error", {
+            error,
+            errorDescription,
+          });
           return redirectWithClearedCookie(
             request,
-            `/settings?microsoft=error&message=${encodeURIComponent(error)}`,
+            `/settings?microsoft=error&message=${encodeURIComponent(message)}`,
           );
         }
         if (!code || !state) {
