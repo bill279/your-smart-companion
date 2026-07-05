@@ -394,15 +394,11 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
   }, []);
 
-  const conversation = useConversation({
+  const conversation = useRealtimeVoice({
+    toolDefs: REALTIME_TOOL_DEFS,
     clientTools: {
-      show_in_chat: async (params: { markdown?: string; content?: string }) => {
-        // Render rich content (tables, lists, code, long drafts) directly in
-        // the chat WITHOUT the voice agent speaking it. The agent should call
-        // this whenever the user asks for a table/list/code/email draft so
-        // the audio stays a short spoken summary while the visual appears
-        // instantly in the transcript.
-        const md = (params.markdown ?? params.content ?? "").trim();
+      show_in_chat: async (params) => {
+        const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
         if (!md) return JSON.stringify({ error: "markdown required" });
         try {
           setPendingAssistant(md);
@@ -417,21 +413,23 @@ function ThreadView({ threadId }: { threadId: string }) {
           return JSON.stringify({ error: "failed to render" });
         }
       },
-      web_search: async (params: { query?: string; limit?: number }) => {
-        const query = params.query?.trim();
+      web_search: async (params) => {
+        const p = params as { query?: string; limit?: number };
+        const query = p.query?.trim();
         if (!query) return JSON.stringify({ error: "query required" });
 
         const res = await fetch("/api/public/web-search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, limit: params.limit ?? 5 }),
+          body: JSON.stringify({ query, limit: p.limit ?? 5 }),
         });
         const data = await res.json().catch(() => ({ error: "search failed" }));
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "search failed" });
         return JSON.stringify(data);
       },
-      send_email: async (params: { to?: string; subject?: string; body?: string; cc?: string }) => {
-        if (!params.to || !params.subject || !params.body) {
+      send_email: async (params) => {
+        const p = params as { to?: string; subject?: string; body?: string; cc?: string };
+        if (!p.to || !p.subject || !p.body) {
           return JSON.stringify({ error: "to, subject and body are required" });
         }
         const { data: sess } = await supabase.auth.getSession();
@@ -440,17 +438,17 @@ function ThreadView({ threadId }: { threadId: string }) {
         const res = await fetch("/api/public/jarvis/tools/send_email", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(params),
+          body: JSON.stringify(p),
         });
         const data = await res.json().catch(() => ({ error: "send failed" }));
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
         return JSON.stringify(data);
       },
     },
-    onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
-      // Stream agent text to the chat in real time as ElevenLabs generates it.
-      const kind = part?.type;
-      const chunk = part?.text ?? "";
+    onAssistantDelta: (part) => {
+      // Stream assistant transcript in real time as OpenAI Realtime generates it.
+      const kind = part.kind;
+      const chunk = part.text;
       if (kind === "start") {
         liveAssistantRef.current = chunk;
       } else if (kind === "delta") {
@@ -460,35 +458,16 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
-    onAudioAlignment: (props: { chars?: string[] }) => {
-      // Fallback live transcript: reveal each character as the audio chunk
-      // for it is generated. This guarantees the chat updates while the bot
-      // is speaking even when the agent does not stream text response parts.
-      const chars = props?.chars;
-      if (!chars || chars.length === 0) return;
-      liveAssistantRef.current += chars.join("");
-      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
-    },
-    onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
-      const corrected = props?.corrected_agent_response;
-      if (!corrected) return;
-      liveAssistantRef.current = corrected;
-      setPendingAssistant(cleanAssistantText(corrected));
-    },
     onConnect: () => {
       clearVoiceConnectTimeout();
       hasConnectedVoiceRef.current = true;
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
-      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
-      const ctx = pendingContextRef.current;
+      // Instructions were already sent inside session.update on data-channel open.
       pendingContextRef.current = "";
-      if (ctx) {
-        try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
-      }
     },
-    onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
+    onDisconnect: (details) => {
       clearVoiceConnectTimeout();
       if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
       const wasStopping = voiceStateRef.current === "stopping";
@@ -496,17 +475,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceUiState("idle");
       pendingContextRef.current = "";
       if (wasStopping) return;
-      const closeText = details?.closeReason || details?.message || "";
-      if (/quota/i.test(closeText)) {
-        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-        return;
-      }
-      // If the session was previously connected and dropped for any non-error
-      // reason (typically ElevenLabs idle timeout), silently reconnect so the
-      // user stays in voice mode until they explicitly tap to stop.
+      const closeText = details?.message ?? "";
+      // If the session was previously connected and dropped, silently reconnect
+      // so the user stays in voice mode until they explicitly tap to stop.
       if (hasConnectedVoiceRef.current && details?.reason !== "error") {
         // Only auto-reconnect if the user actually spoke in the last 60s.
-        // Otherwise the session was idle and we'd just burn ElevenLabs credits.
         const recentlyActive = Date.now() - lastUserSpeechAtRef.current < 60_000;
         if (recentlyActive) {
           setTimeout(() => {
@@ -520,21 +493,19 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
     },
-    onError: (e) => {
+    onError: (e: string) => {
       const msg = String(e || "");
-      if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
       clearVoiceConnectTimeout();
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      setVoiceError(/quota/i.test(msg) ? "ElevenLabs voice quota is exhausted. Text chat still works." : msg || "Voice failed to connect. Tap the mic once to try again.");
+      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
     },
-    onMessage: async (message: { source?: string; message?: string }) => {
+    onMessage: async (message) => {
       const text = message?.message;
       if (!text) return;
-      const voiceMessage = message as { source?: string; message?: string; event_id?: number };
-      const eventKey = `${voiceMessage.source ?? "unknown"}:${voiceMessage.event_id ?? text}`;
+      const eventKey = `${message.source}:${message.event_id ?? text}`;
       if (seenVoiceEventsRef.current.has(eventKey)) return;
       seenVoiceEventsRef.current.add(eventKey);
       if (seenVoiceEventsRef.current.size > 250) {
