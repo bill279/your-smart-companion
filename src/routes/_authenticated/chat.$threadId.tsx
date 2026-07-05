@@ -907,7 +907,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceActive = voiceUiState === "connected" || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceActive = voiceUiState === "connected" || voiceUiState === "starting";
   const voiceConnecting = voiceUiState === "starting";
 
   return (
@@ -1041,42 +1041,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <Sparkles size={12} /> Activity & memory
         </Link>
-        {quota && quota.available && quota.limit > 0 && (
-          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
-            <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="font-medium text-foreground">Voice quota</span>
-              <span
-                className={
-                  quotaTone === "danger"
-                    ? "text-destructive font-semibold"
-                    : quotaTone === "warn"
-                    ? "text-amber-500 font-semibold"
-                    : "text-muted-foreground"
-                }
-              >
-                {quota.percentUsed}% used
-              </span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-              <div
-                className={
-                  quotaTone === "danger"
-                    ? "h-full bg-destructive"
-                    : quotaTone === "warn"
-                    ? "h-full bg-amber-500"
-                    : "h-full bg-primary"
-                }
-                style={{ width: `${Math.min(100, quota.percentUsed)}%` }}
-              />
-            </div>
-            <div className="mt-1.5 text-[10px] text-muted-foreground">
-              {quota.remaining.toLocaleString()} chars left
-              {quota.resetAt
-                ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
-                : ""}
-            </div>
-          </div>
-        )}
         <button
           onClick={signOut}
           className="m-4 flex items-center gap-2 justify-center py-2 text-xs text-muted-foreground hover:text-foreground"
@@ -1111,22 +1075,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             <Menu size={20} />
           </button>
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
-          {quota && quota.available && quota.limit > 0 && (
-            <span
-              title={`Voice quota: ${quota.percentUsed}% used`}
-              className={
-                "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
-                (quotaTone === "danger"
-                  ? "bg-destructive/15 text-destructive"
-                  : quotaTone === "warn"
-                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  : "bg-secondary text-muted-foreground")
-              }
-            >
-              🎙 {quota.percentUsed}%
-            </span>
-          )}
-          <div className={`relative ${quota && quota.available && quota.limit > 0 ? "ml-1" : "ml-auto"}`}>
+          <div className="relative ml-auto">
             <button
               onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
               className="p-2 rounded-md hover:bg-secondary text-foreground"
