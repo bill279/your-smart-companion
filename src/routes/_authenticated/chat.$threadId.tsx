@@ -940,6 +940,83 @@ function ThreadView({ threadId }: { threadId: string }) {
           }).catch((err) => {
             console.warn("[voice] failed to persist user transcript", err);
           });
+          const isDocumentIntent = looksLikeDocumentIntent(text);
+          const isVisualAnswerIntent = !isDocumentIntent && looksLikeVoiceVisualAnswerIntent(text);
+          const isBrainAnswerIntent = !isDocumentIntent && !isVisualAnswerIntent && looksLikeVoiceBrainAnswerIntent(text);
+          const delegateToChatBrain = isDocumentIntent || isVisualAnswerIntent || isBrainAnswerIntent;
+          // Chat brain owns anything that needs tools, research, documents,
+          // or approvals — that stays a single source of truth so it can
+          // never race the live model for those. But routing EVERY turn
+          // (including "hi"/"thanks"/"okay") through a full /api/chat round
+          // trip made voice feel slow and dead-air-y, so short acknowledgments
+          // and small talk get a fast, snappy live-model reply instead.
+          if (!delegateToChatBrain) {
+            openAiSessionRef.current?.sendEvent({ type: "response.create" });
+          }
+          if (isVisualAnswerIntent || isBrainAnswerIntent) {
+            const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
+            const completedRecently =
+              key === lastVisualIntentKeyRef.current &&
+              Date.now() - lastVisualIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
+            if (completedRecently) {
+              // no-op — same request was just answered
+            } else if (visualInFlightRef.current) {
+              // Busy with a previous turn — don't drop this one, run it next.
+              queuedVoiceTurnRef.current = { text, visual: isVisualAnswerIntent };
+            } else {
+              visualInFlightRef.current = true;
+              lastVisualIntentKeyRef.current = key;
+              void runDeterministicVoiceVisualAnswer(text, { visual: isVisualAnswerIntent });
+              setTimeout(() => {
+                if (visualInFlightRef.current) {
+                  console.warn("[realtime] deterministic voice-answer lock released by timeout");
+                  visualInFlightRef.current = false;
+                  lastVisualIntentCompletedAtRef.current = Date.now();
+                  setPendingAssistant("");
+                  const queuedAfterTimeout = queuedVoiceTurnRef.current;
+                  if (queuedAfterTimeout) {
+                    queuedVoiceTurnRef.current = null;
+                    visualInFlightRef.current = true;
+                    void runDeterministicVoiceVisualAnswer(queuedAfterTimeout.text, { visual: queuedAfterTimeout.visual });
+                  }
+                }
+              }, 45_000);
+            }
+          }
+          if (isDocumentIntent) {
+            const key = normalizeIntent(text);
+            const now = Date.now();
+            const completedRecently =
+              key === lastDocumentIntentKeyRef.current &&
+              now - lastDocumentIntentCompletedAtRef.current <
+                DOC_INTENT_COMPLETED_TTL_MS;
+            if (docInFlightRef.current) {
+              console.log("[realtime] doc-intent ignored — generation already in flight");
+            } else if (completedRecently) {
+              console.log("[realtime] doc-intent ignored — same intent completed within 60s");
+            } else {
+              lastDocumentIntentKeyRef.current = key;
+              docInFlightRef.current = true;
+              setVoicePhase("generating-document");
+	              console.log("[realtime] doc-intent detected, using deterministic document route:", text);
+	              void runDeterministicVoiceDocument(text, key);
+	              // Safety: if the tool call never resolves, release the lock.
+	              setTimeout(() => {
+                if (docInFlightRef.current) {
+                  console.warn("[realtime] doc-intent lock released by timeout");
+                  docInFlightRef.current = false;
+                  lastDocumentIntentCompletedAtRef.current = Date.now();
+                  setVoicePhase("live");
+                  // Count the timeout as a failure for repeat suppression.
+                  const k = lastDocumentIntentKeyRef.current;
+                  if (k) {
+                    const n = (docIntentFailureCountRef.current.get(k) ?? 0) + 1;
+                    docIntentFailureCountRef.current.set(k, n);
+                  }
+                }
+              }, 45_000);
+            }
+          }
         }
       });
     } catch (e) {

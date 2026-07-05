@@ -10,7 +10,6 @@ import {
   humanRealtimeError,
   extractRequestId,
 } from "@/lib/voice/realtime-errors";
-import { REALTIME_TOOLS, realtimeToolNames } from "@/lib/voice/realtime-tools";
 
 // Mints an ephemeral OpenAI Realtime client secret. The raw OPENAI_API_KEY
 // never leaves the server. The browser gets a short-lived client_secret it
@@ -28,17 +27,14 @@ const REALTIME_SESSION_URL = "https://api.openai.com/v1/realtime/client_secrets"
 function buildInstructions() {
   return [
     "You are BPA Bot, BP Automation's voice assistant. You are fast, polished, concise, accurate, and useful.",
-    "For simple conversational turns, answer directly and immediately.",
-    "You have tools for live web research, Outlook email, briefings, replies, sending approved emails, and generating downloadable documents. Use them when needed instead of saying you cannot.",
+    "Realtime voice has no tools. For simple conversational turns, answer directly and briefly from general knowledge.",
+    "Tool-heavy requests are routed by the app to the main chat brain. Do not claim you searched, emailed, scheduled, generated a file, or put something on screen unless the app-provided instruction says so.",
     "Default to 1 short sentence. Use 2 sentences only when needed. Never monologue.",
     "Do not greet or introduce yourself again after the first exchange.",
     "Avoid filler like 'sure thing', 'absolutely', 'let me', 'I can help with that', apologies loops, jokes, and rambling.",
     "If audio is unclear, partial, or mid-thought, ask one short repair question. If the user says wait/cancel/never mind, say 'Okay — I’ll wait.'",
     "If the user asks what you can help with / what can you do, answer exactly one short sentence: 'I can help with research, email, calendar, PDFs/documents, comparisons, and BP Automation knowledge.' Do not list examples unless asked.",
     "Never read tables, lists, code, or long drafts aloud. If the answer requires a table/list/links/draft, give a one-sentence executive summary only. Do not claim links, details, or a table are on screen unless they have actually been inserted into chat. Do not speak column headers, pipes, dashes, or row-by-row cell values.",
-    "For research, use web_search and include source URLs in the chat-visible text response.",
-    "For PDFs/documents, call generate_document and then say one short sentence that it is ready in chat.",
-    "Email safety: never send email on the first request. Present a concise draft/readback and wait for explicit approval. Only call send_email with approved:true after the user's latest reply clearly approves the immediately previous draft.",
     "Do not repeat yourself across turns. If you already asked for confirmation, wait for yes/no/edits. If the user approves, act immediately. If the user is silent, stay quiet.",
     "Never think out loud, narrate internal steps, or fill silence.",
   ].join(" ");
@@ -70,9 +66,9 @@ export const Route = createFileRoute("/api/realtime/session")({
           model: REALTIME_MODEL,
           fallbackModels: REALTIME_FALLBACK_MODELS,
           endpoint: REALTIME_SESSION_URL,
-          tools: realtimeToolNames(),
-          documentToolRegistered: true,
-          architecture: "native_realtime_with_tools",
+          tools: [],
+          documentToolRegistered: false,
+          architecture: "transport_only",
         });
       },
       POST: async ({ request }) => {
@@ -106,6 +102,9 @@ export const Route = createFileRoute("/api/realtime/session")({
 
         const instructions = buildInstructions();
         // Try primary model, then a documented fallback for 5xx / model-not-available.
+        // Realtime is transport only. Tools are intentionally not registered
+        // here; /api/chat owns reasoning, tool execution, files, approvals,
+        // persistence, and visual answers.
         const modelChain = [REALTIME_MODEL, ...REALTIME_FALLBACK_MODELS];
         const attempts: Array<{ model: string; status: number; requestId: string | null; bodySnippet: string; kind: string }> = [];
         let successModel: string | null = null;
@@ -115,14 +114,13 @@ export const Route = createFileRoute("/api/realtime/session")({
             model: candidateModel,
             instructions,
             voice: REALTIME_VOICE,
-            tools: REALTIME_TOOLS,
           });
           console.log(
             "[realtime session] creating",
             REALTIME_SESSION_URL,
             "model",
             candidateModel,
-            "native_tools",
+            "transport_only",
           );
           const upstream = await fetch(REALTIME_SESSION_URL, {
             method: "POST",
@@ -217,10 +215,10 @@ export const Route = createFileRoute("/api/realtime/session")({
           modelChainTried: attempts.map((a) => a.model),
           voice: REALTIME_VOICE,
           instructions,
-          tools: REALTIME_TOOLS,
+          tools: [],
           registeredToolNames,
-          documentToolRegistered: true,
-          architecture: "native_realtime_with_tools",
+          documentToolRegistered: false,
+          architecture: "transport_only",
         });
       },
     },
