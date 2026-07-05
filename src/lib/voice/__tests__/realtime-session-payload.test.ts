@@ -41,8 +41,18 @@ describe("buildRealtimeSessionPayload", () => {
     expect(parsed.session.type).toBe("realtime");
     expect(parsed.session.model).toBe("gpt-realtime");
     expect(parsed.session.tool_choice).toBe("auto");
-    expect(Array.isArray(parsed.session.tools)).toBe(true);
-    expect(parsed.session.tools.some((t: { name: string }) => t.name === "generate_document")).toBe(true);
+    expect(parsed.session.tools).toEqual([]);
+  });
+
+  it("does not register tools because /api/chat is the single agent brain", () => {
+    const payload = buildRealtimeSessionPayload({
+      model: "gpt-realtime",
+      instructions: "test",
+      voice: "alloy",
+    });
+
+    expect(payload.session.tools).toEqual([]);
+    expect(payload.session.audio.input.turn_detection.create_response).toBe(false);
   });
 
   it("requests input audio transcription so voice turns can sync into chat", () => {

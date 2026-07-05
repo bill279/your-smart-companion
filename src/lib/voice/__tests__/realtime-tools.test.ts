@@ -11,7 +11,7 @@ import {
   looksLikeDocumentIntent,
 } from "../../doc-intent";
 
-describe("OpenAI Realtime tools registry", () => {
+describe("Legacy Realtime tool schemas", () => {
   it("declares web_search, web_scrape, send_email, and generate_document", () => {
     const names = realtimeToolNames();
     expect(names).toContain("web_search");
@@ -43,7 +43,7 @@ describe("OpenAI Realtime tools registry", () => {
     expect([...formats]).toEqual(["pdf", "docx", "md", "xlsx", "csv", "txt"]);
   });
 
-  it("voice document intent routes to the SAME deterministic path as typed chat", () => {
+  it("voice document intent is detected before routing to the deterministic chat path", () => {
     // Both voice transcripts and typed chat go through looksLikeDocumentIntent
     // + detectDocumentIntent → server generate_document → bpa-artifact fence.
     // If this test breaks, the voice path has drifted from the typed path.
@@ -52,10 +52,6 @@ describe("OpenAI Realtime tools registry", () => {
     const intent = detectDocumentIntent(utterance);
     expect(intent).not.toBeNull();
     expect(intent!.format).toBe("pdf");
-
-    // And the OpenAI Realtime tool must exist so voice can hit the same
-    // generator server-side.
-    expect(realtimeHasTool("generate_document")).toBe(true);
   });
 });
 

@@ -827,49 +827,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           setVoicePhase("live");
         }
       });
-      session.onToolCall((name, _args, result) => {
-        if (name !== "generate_document") return;
-        const r = result as { ok?: boolean; artifact?: Record<string, unknown> } | null;
-        docInFlightRef.current = false;
-        lastDocumentIntentCompletedAtRef.current = Date.now();
-        setVoicePhase("live");
-        if (!r?.ok || !r.artifact) {
-          const errMsg =
-            (r && typeof (r as { error?: unknown }).error === "string"
-              ? ((r as { error?: string }).error as string)
-              : null) ?? "Document generation failed.";
-          toast.error(errMsg);
-          // Track failures per intent-key. After N failures, KEEP the key so
-          // repeated identical utterances no longer re-trigger the doc path
-          // for the completed-TTL window — this prevents infinite loops when
-          // the generator or model keeps returning errors.
-          const key = lastDocumentIntentKeyRef.current;
-          if (key) {
-            const n = (docIntentFailureCountRef.current.get(key) ?? 0) + 1;
-            docIntentFailureCountRef.current.set(key, n);
-            if (n >= DOC_MAX_FAILURES_PER_INTENT) {
-              console.warn(
-                "[realtime] doc-intent locked after repeated failures — will not retry same utterance",
-                { key, failures: n },
-              );
-              // Leave key + completed timestamp set so the TTL blocks repeats.
-            } else {
-              // Clear so the user can retry with same utterance.
-              lastDocumentIntentKeyRef.current = "";
-            }
-          }
-          return;
-        }
-        // Success — clear failure counter for this key.
-        docIntentFailureCountRef.current.delete(lastDocumentIntentKeyRef.current);
-        const block = "```bpa-artifact\n" + JSON.stringify(r.artifact) + "\n```";
-	        const content = `Generated ${(r.artifact.filename as string) ?? "document"}.\n\n${block}`;
-	        addLocalVoiceMessage("assistant", content);
-	        void add({ data: { threadId, role: "assistant", content } }).then(() => {
-	          qc.invalidateQueries({ queryKey: ["messages", threadId] });
-	        });
-        // Keep lastDocumentIntentKey set; completed-TTL blocks repeats for 60s.
-      });
       session.onTranscript((role, text, done) => {
 	        if (role === "assistant") {
 	          assistantBuf = text;

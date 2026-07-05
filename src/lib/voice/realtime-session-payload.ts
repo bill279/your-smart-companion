@@ -4,8 +4,6 @@
 // without hitting the network. Do NOT inline this back into the route
 // handler — the regression test guards against dropping `session.type`.
 
-import { REALTIME_TOOLS } from "./realtime-tools";
-
 export interface BuildRealtimeSessionPayloadInput {
   model: string;
   instructions: string;
@@ -32,14 +30,12 @@ export function buildRealtimeSessionPayload({
             // to cut the user off than raw silence thresholds.
             type: "semantic_vad" as const,
             eagerness: "low" as const,
-            // create_response is deliberately false: the client decides,
-            // per finished user turn, whether the live model should answer
-            // or whether the request gets delegated to the deterministic
-            // /api/chat path (documents, research tables, long-form asks).
-            // With auto-response on, both could fire for the same utterance
-            // and race — that was the source of duplicate documents and
-            // repeated confirmations. Only one path may ever create a
-            // response for a given turn now.
+            // create_response is deliberately false: Realtime is transport
+            // only. Finished user turns are delegated to /api/chat, the
+            // single source of truth for reasoning, tools, persistence,
+            // approvals, files, research, and visual answers. Realtime only
+            // transcribes the user and speaks a short summary after the chat
+            // answer exists.
             create_response: false,
             interrupt_response: true,
           },
@@ -47,7 +43,10 @@ export function buildRealtimeSessionPayload({
         },
         output: { voice },
       },
-      tools: REALTIME_TOOLS,
+      // Final-product architecture: no tools are registered in Realtime.
+      // Tool execution belongs to /api/chat so voice and text share the same
+      // agent brain and cannot race each other.
+      tools: [],
       tool_choice: "auto" as const,
     },
   };

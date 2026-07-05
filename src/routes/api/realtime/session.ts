@@ -1,11 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import {
-  REALTIME_TOOLS,
-  realtimeToolNames,
-  realtimeHasTool,
-} from "@/lib/voice/realtime-tools";
 import { buildRealtimeSessionPayload } from "@/lib/voice/realtime-session-payload";
 import {
   REALTIME_PRIMARY_MODEL,
@@ -23,7 +18,6 @@ import { microsoftIntegrationStatus } from "@/lib/microsoft-integration.server";
 
 const REALTIME_MODEL = REALTIME_PRIMARY_MODEL;
 const REALTIME_VOICE = "alloy";
-const DOCUMENT_TOOL_NAME = "generate_document";
 // Current OpenAI Realtime ephemeral-secret endpoint. The legacy
 // `/v1/realtime/sessions` route now returns 404 for many keys; the
 // documented replacement is `/v1/realtime/client_secrets`, which returns
@@ -93,25 +87,14 @@ export const Route = createFileRoute("/api/realtime/session")({
             { status: 501 },
           );
         }
-        if (!realtimeHasTool("generate_document")) {
-          return Response.json(
-            {
-              ok: false,
-              error: "realtime_document_tool_missing",
-              message:
-                "Voice document generation is not registered on the server. Redeploy required.",
-              tools: realtimeToolNames(),
-            },
-            { status: 500 },
-          );
-        }
         return Response.json({
           ok: true,
           model: REALTIME_MODEL,
           fallbackModels: REALTIME_FALLBACK_MODELS,
           endpoint: REALTIME_SESSION_URL,
-          tools: realtimeToolNames(),
-          documentToolRegistered: true,
+          tools: [],
+          documentToolRegistered: false,
+          architecture: "transport_only",
         });
       },
       POST: async ({ request }) => {
@@ -152,19 +135,6 @@ export const Route = createFileRoute("/api/realtime/session")({
         const costMode = (settings?.cost_mode ?? "balanced") as string;
         const maxSeconds = settings?.max_voice_seconds ?? 45;
 
-        if (!realtimeHasTool("generate_document")) {
-          console.error("[realtime session] generate_document missing from local Realtime tools payload", {
-            tools: realtimeToolNames(),
-          });
-          return Response.json(
-            {
-              error: "realtime_document_tool_missing",
-              message: "Voice document generation is not registered. Restart voice and try again.",
-            },
-            { status: 500 },
-          );
-        }
-
         const microsoftStatus = await microsoftIntegrationStatus(supabase, userData.user.id).catch(() => ({ connected: false }));
         const emailConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_MAIL_API_KEY)));
         const calendarConfigured = Boolean(microsoftStatus.connected || (process.env.LOVABLE_API_KEY && (process.env.MICROSOFT_OUTLOOK_API_KEY || process.env.GOOGLE_CALENDAR_API_KEY)));
@@ -173,9 +143,9 @@ export const Route = createFileRoute("/api/realtime/session")({
           calendarConfigured,
         });
         // Try primary model, then a documented fallback for 5xx / model-not-available.
-        // Tools + instructions are baked into the ephemeral client_secret when the
-        // endpoint accepts them; the client also re-registers via session.update
-        // after the data channel opens, so this is a defense-in-depth setup.
+        // Realtime is transport only. Tools are intentionally not registered
+        // here; /api/chat owns reasoning, tool execution, files, approvals,
+        // persistence, and visual answers.
         const modelChain = [REALTIME_MODEL, ...REALTIME_FALLBACK_MODELS];
         const attempts: Array<{ model: string; status: number; requestId: string | null; bodySnippet: string; kind: string }> = [];
         let successModel: string | null = null;
@@ -191,8 +161,7 @@ export const Route = createFileRoute("/api/realtime/session")({
             REALTIME_SESSION_URL,
             "model",
             candidateModel,
-            "tools",
-            realtimeToolNames().join(", "),
+            "transport_only",
           );
           const upstream = await fetch(REALTIME_SESSION_URL, {
             method: "POST",
@@ -275,16 +244,11 @@ export const Route = createFileRoute("/api/realtime/session")({
         const echoedTools = session.session?.tools ?? session.tools;
         const registeredToolNames = Array.isArray(echoedTools)
           ? echoedTools.map((t) => t?.name).filter(Boolean)
-          : REALTIME_TOOLS.map((t) => t.name);
+          : [];
         console.log(
           `[realtime session] created (model ${successModel}); tools registered:`,
           registeredToolNames.join(", ") || "(none)",
         );
-        if (!registeredToolNames.includes("generate_document")) {
-          console.warn(
-            "[realtime session] generate_document missing from OpenAI-echoed tools; client will re-register via session.update",
-          );
-        }
         return Response.json({
           clientSecret: clientSecretValue,
           expiresAt: clientSecretExpiresAt,
@@ -292,9 +256,10 @@ export const Route = createFileRoute("/api/realtime/session")({
           modelChainTried: attempts.map((a) => a.model),
           voice: REALTIME_VOICE,
           instructions,
-          tools: REALTIME_TOOLS,
+          tools: [],
           registeredToolNames,
-          documentToolRegistered: registeredToolNames.includes(DOCUMENT_TOOL_NAME),
+          documentToolRegistered: false,
+          architecture: "transport_only",
         });
       },
     },

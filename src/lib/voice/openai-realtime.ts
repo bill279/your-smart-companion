@@ -18,9 +18,7 @@ export type RealtimeSession = {
   onError: (cb: (message: string) => void) => void;
   onOpen: (cb: () => void) => void;
   onClose: (cb: () => void) => void;
-  onToolCall: (cb: (name: string, args: Record<string, unknown>, result: unknown) => void) => void;
   sendEvent: (event: Record<string, unknown>) => boolean;
-  forceGenerateDocument: (hint?: string) => boolean;
 };
 
 function isBenignRealtimeError(message: string) {
@@ -135,18 +133,15 @@ export async function startOpenAiRealtimeSession(options: {
         .map((tool) => (tool && typeof tool === "object" && "name" in tool ? String(tool.name) : ""))
         .filter(Boolean)
     : [];
-  if (!localToolNames.includes("generate_document")) {
-    phase("failed", "Missing generate_document tool");
-    throw new Error("Voice session is missing generate_document locally. PDF/DOCX generation cannot start.");
-  }
-  if (documentToolRegistered === false || (registeredToolNames && !registeredToolNames.includes("generate_document"))) {
-    console.warn(
-      "[realtime] server session missing generate_document — will re-register client-side",
+  if (localToolNames.length || registeredToolNames?.length || documentToolRegistered) {
+    console.warn("[realtime] ignoring unexpected Realtime tools; /api/chat owns tools", {
+      localToolNames,
       registeredToolNames,
-    );
+      documentToolRegistered,
+    });
   }
   const fallbackInstructions =
-    "You can create downloadable PDFs, DOCX Word documents, Markdown files, spreadsheets, CSV, and TXT files with generate_document. For any create/export PDF, Word, Markdown, report, download, or attachment request, call generate_document immediately. Never say you cannot create files or PDFs; briefly confirm after the artifact is generated and do not read the full document aloud.";
+    "You are the voice transport for BPA Bot. Do not answer user requests directly. Wait for chat to provide the result, then speak only the short sentence sent in response.create.";
   const realtimeInstructions = [instructions || fallbackInstructions, options.context?.trim()]
     .filter(Boolean)
     .join("\n\n");
@@ -181,46 +176,6 @@ export async function startOpenAiRealtimeSession(options: {
   let onErrorCb: ((message: string) => void) | null = null;
   let onOpenCb: (() => void) | null = null;
   let onCloseCb: (() => void) | null = null;
-  let onToolCallCb: ((name: string, args: Record<string, unknown>, result: unknown) => void) | null = null;
-
-  // Track streaming function-call argument deltas keyed by call_id.
-  const pendingCalls = new Map<string, { name: string; args: string }>();
-  const dispatchedCalls = new Set<string>();
-
-  async function runTool(name: string, argsJson: string, callId: string) {
-    let args: Record<string, unknown> = {};
-    try { args = JSON.parse(argsJson || "{}"); } catch { /* leave empty */ }
-    let result: unknown;
-    try {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      const jwt2 = s?.access_token;
-      const resp = await fetch("/api/realtime/tool", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(jwt2 ? { Authorization: `Bearer ${jwt2}` } : {}),
-        },
-        body: JSON.stringify({ name, arguments: args }),
-      });
-      result = await resp.json().catch(() => ({ error: `tool http ${resp.status}` }));
-    } catch (err) {
-      result = { error: err instanceof Error ? err.message : "tool call failed" };
-    }
-    onToolCallCb?.(name, args, result);
-    try {
-      dc.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "function_call_output",
-          call_id: callId,
-          output: JSON.stringify(result),
-        },
-      }));
-      dc.send(JSON.stringify({ type: "response.create" }));
-    } catch (err) {
-      console.warn("realtime tool response send failed", err);
-    }
-  }
 
   let assistantBuf = "";
   let userInterimBuf = "";
@@ -256,42 +211,32 @@ export async function startOpenAiRealtimeSession(options: {
   };
   dc.addEventListener("open", () => {
     phase("live");
-    // Defensively (re)register tools via session.update so document/email/web
-    // tools are always available even if the ephemeral session config was
-    // dropped upstream.
-    if (Array.isArray(tools) && tools.length) {
-      try {
-        console.log("[realtime] registering client-side tools:", localToolNames.join(", "));
-        dc.send(
-          JSON.stringify({
-            type: "session.update",
-            session: {
-              type: "realtime",
-              audio: {
-                input: {
-                  turn_detection: {
-                    type: "semantic_vad",
-                    eagerness: "low",
-                    // Kept in sync with realtime-session-payload.ts: the
-                    // client always decides explicitly (via response.create)
-                    // whether the live model answers a turn, so it never
-                    // races the deterministic /api/chat delegation path.
-                    create_response: false,
-                    interrupt_response: true,
-                  },
-                  transcription: { model: "whisper-1" },
+    try {
+      dc.send(
+        JSON.stringify({
+          type: "session.update",
+          session: {
+            type: "realtime",
+            audio: {
+              input: {
+                turn_detection: {
+                  type: "semantic_vad",
+                  eagerness: "low",
+                  create_response: false,
+                  interrupt_response: true,
                 },
-                output: { voice: voice ?? "alloy" },
+                transcription: { model: "whisper-1" },
               },
-              tools,
-              tool_choice: "auto",
-              instructions: realtimeInstructions,
+              output: { voice: voice ?? "alloy" },
             },
-          }),
-        );
-      } catch (err) {
-        console.warn("[realtime] session.update tools failed", err);
-      }
+            tools: [],
+            tool_choice: "auto",
+            instructions: realtimeInstructions,
+          },
+        }),
+      );
+    } catch (err) {
+      console.warn("[realtime] session.update transport config failed", err);
     }
     onOpenCb?.();
   });
@@ -326,12 +271,6 @@ export async function startOpenAiRealtimeSession(options: {
           const s = (msg as unknown as { session?: { tools?: Array<{ name?: string }> } }).session;
           const names = s?.tools?.map((t) => t?.name).filter(Boolean) ?? [];
           console.log("[realtime] session tools:", names.join(", ") || "(none)");
-          if (msg.type === "session.updated" && !names.includes("generate_document")) {
-            console.warn("[realtime] generate_document missing after session.update", names);
-            onErrorCb?.(
-              "Voice session is missing the document tool — PDF/DOCX generation unavailable until you restart the mic.",
-            );
-          }
           break;
         }
         case "response.audio_transcript.delta":
@@ -363,33 +302,7 @@ export async function startOpenAiRealtimeSession(options: {
         case "input_audio_transcription.delta":
           emitParsedTranscript(msg);
           break;
-        case "response.function_call_arguments.delta": {
-          const id = msg.call_id ?? "";
-          const existing = pendingCalls.get(id) ?? { name: msg.name ?? "", args: "" };
-          existing.args += msg.delta ?? "";
-          if (msg.name && !existing.name) existing.name = msg.name;
-          pendingCalls.set(id, existing);
-          break;
-        }
-        case "response.function_call_arguments.done": {
-          const id = msg.call_id ?? "";
-          const buf = pendingCalls.get(id);
-          const name = msg.name ?? buf?.name ?? "";
-          const argsJson = msg.arguments ?? buf?.args ?? "";
-          pendingCalls.delete(id);
-          if (name && id && !dispatchedCalls.has(id)) {
-            dispatchedCalls.add(id);
-            void runTool(name, argsJson, id);
-          }
-          break;
-        }
         case "response.output_item.done": {
-          const item = msg.item;
-          if (item?.type === "function_call" && item.call_id && item.name && !dispatchedCalls.has(item.call_id)) {
-            dispatchedCalls.add(item.call_id);
-            void runTool(item.name, item.arguments ?? "", item.call_id);
-            break;
-          }
           emitParsedTranscript(msg);
           break;
         }
@@ -449,7 +362,6 @@ export async function startOpenAiRealtimeSession(options: {
     onError: (cb) => { onErrorCb = cb; },
     onOpen: (cb) => { onOpenCb = cb; },
     onClose: (cb) => { onCloseCb = cb; },
-    onToolCall: (cb) => { onToolCallCb = cb; },
     sendEvent: (event) => {
       try {
         if (dc.readyState !== "open") return false;
@@ -457,33 +369,6 @@ export async function startOpenAiRealtimeSession(options: {
         return true;
       } catch (err) {
         console.warn("[realtime] sendEvent failed", err);
-        return false;
-      }
-    },
-    forceGenerateDocument: (hint) => {
-      try {
-        if (dc.readyState !== "open") return false;
-        const instructions = [
-          "The user requested a downloadable document. You MUST call the generate_document tool now.",
-          "Do NOT reply with the document body as text. Do NOT ask for confirmation.",
-          "Pick an appropriate format (default pdf if unspecified), a concise title and filename, and put the full document body in the markdown field, using the most recent relevant assistant answer and conversation context.",
-          "After the tool result returns, speak exactly one short sentence such as: 'I generated the PDF — it's on screen.' Never read the document contents aloud.",
-          hint ? `User request: ${hint}` : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        dc.send(
-          JSON.stringify({
-            type: "response.create",
-            response: {
-              tool_choice: { type: "function", name: "generate_document" },
-              instructions,
-            },
-          }),
-        );
-        return true;
-      } catch (err) {
-        console.warn("[realtime] forceGenerateDocument failed", err);
         return false;
       }
     },
