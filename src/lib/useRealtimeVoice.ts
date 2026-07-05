@@ -243,17 +243,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        const sdpRes = await fetch(
-          `https://api.openai.com/v1/realtime?model=${encodeURIComponent(opts.model)}`,
-          {
-            method: "POST",
-            body: offer.sdp,
-            headers: {
-              Authorization: `Bearer ${opts.clientSecret}`,
-              "Content-Type": "application/sdp",
-            },
+        const sdpRes = await fetch("https://api.openai.com/v1/realtime/calls", {
+          method: "POST",
+          body: offer.sdp,
+          headers: {
+            Authorization: `Bearer ${opts.clientSecret}`,
+            "Content-Type": "application/sdp",
           },
-        );
+        });
         if (!sdpRes.ok) {
           const t = await sdpRes.text().catch(() => "");
           throw new Error(`SDP exchange failed (${sdpRes.status}): ${t.slice(0, 200)}`);
