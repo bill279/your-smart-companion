@@ -101,6 +101,28 @@ function looksUnstableVoiceText(text: string) {
   return false;
 }
 
+function looksLikeAccidentalVoiceTranscript(text: string) {
+  const s = cleanAssistantText(text).trim();
+  if (!s) return true;
+  if (looksUnstableVoiceText(s)) return true;
+
+  // OpenAI/Whisper can hallucinate short foreign-language broadcast phrases
+  // from silence/background audio on mobile. This app is configured as an
+  // English assistant; do not save or act on a non-Latin transcript unless it
+  // also contains meaningful English. This blocks cases like
+  // "MBC 뉴스 이덕영입니다." from becoming a user command.
+  const asciiLetters = (s.match(/[A-Za-z]/g) ?? []).length;
+  const cjkChars = (s.match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g) ?? []).length;
+  if (cjkChars > 0 && asciiLetters < 4) return true;
+
+  const latinWords = (s.match(/\b[A-Za-z][A-Za-z']*\b/g) ?? []).length;
+  const allLetters = (s.match(/\p{L}/gu) ?? []).length;
+  if (allLetters >= 3 && latinWords === 0) return true;
+
+  if (/\bMBC\b/i.test(s) && cjkChars > 0) return true;
+  return false;
+}
+
 function looksLikeVoiceVisualAnswerIntent(text: string) {
   const s = text.toLowerCase();
   const asksForCurrentSimpleFact =
@@ -114,7 +136,10 @@ function looksLikeVoiceVisualAnswerIntent(text: string) {
     /\b(camera|cameras|sensor|sensors|machine|machines|robot|robots|plc|scada|vendor|vendors|supplier|suppliers|product|products|model|models|software|tool|tools|system|systems|equipment|component|components|part|parts)\b/.test(s);
   const asksForMeasuredCriteria =
     /\b(depth of field|resolution|price|cost|range|payload|accuracy|speed|rating|dimensions?|throughput|capacity)\b/.test(s);
-  return asksForCurrentSimpleFact || asksForTable || asksForProductResearch || (asksForResearch && asksForMeasuredCriteria);
+  const asksForBusinessResearch =
+    asksForResearch &&
+    /\b(company|business|firm|organization|organisation|website|competitor|customer|market|edmonton|bp automation|bpa)\b/.test(s);
+  return asksForCurrentSimpleFact || asksForTable || asksForProductResearch || asksForBusinessResearch || (asksForResearch && asksForMeasuredCriteria);
 }
 
 // Only route voice through the heavier /api/chat pipeline when it clearly
@@ -470,7 +495,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   // Hide legacy transient voice/session error strings that a prior code
   // path may have persisted as assistant messages. See
   // src/lib/voice/transient-errors.ts for the pattern list.
-  const messages = filterOutTransientVoiceErrors(rawMessages);
+  const messages = filterOutTransientVoiceErrors(rawMessages).filter(
+    (m) => !(m.role === "user" && looksLikeAccidentalVoiceTranscript(m.content || "")),
+  );
   type LocalVoiceMessage = { id: string; role: "user" | "assistant"; content: string };
   const [localVoiceMessages, setLocalVoiceMessages] = useState<LocalVoiceMessage[]>([]);
   const normMessage = (s: string) => cleanAssistantText(s).trim().replace(/\s+/g, " ");
@@ -669,7 +696,16 @@ function ThreadView({ threadId }: { threadId: string }) {
 	    const runDeterministicVoiceVisualAnswer = async (text: string, opts?: { visual?: boolean }) => {
 	      const visual = opts?.visual ?? true;
 	      const currentInfo = /\b(weather|temperature|forecast|rain|snow|wind|humidity|air quality|aqi|stock price|exchange rate|current time|time in|latest score|traffic)\b/i.test(text);
-	      setPendingAssistant(currentInfo ? "Checking the latest info…" : visual ? "Building the table and source-backed details…" : "Thinking through that…");
+	      const companyResearch = /\b(bp automation|bpa|company|business|edmonton)\b/i.test(text);
+	      setPendingAssistant(
+	        currentInfo
+	          ? "Checking the latest info…"
+	          : companyResearch
+	            ? "Researching BP Automation…"
+	            : visual
+	              ? "Building the chat answer…"
+	              : "Working on it…",
+	      );
 	      try {
 	        const { data: sess } = await supabase.auth.getSession();
 	        const token = sess.session?.access_token;
@@ -885,8 +921,17 @@ function ThreadView({ threadId }: { threadId: string }) {
         } else if (role === "user" && !done) {
           // Interim user transcript — surface a live "you're saying…"
           // bubble so the chat updates in real time while listening.
-          setPendingUserVoice(text);
+          if (looksLikeAccidentalVoiceTranscript(text)) {
+            setPendingUserVoice("");
+          } else {
+            setPendingUserVoice(text);
+          }
         } else if (role === "user" && done && text.trim()) {
+          if (looksLikeAccidentalVoiceTranscript(text)) {
+            setPendingUserVoice("");
+            setPendingSpokenAssistant("");
+            return;
+          }
           setPendingUserVoice("");
           setPendingSpokenAssistant("");
           addLocalVoiceMessage("user", text);
