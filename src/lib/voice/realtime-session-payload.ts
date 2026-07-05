@@ -31,11 +31,11 @@ export function buildRealtimeSessionPayload({
           turn_detection: {
             // Semantic VAD is closer to ChatGPT-style voice behavior: it
             // waits through "umm..." / mid-thought pauses better than raw
-            // silence thresholds. Medium is the best current tradeoff here:
-            // low felt too slow in mobile testing, while high risks cutting
-            // off longer business requests.
+            // silence thresholds. High gives the snappiest mobile feel; the
+            // heavier chat-brain route still handles longer/tool requests
+            // after the final transcript lands.
             type: "semantic_vad" as const,
-            eagerness: "medium" as const,
+            eagerness: "high" as const,
             // create_response is deliberately false: Realtime is transport
             // only. Finished user turns are delegated to /api/chat, the
             // single source of truth for reasoning, tools, persistence,

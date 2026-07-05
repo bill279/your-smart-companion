@@ -118,17 +118,16 @@ function looksLikeVoiceVisualAnswerIntent(text: string) {
   return asksForCurrentSimpleFact || asksForTable || asksForProductResearch || (asksForResearch && asksForMeasuredCriteria);
 }
 
-// Anything long or substantive enough that it needs the full chat-brain
-// pipeline (tools, memory, multi-step reasoning) rather than a snappy live
-// reply. Short acknowledgments and small talk ("hi", "thanks", "okay",
-// "sounds good") intentionally do NOT match this, so they stay on the fast
-// live-model path instead of taking a multi-second round trip through
-// /api/chat for no reason.
+// Only route voice through the heavier /api/chat pipeline when it clearly
+// needs stateful actions, external tools, or a very long turn. Normal
+// conversational asks ("explain this", "what do you think", "how can we make
+// it better") should stay on the fast live-model path, otherwise voice feels
+// several seconds slower than ChatGPT.
 function looksLikeVoiceBrainAnswerIntent(text: string) {
   const s = text.toLowerCase();
   const words = s.trim().split(/\s+/).filter(Boolean).length;
-  if (words >= 35 || text.length >= 220) return true;
-  return /\b(explain|walk me through|plan|strategy|summari[sz]e|summary|draft|write|create|analy[sz]e|recommend|proposal|compare|research|find|look up|email|reply|calendar|schedule|what should|how can|make it better)\b/.test(s);
+  if (words >= 70 || text.length >= 420) return true;
+  return /\b(draft|write|create|send|email|reply|respond|forward|calendar|schedule|book|meeting|invite|remind|remember|save|update|delete|morning briefing|inbox|outlook)\b/.test(s);
 }
 
 function looksLikeVoiceVisualPlaceholder(text: string) {

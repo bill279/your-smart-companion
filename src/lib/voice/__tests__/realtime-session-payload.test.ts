@@ -66,14 +66,14 @@ describe("buildRealtimeSessionPayload", () => {
     expect(payload.session.audio.input.transcription.prompt).toContain("BP Automation");
   });
 
-  it("uses medium semantic VAD for a faster mobile voice feel", () => {
+  it("uses high semantic VAD for a faster mobile voice feel", () => {
     const payload = buildRealtimeSessionPayload({
       model: "gpt-realtime",
       instructions: "test",
       voice: "alloy",
     });
     expect(payload.session.audio.input.turn_detection.type).toBe("semantic_vad");
-    expect(payload.session.audio.input.turn_detection.eagerness).toBe("medium");
+    expect(payload.session.audio.input.turn_detection.eagerness).toBe("high");
   });
 
   it("client-side session.update also includes session.type", () => {

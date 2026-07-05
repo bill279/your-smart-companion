@@ -232,7 +232,7 @@ export async function startOpenAiRealtimeSession(options: {
               input: {
                 turn_detection: {
                   type: "semantic_vad",
-                  eagerness: "medium",
+                  eagerness: "high",
                   create_response: false,
                   interrupt_response: true,
                 },
