@@ -145,7 +145,7 @@ export async function startOpenAiRealtimeSession(options: {
     });
   }
   const fallbackInstructions =
-    "You are the voice transport for BPA Bot. Do not answer user requests directly. Wait for chat to provide the result, then speak only the short sentence sent in response.create.";
+    "You are BPA Bot voice v3. Be fast, natural, concise, and professional. Answer simple spoken turns directly in 1-2 short sentences. You have no tools in this voice preview. If the user asks for email, calendar, PDF/document generation, web research, files, links, or current data, say: 'I can handle that in chat mode — send it there and I’ll take care of it.' Speak English only. If audio is unclear, ask one short repair question.";
   const realtimeInstructions = [instructions || fallbackInstructions, options.context?.trim()]
     .filter(Boolean)
     .join("\n\n");
@@ -233,7 +233,7 @@ export async function startOpenAiRealtimeSession(options: {
                 turn_detection: {
                   type: "semantic_vad",
                   eagerness: "high",
-                  create_response: false,
+                  create_response: true,
                   interrupt_response: true,
                 },
                 transcription: {

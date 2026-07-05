@@ -26,15 +26,16 @@ const REALTIME_SESSION_URL = "https://api.openai.com/v1/realtime/client_secrets"
 
 function buildInstructions() {
   return [
-    "You are BPA Bot, BP Automation's voice assistant. You are fast, polished, concise, accurate, and useful.",
-    "Realtime voice has no tools. For simple conversational turns, answer directly and briefly from general knowledge.",
-    "Tool-heavy requests are routed by the app to the main chat brain. Do not claim you searched, emailed, scheduled, generated a file, or put something on screen unless the app-provided instruction says so.",
+    "You are BPA Bot voice v3, BP Automation's voice assistant. You are fast, polished, concise, accurate, and useful.",
+    "This voice preview is conversation-first and has no tools. Answer simple conversational turns directly from general knowledge.",
+    "If the user asks for email, calendar, PDF/document generation, web research, files, links, tables, current data, or anything requiring tools, say exactly one short sentence: 'I can handle that in chat mode — send it there and I’ll take care of it.'",
+    "Do not claim you searched, emailed, scheduled, generated a file, created a table, opened links, or put something on screen.",
     "Default to 1 short sentence. Use 2 sentences only when needed. Never monologue.",
     "Do not greet or introduce yourself again after the first exchange.",
     "Avoid filler like 'sure thing', 'absolutely', 'let me', 'I can help with that', apologies loops, jokes, and rambling.",
     "If audio is unclear, partial, or mid-thought, ask one short repair question. If the user says wait/cancel/never mind, say 'Okay — I’ll wait.'",
-    "If the user asks what you can help with / what can you do, answer exactly one short sentence: 'I can help with research, email, calendar, PDFs/documents, comparisons, and BP Automation knowledge.' Do not list examples unless asked.",
-    "Never read tables, lists, code, or long drafts aloud. If the answer requires a table/list/links/draft, give a one-sentence executive summary only. Do not claim links, details, or a table are on screen unless they have actually been inserted into chat. Do not speak column headers, pipes, dashes, or row-by-row cell values.",
+    "If the user asks what you can help with / what can you do, answer exactly one short sentence: 'In voice, I can have quick conversations; use chat for research, email, calendar, PDFs/documents, comparisons, and files.'",
+    "Speak English only. Ignore accidental background audio or non-English snippets unless the user clearly asks for translation.",
     "Do not repeat yourself across turns. If you already asked for confirmation, wait for yes/no/edits. If the user approves, act immediately. If the user is silent, stay quiet.",
     "Never think out loud, narrate internal steps, or fill silence.",
   ].join(" ");
@@ -68,7 +69,7 @@ export const Route = createFileRoute("/api/realtime/session")({
           endpoint: REALTIME_SESSION_URL,
           tools: [],
           documentToolRegistered: false,
-          architecture: "transport_only",
+          architecture: "voice_v3_conversation_only",
         });
       },
       POST: async ({ request }) => {
@@ -102,9 +103,8 @@ export const Route = createFileRoute("/api/realtime/session")({
 
         const instructions = buildInstructions();
         // Try primary model, then a documented fallback for 5xx / model-not-available.
-        // Realtime is transport only. Tools are intentionally not registered
-        // here; /api/chat owns reasoning, tool execution, files, approvals,
-        // persistence, and visual answers.
+        // Voice v3 is conversation-only. Tools are intentionally not registered
+        // here until the native spoken loop is excellent.
         const modelChain = [REALTIME_MODEL, ...REALTIME_FALLBACK_MODELS];
         const attempts: Array<{ model: string; status: number; requestId: string | null; bodySnippet: string; kind: string }> = [];
         let successModel: string | null = null;
@@ -120,7 +120,7 @@ export const Route = createFileRoute("/api/realtime/session")({
             REALTIME_SESSION_URL,
             "model",
             candidateModel,
-            "transport_only",
+            "voice_v3_conversation_only",
           );
           const upstream = await fetch(REALTIME_SESSION_URL, {
             method: "POST",
@@ -218,7 +218,7 @@ export const Route = createFileRoute("/api/realtime/session")({
           tools: [],
           registeredToolNames,
           documentToolRegistered: false,
-          architecture: "transport_only",
+          architecture: "voice_v3_conversation_only",
         });
       },
     },

@@ -572,9 +572,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     setShowScrollDown(false);
   }
 
-	  useEffect(() => {
-	    scrollToLatest();
-	  }, [messages.length, pendingAssistant, pendingSpokenAssistant, pendingUser, pendingUserVoice]);
+  useEffect(() => {
+    scrollToLatest();
+  }, [messages.length, pendingAssistant, pendingSpokenAssistant, pendingUser, pendingUserVoice]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -610,14 +610,17 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     const history = kept.join("\n");
     const rules = [
-      "Fast voice rules:",
+      "Voice v3 rules:",
+      "- This is a conversation-only voice preview. Do not use or claim tools.",
+      "- For email, calendar, PDF/document generation, web research, files, links, tables, current data, or any tool request, say exactly: 'I can handle that in chat mode — send it there and I’ll take care of it.'",
+      "- Do not claim you searched, emailed, scheduled, generated a file, created a table, opened links, or put details on screen.",
       "- Do not greet or introduce yourself again.",
       "- BE CONCISE: keep spoken replies to 1-2 short sentences and under 25 words by default. Avoid long monologues so the user can interject naturally.",
       "- PROFESSIONAL INTELLIGENCE: lead with the useful answer, not filler. Avoid 'sure thing', 'absolutely', rambling, jokes, apologies loops, and casual throwaway phrases.",
       "- DO NOT ANSWER FRAGMENTS: if the transcript sounds partial, noisy, background speech, canceled mid-thought, or like the user is still thinking, wait. Ignore isolated words, breathing, false starts, and short fragments unless they are clear commands like 'stop' or 'cancel'. Do not invent meaning from weak audio. If genuinely unclear, ask one short repair question. If they say wait/cancel/never mind, say 'Okay — I’ll wait.'",
       "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content.",
-      "- VISUAL CONTENT: for tables, comparisons, links, email drafts, documents, code, or long lists, keep speech short. The full answer belongs in chat.",
-      "- CAPABILITIES QUESTION: if asked what you can do, answer exactly one short sentence: 'I can help with research, email, calendar, PDFs/documents, comparisons, and BP Automation knowledge.'",
+      "- Speak English only. Ignore accidental background audio or non-English snippets unless the user clearly asks for translation.",
+      "- CAPABILITIES QUESTION: if asked what you can do, answer exactly one short sentence: 'In voice, I can have quick conversations; use chat for research, email, calendar, PDFs/documents, comparisons, and files.'",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
     ].join("\n");
     return history
@@ -631,190 +634,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceError(null);
     setVoiceUiState("starting");
     setVoicePhase("preflight");
-    let assistantBuf = "";
-    // Document-intent loop guards use refs so repeated transcript fragments
-    // and re-renders can't bypass the dedupe. Key = normalized text + format.
-    const DOC_INTENT_COMPLETED_TTL_MS = 60_000;
-    const detectFormat = (t: string): string => {
-      const s = t.toLowerCase();
-      if (/\bpdf\b/.test(s)) return "pdf";
-      if (/\b(docx|word)\b/.test(s)) return "docx";
-      if (/\b(xlsx|excel|spreadsheet)\b/.test(s)) return "xlsx";
-      if (/\bcsv\b/.test(s)) return "csv";
-      if (/\bmarkdown|\bmd\b/.test(s)) return "md";
-      if (/\btxt|text file\b/.test(s)) return "txt";
-      return "auto";
-    };
-	    const normalizeIntent = (t: string) =>
-	      t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200) +
-	      "|" +
-	      detectFormat(t);
-	    const isDocumentLimboReply = (t: string) =>
-	      /\b(?:i can|i will|i'll|would you like|need .*overview|cannot|can't|unable)\b/i.test(t) &&
-	      /\b(?:pdf|document|file|summary|report)\b/i.test(t);
-	    const buildSpokenBrief = (markdown: string) => {
-	      const cleaned = cleanAssistantText(markdown)
-	        .replace(/```bpa-artifact[\s\S]*?```/gi, " ")
-	        .replace(/```[\s\S]*?```/g, " ")
-	        .split(/\r?\n/)
-	        .filter((line) => {
-	          const t = line.trim();
-	          if (!t) return false;
-	          if (/^\|/.test(t)) return false;
-	          if (/^[-:|\s]+$/.test(t)) return false;
-	          if (/^#{1,6}\s/.test(t)) return false;
-	          return true;
-	        })
-	        .join(" ")
-	        .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
-	        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-	        .replace(/[*_`>#~-]+/g, " ")
-	        .replace(/\s+/g, " ")
-	        .trim();
-	      if (!cleaned) return "";
-	      const firstSentence = cleaned.match(/^.{20,220}?[.!?](?:\s|$)/)?.[0]?.trim();
-	      return (firstSentence || cleaned.slice(0, 180).trim()).replace(/\s+[,;:]?$/, "");
-	    };
-	    const speakChatResultBriefly = (markdown: string) => {
-	      const brief = buildSpokenBrief(markdown);
-	      if (!brief || !openAiSessionRef.current) return;
-	      suppressRealtimeAssistantUntilRef.current = Date.now() + 12_000;
-	      // Show the spoken summary immediately, then keep it updated from
-	      // Realtime audio transcript deltas. Previously we suppressed this
-	      // transcript entirely to avoid duplicate saved messages, which made
-	      // voice feel disconnected because the chat did not move while the
-	      // assistant was talking.
-	      setPendingSpokenAssistant(brief);
-	      openAiSessionRef.current.sendEvent({
-	        type: "response.create",
-	        response: {
-	          instructions:
-	            `Say this result out loud in one short, natural sentence and do not call tools: ${brief}`,
-	        },
-	      });
-	    };
-	    const runDeterministicVoiceVisualAnswer = async (text: string, opts?: { visual?: boolean }) => {
-	      const visual = opts?.visual ?? true;
-	      const currentInfo = /\b(weather|temperature|forecast|rain|snow|wind|humidity|air quality|aqi|stock price|exchange rate|current time|time in|latest score|traffic)\b/i.test(text);
-	      const companyResearch = /\b(bp automation|bpa|company|business|edmonton)\b/i.test(text);
-	      setPendingAssistant(
-	        currentInfo
-	          ? "Checking the latest info…"
-	          : companyResearch
-	            ? "Researching BP Automation…"
-	            : visual
-	              ? "Building the chat answer…"
-	              : "Working on it…",
-	      );
-	      try {
-	        const { data: sess } = await supabase.auth.getSession();
-	        const token = sess.session?.access_token;
-	        if (!token) throw new Error("Session expired. Please sign in again.");
-	        const res = await fetch("/api/chat", {
-	          method: "POST",
-	          headers: {
-	            "Content-Type": "application/json",
-	            Authorization: `Bearer ${token}`,
-	          },
-	          body: JSON.stringify({
-	            threadId,
-	            content: text,
-	            attachments: [],
-	            ...(visual ? { voiceVisualIntent: true } : { voiceChatIntent: true }),
-	          }),
-	        });
-	        if (!res.ok || !res.body) {
-	          throw new Error((await res.text().catch(() => "")) || `Voice answer failed (${res.status}).`);
-	        }
-	        const reader = res.body.getReader();
-	        const decoder = new TextDecoder();
-	        let acc = "";
-	        let speechStarted = false;
-	        while (true) {
-	          const { value, done } = await reader.read();
-	          if (done) break;
-	          acc += decoder.decode(value, { stream: true });
-	          setPendingAssistant(cleanAssistantText(acc));
-	          if (!speechStarted) {
-	            const earlyBrief = buildSpokenBrief(acc);
-	            if (earlyBrief.length >= 50 && /[.!?]$/.test(earlyBrief)) {
-	              speechStarted = true;
-	              speakChatResultBriefly(earlyBrief);
-	            }
-	          }
-	        }
-	        if (!speechStarted) speakChatResultBriefly(acc);
-	        lastVisualIntentCompletedAtRef.current = Date.now();
-	      } catch (err) {
-	        toast.error(err instanceof Error ? err.message : "Voice answer failed.");
-	      } finally {
-	        visualInFlightRef.current = false;
-	        setPendingAssistant("");
-	        qc.invalidateQueries({ queryKey: ["messages", threadId] });
-	        qc.invalidateQueries({ queryKey: ["threads"] });
-	        // If the user said something else while this was in flight, don't
-	        // drop it — run the latest one now instead of silently ignoring it.
-	        const queued = queuedVoiceTurnRef.current;
-	        if (queued) {
-	          queuedVoiceTurnRef.current = null;
-	          visualInFlightRef.current = true;
-	          lastVisualIntentKeyRef.current = queued.text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
-	          void runDeterministicVoiceVisualAnswer(queued.text, { visual: queued.visual });
-	        }
-	      }
-	    };
-	    const runDeterministicVoiceDocument = async (text: string, key: string) => {
-	      setVoicePhase("generating-document");
-	      setPendingAssistant(`Generating ${detectFormat(text).toUpperCase() === "AUTO" ? "document" : detectFormat(text).toUpperCase()}…`);
-	      try {
-	        const { data: sess } = await supabase.auth.getSession();
-	        const token = sess.session?.access_token;
-	        if (!token) throw new Error("Session expired. Please sign in again.");
-	        const res = await fetch("/api/chat", {
-	          method: "POST",
-	          headers: {
-	            "Content-Type": "application/json",
-	            Authorization: `Bearer ${token}`,
-	          },
-	          body: JSON.stringify({
-	            threadId,
-	            content: text,
-	            attachments: [],
-	            voiceDocIntent: true,
-	          }),
-	        });
-	        if (!res.ok || !res.body) {
-	          throw new Error((await res.text().catch(() => "")) || `Document generation failed (${res.status}).`);
-	        }
-	        const reader = res.body.getReader();
-	        const decoder = new TextDecoder();
-	        let acc = "";
-	        while (true) {
-	          const { value, done } = await reader.read();
-	          if (done) break;
-	          acc += decoder.decode(value, { stream: true });
-	          setPendingAssistant(cleanAssistantText(acc));
-	        }
-	        speakChatResultBriefly(acc);
-	        docIntentFailureCountRef.current.delete(key);
-	        lastDocumentIntentCompletedAtRef.current = Date.now();
-	        toast.success("Document generated.");
-	      } catch (err) {
-	        const n = (docIntentFailureCountRef.current.get(key) ?? 0) + 1;
-	        docIntentFailureCountRef.current.set(key, n);
-	        if (n < DOC_MAX_FAILURES_PER_INTENT) {
-	          lastDocumentIntentKeyRef.current = "";
-	        }
-	        toast.error(err instanceof Error ? err.message : "Document generation failed.");
-	      } finally {
-	        docInFlightRef.current = false;
-	        setVoicePhase("live");
-	        setPendingAssistant("");
-	        qc.invalidateQueries({ queryKey: ["messages", threadId] });
-	        qc.invalidateQueries({ queryKey: ["threads"] });
-	      }
-	    };
-	    try {
+    setPendingAssistant("");
+    setPendingSpokenAssistant("");
+    setPendingUserVoice("");
+    try {
       const session = await startOpenAiRealtimeSession({
         context: buildVoiceContext(),
         onPhase: (p, detail) => {
@@ -868,155 +691,52 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (/cancellation failed:\s*no active response found/i.test(message)) return;
         toast.error(message);
         setVoiceError(message);
-        if (docInFlightRef.current) {
-          docInFlightRef.current = false;
-          lastDocumentIntentCompletedAtRef.current = Date.now();
-          setVoicePhase("live");
-        }
       });
       session.onTranscript((role, text, done) => {
-	        if (role === "assistant") {
-	          assistantBuf = text;
-	          const suppressAssistantTranscript = Date.now() < suppressRealtimeAssistantUntilRef.current;
-	          if (suppressAssistantTranscript) {
-	            setPendingSpokenAssistant(cleanAssistantText(text));
-	          } else if (!docInFlightRef.current && !visualInFlightRef.current && !looksLikeVoiceVisualPlaceholder(text)) {
-	            setPendingAssistant(text);
-	          }
-	          if (done && text.trim()) {
-	            const recentlyHandledDoc =
-	              Date.now() - lastDocumentIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
-	            if (
-	              docInFlightRef.current ||
-	              visualInFlightRef.current ||
-	              suppressAssistantTranscript ||
-	              looksLikeVoiceVisualPlaceholder(text) ||
-	              (recentlyHandledDoc && isDocumentLimboReply(text))
-	            ) {
-	              if (suppressAssistantTranscript) {
-	                setPendingSpokenAssistant(cleanAssistantText(text));
-	              } else {
-	                setPendingAssistant("");
-	              }
-	              assistantBuf = "";
-	              return;
-	            }
-	            setPendingUserVoice("");
-	            const finalAssistantText = cleanAssistantText(text);
-	            // Render the completed voice turn locally immediately. The
-	            // database save/refetch then catches up in the background, so
-	            // the chat never blinks empty or drops the text mid-session.
-	            addLocalVoiceMessage("assistant", finalAssistantText);
-	            setPendingAssistant("");
-	            void add({ data: { threadId, role: "assistant", content: finalAssistantText } })
-	              .then(() => {
-	                qc.invalidateQueries({ queryKey: ["messages", threadId] });
-	                qc.invalidateQueries({ queryKey: ["threads"] });
-	              })
-	              .catch((err) => {
-	                console.warn("[voice] failed to persist assistant transcript", err);
-	              });
-            assistantBuf = "";
+        if (role === "assistant") {
+          const clean = cleanAssistantText(text);
+          if (!done) {
+            setPendingAssistant(clean);
+            return;
           }
+          const finalAssistantText = clean.trim();
+          if (!finalAssistantText) {
+            setPendingAssistant("");
+            return;
+          }
+          setPendingUserVoice("");
+          addLocalVoiceMessage("assistant", finalAssistantText);
+          setPendingAssistant("");
+          void add({ data: { threadId, role: "assistant", content: finalAssistantText } })
+            .then(() => {
+              qc.invalidateQueries({ queryKey: ["messages", threadId] });
+              qc.invalidateQueries({ queryKey: ["threads"] });
+            })
+            .catch((err) => {
+              console.warn("[voice] failed to persist assistant transcript", err);
+            });
         } else if (role === "user" && !done) {
-          // Interim user transcript — surface a live "you're saying…"
-          // bubble so the chat updates in real time while listening.
           if (looksLikeAccidentalVoiceTranscript(text)) {
             setPendingUserVoice("");
           } else {
-            setPendingUserVoice(text);
+            setPendingUserVoice(text.trim());
           }
         } else if (role === "user" && done && text.trim()) {
           if (looksLikeAccidentalVoiceTranscript(text)) {
             setPendingUserVoice("");
-            setPendingSpokenAssistant("");
             return;
           }
+          const finalUserText = text.trim();
           setPendingUserVoice("");
-          setPendingSpokenAssistant("");
-          addLocalVoiceMessage("user", text);
-          void add({ data: { threadId, role: "user", content: text } }).then(() => {
-            qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          }).catch((err) => {
-            console.warn("[voice] failed to persist user transcript", err);
-          });
-          const isDocumentIntent = looksLikeDocumentIntent(text);
-          const isVisualAnswerIntent = !isDocumentIntent && looksLikeVoiceVisualAnswerIntent(text);
-          const isBrainAnswerIntent = !isDocumentIntent && !isVisualAnswerIntent && looksLikeVoiceBrainAnswerIntent(text);
-          const delegateToChatBrain = isDocumentIntent || isVisualAnswerIntent || isBrainAnswerIntent;
-          // Chat brain owns anything that needs tools, research, documents,
-          // or approvals — that stays a single source of truth so it can
-          // never race the live model for those. But routing EVERY turn
-          // (including "hi"/"thanks"/"okay") through a full /api/chat round
-          // trip made voice feel slow and dead-air-y, so short acknowledgments
-          // and small talk get a fast, snappy live-model reply instead.
-          if (!delegateToChatBrain) {
-            openAiSessionRef.current?.sendEvent({ type: "response.create" });
-          }
-          if (isVisualAnswerIntent || isBrainAnswerIntent) {
-            const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
-            const completedRecently =
-              key === lastVisualIntentKeyRef.current &&
-              Date.now() - lastVisualIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
-            if (completedRecently) {
-              // no-op — same request was just answered
-            } else if (visualInFlightRef.current) {
-              // Busy with a previous turn — don't drop this one, run it next.
-              queuedVoiceTurnRef.current = { text, visual: isVisualAnswerIntent };
-            } else {
-              visualInFlightRef.current = true;
-              lastVisualIntentKeyRef.current = key;
-              void runDeterministicVoiceVisualAnswer(text, { visual: isVisualAnswerIntent });
-              setTimeout(() => {
-                if (visualInFlightRef.current) {
-                  console.warn("[realtime] deterministic voice-answer lock released by timeout");
-                  visualInFlightRef.current = false;
-                  lastVisualIntentCompletedAtRef.current = Date.now();
-                  setPendingAssistant("");
-                  const queuedAfterTimeout = queuedVoiceTurnRef.current;
-                  if (queuedAfterTimeout) {
-                    queuedVoiceTurnRef.current = null;
-                    visualInFlightRef.current = true;
-                    void runDeterministicVoiceVisualAnswer(queuedAfterTimeout.text, { visual: queuedAfterTimeout.visual });
-                  }
-                }
-              }, 45_000);
-            }
-          }
-          if (isDocumentIntent) {
-            const key = normalizeIntent(text);
-            const now = Date.now();
-            const completedRecently =
-              key === lastDocumentIntentKeyRef.current &&
-              now - lastDocumentIntentCompletedAtRef.current <
-                DOC_INTENT_COMPLETED_TTL_MS;
-            if (docInFlightRef.current) {
-              console.log("[realtime] doc-intent ignored — generation already in flight");
-            } else if (completedRecently) {
-              console.log("[realtime] doc-intent ignored — same intent completed within 60s");
-            } else {
-              lastDocumentIntentKeyRef.current = key;
-              docInFlightRef.current = true;
-              setVoicePhase("generating-document");
-	              console.log("[realtime] doc-intent detected, using deterministic document route:", text);
-	              void runDeterministicVoiceDocument(text, key);
-	              // Safety: if the tool call never resolves, release the lock.
-	              setTimeout(() => {
-                if (docInFlightRef.current) {
-                  console.warn("[realtime] doc-intent lock released by timeout");
-                  docInFlightRef.current = false;
-                  lastDocumentIntentCompletedAtRef.current = Date.now();
-                  setVoicePhase("live");
-                  // Count the timeout as a failure for repeat suppression.
-                  const k = lastDocumentIntentKeyRef.current;
-                  if (k) {
-                    const n = (docIntentFailureCountRef.current.get(k) ?? 0) + 1;
-                    docIntentFailureCountRef.current.set(k, n);
-                  }
-                }
-              }, 45_000);
-            }
-          }
+          addLocalVoiceMessage("user", finalUserText);
+          void add({ data: { threadId, role: "user", content: finalUserText } })
+            .then(() => {
+              qc.invalidateQueries({ queryKey: ["messages", threadId] });
+              qc.invalidateQueries({ queryKey: ["threads"] });
+            })
+            .catch((err) => {
+              console.warn("[voice] failed to persist user transcript", err);
+            });
         }
       });
     } catch (e) {

@@ -36,13 +36,10 @@ export function buildRealtimeSessionPayload({
             // after the final transcript lands.
             type: "semantic_vad" as const,
             eagerness: "high" as const,
-            // create_response is deliberately false: Realtime is transport
-            // only. Finished user turns are delegated to /api/chat, the
-            // single source of truth for reasoning, tools, persistence,
-            // approvals, files, research, and visual answers. Realtime only
-            // transcribes the user and speaks a short summary after the chat
-            // answer exists.
-            create_response: false,
+            // Voice v3 is conversation-first: OpenAI Realtime answers normal
+            // spoken turns directly for low latency. Tool/file/email/calendar
+            // work stays in chat mode until the core voice loop is excellent.
+            create_response: true,
             interrupt_response: true,
           },
           transcription: {

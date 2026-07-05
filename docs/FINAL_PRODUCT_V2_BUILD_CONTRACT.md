@@ -224,3 +224,10 @@ Required v3 direction:
 - Voice v3 must be a clean module, not another patch inside the current chat component.
 - The first milestone is excellent normal conversation: fast, stable, natural, chat-synced.
 - Only after that works should email, PDFs, research, and calendar actions be layered back in one by one.
+
+July 5 implementation note:
+
+- `codex/voice-v3-clean-rebuild` now removes the slow hybrid voice route that sent spoken turns through `/api/chat` and then forced Realtime to speak summaries.
+- OpenAI Realtime is allowed to answer normal voice turns directly with `create_response: true`.
+- Realtime still registers zero tools.
+- In this milestone, voice must refuse/handoff email, calendar, files, PDF/document generation, web research, links, tables, and current-data requests to chat mode instead of pretending it completed them.
