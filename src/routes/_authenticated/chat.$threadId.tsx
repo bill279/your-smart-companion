@@ -21,7 +21,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { getAssistantSettings } from "@/lib/assistant/settings.functions";
 import {
   startOpenAiRealtimeSession,
-  preflightOpenAiRealtime,
   type RealtimeSession,
   type RealtimePhase,
 } from "@/lib/voice/openai-realtime";
@@ -570,7 +569,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }, [messages.length]);
 
   function buildVoiceContext() {
-    const MAX_CHARS = 5000;
+    const MAX_CHARS = 1400;
     const recent = (messages ?? []).slice(-30).map(
       (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
     );
@@ -584,28 +583,13 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     const history = kept.join("\n");
     const rules = [
-      "Behavioral rules for this session:",
+      "Fast voice rules:",
       "- Do not greet or introduce yourself again.",
-      "- If asked for a table, output a GitHub-Flavored Markdown table directly.",
-      "- EMAIL: never guess or invent addresses. If the user supplied or confirmed the exact email address already, use it directly.",
-      "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
-      "- EMAIL SIGNATURE: Microsoft Graph usually does not apply the user's Outlook UI signature, so include an appropriate sign-off in the email body unless the user asks not to.",
-      "- EMAIL APPROVAL: present one complete concise readback/draft, then wait. If the next reply is yes, ok, sure, send, confirm, or approved, call send_email immediately with approved: true. Do not ask again. Never call send_email unless the immediately previous assistant turn was the draft/readback.",
-      "- OUTLOOK BRIEFING: for morning briefing, catch me up, what needs a reply, or priorities, use get_outlook_briefing. Speak only the top 2-3 priorities; in chat use Top priorities / Emails needing action / Calendar / Next steps. Keep it high-level and avoid sender email addresses unless asked.",
-      "- OUTLOOK REPLIES: for reply to latest email from someone, use prepare_outlook_reply, draft the reply, then wait for approval before sending.",
-      "- EMAIL SILENCE: if the user is silent or audio is unclear after an email readback, wait quietly. Do not repeat the same confirmation prompt over and over.",
-      "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
-      "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
       "- BE CONCISE: keep spoken replies to 1-2 short sentences and under 25 words by default. Avoid long monologues so the user can interject naturally.",
-      "- PROFESSIONAL INTELLIGENCE: behave like a competent chief-of-staff assistant. Lead with the useful answer/action, not filler. Avoid 'sure thing', 'absolutely', rambling, jokes, apologies loops, and casual throwaway phrases.",
+      "- PROFESSIONAL INTELLIGENCE: lead with the useful answer, not filler. Avoid 'sure thing', 'absolutely', rambling, jokes, apologies loops, and casual throwaway phrases.",
       "- DO NOT ANSWER FRAGMENTS: if the transcript sounds partial, noisy, background speech, canceled mid-thought, or like the user is still thinking, wait. Ignore isolated words, breathing, false starts, and short fragments unless they are clear commands like 'stop' or 'cancel'. Do not invent meaning from weak audio. If genuinely unclear, ask one short repair question. If they say wait/cancel/never mind, say 'Okay — I’ll wait.'",
-      "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content. If uncertain, ask one concise question.",
-      "- VISUAL CONTENT: for tables, comparisons, links, email drafts, documents, code, or long lists, keep speech short. Never claim a table, links, or details are on screen unless the chat message actually contains them. Do not read long content out loud.",
-      "- RESEARCH/VISUAL DELEGATION: if the user asks to find the best/top products, compare vendors, provide specs, include links/sources, or build a table, the real answer belongs in chat with clickable links and/or a Markdown table. A spoken-only summary is not enough. If the chat answer is being built, say at most: 'I’ll put the researched answer in the chat.'",
-      "- SOURCE DISCIPLINE: for current product/vendor/research answers, include source links in chat. If a spec is not published or not verified, say 'Not published' or 'Needs verification' instead of inventing it.",
-      "- DOCUMENT GENERATION: you CAN create downloadable PDF, DOCX, Markdown, XLSX, CSV, and TXT files. For requests like 'create a PDF from that summary', 'export this', 'make a Word doc', or 'download this report', call generate_document immediately. Never say you cannot create files, PDFs, attachments, or downloads.",
-      "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
-      "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
+      "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content.",
+      "- VISUAL CONTENT: for tables, comparisons, links, email drafts, documents, code, or long lists, keep speech short. The full answer belongs in chat.",
       "- CAPABILITIES QUESTION: if asked what you can do, answer exactly one short sentence: 'I can help with research, email, calendar, PDFs/documents, comparisons, and BP Automation knowledge.'",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
     ].join("\n");
@@ -620,19 +604,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoiceError(null);
     setVoiceUiState("starting");
     setVoicePhase("preflight");
-    // Server-side preflight BEFORE prompting for mic. If OPENAI_API_KEY is
-    // missing or the tools payload is broken, fail with a clear message
-    // instead of asking for microphone permissions and then dying.
-    const pre = await preflightOpenAiRealtime();
-    if (myGeneration !== voiceGenerationRef.current) return; // cancelled while awaiting preflight
-    if (!pre.ok) {
-      const msg = pre.message ?? "OpenAI Realtime is not available.";
-      setVoiceError(msg);
-      toast.error(msg);
-      setVoicePhase("failed");
-      setVoiceUiState("idle");
-      return;
-    }
     let assistantBuf = "";
     // Document-intent loop guards use refs so repeated transcript fragments
     // and re-renders can't bypass the dedupe. Key = normalized text + format.
@@ -888,9 +859,6 @@ function ThreadView({ threadId }: { threadId: string }) {
 	            ) {
 	              if (suppressAssistantTranscript) {
 	                setPendingSpokenAssistant(cleanAssistantText(text));
-	                window.setTimeout(() => {
-	                  setPendingSpokenAssistant("");
-	                }, 1800);
 	              } else {
 	                setPendingAssistant("");
 	              }
@@ -920,6 +888,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingUserVoice(text);
         } else if (role === "user" && done && text.trim()) {
           setPendingUserVoice("");
+          setPendingSpokenAssistant("");
           addLocalVoiceMessage("user", text);
           void add({ data: { threadId, role: "user", content: text } }).then(() => {
             qc.invalidateQueries({ queryKey: ["messages", threadId] });
@@ -2011,9 +1980,6 @@ function Bubble({
               },
             }}
           >{displayContent}</ReactMarkdown>
-          {streaming && displayContent.trim() && (
-            <span className="inline-block w-1.5 h-4 align-[-2px] ml-0.5 bg-foreground/70 animate-pulse rounded-sm" />
-          )}
         </div>
         {!streaming && displayContent && (
           <div className="mt-2 flex items-center gap-1 opacity-60 md:opacity-0 md:group-hover:opacity-100 transition">
