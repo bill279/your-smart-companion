@@ -138,14 +138,10 @@ export async function startOpenAiRealtimeSession(options: {
         .filter(Boolean)
     : [];
   if (localToolNames.length || registeredToolNames?.length || documentToolRegistered) {
-    console.warn("[realtime] ignoring unexpected Realtime tools; /api/chat owns tools", {
-      localToolNames,
-      registeredToolNames,
-      documentToolRegistered,
-    });
+    console.log("[realtime] tools available:", localToolNames.concat(registeredToolNames ?? []).join(", ") || "(none)");
   }
   const fallbackInstructions =
-    "You are the voice transport for BPA Bot. Do not answer user requests directly. Wait for chat to provide the result, then speak only the short sentence sent in response.create.";
+    "You are BPA Bot. Answer directly and briefly. Use tools when the user needs live research, email, calendar, or file generation.";
   const realtimeInstructions = [instructions || fallbackInstructions, options.context?.trim()]
     .filter(Boolean)
     .join("\n\n");
@@ -190,6 +186,7 @@ export async function startOpenAiRealtimeSession(options: {
 
   let assistantBuf = "";
   let userInterimBuf = "";
+  const inFlightToolCalls = new Set<string>();
   let lastFinalAssistant = "";
   let lastFinalUser = "";
   let lastFinalAssistantAt = 0;
@@ -220,6 +217,74 @@ export async function startOpenAiRealtimeSession(options: {
     if (parsed.transcript.done && !shouldEmitFinal(parsed.transcript.role, parsed.transcript.text)) return;
     onTranscriptCb?.(parsed.transcript.role, parsed.transcript.text, parsed.transcript.done);
   };
+  const parseToolArguments = (raw: string | undefined) => {
+    if (!raw?.trim()) return {};
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return { raw };
+    }
+  };
+  const handleToolCall = async (call: { call_id?: string; name?: string; arguments?: string }) => {
+    const callId = call.call_id;
+    const name = call.name;
+    if (!callId || !name || inFlightToolCalls.has(callId)) return;
+    inFlightToolCalls.add(callId);
+    let output: unknown;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const jwt = session?.access_token;
+      if (!jwt) throw new Error("Not signed in.");
+      const toolResp = await fetch("/api/realtime/tool", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${jwt}`,
+        },
+        body: JSON.stringify({
+          name,
+          arguments: parseToolArguments(call.arguments),
+        }),
+      });
+      output = await toolResp.json().catch(() => ({ error: `Tool failed (${toolResp.status})` }));
+      if (!toolResp.ok) {
+        output = {
+          error: `Tool failed (${toolResp.status})`,
+          detail: output,
+        };
+      }
+      const maybeArtifact = output as {
+        ok?: boolean;
+        artifact?: { filename?: string };
+      };
+      if (name === "generate_document" && maybeArtifact.ok && maybeArtifact.artifact) {
+        onTranscriptCb?.(
+          "assistant",
+          `Generated ${maybeArtifact.artifact.filename ?? "the document"}.\n\n\`\`\`bpa-artifact\n${JSON.stringify(maybeArtifact.artifact)}\n\`\`\``,
+          true,
+        );
+      }
+    } catch (err) {
+      output = { error: err instanceof Error ? err.message : "Tool execution failed." };
+    }
+    try {
+      dc.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: callId,
+            output: JSON.stringify(output),
+          },
+        }),
+      );
+      dc.send(JSON.stringify({ type: "response.create" }));
+    } catch (err) {
+      console.warn("[realtime] failed to return tool output", err);
+    } finally {
+      inFlightToolCalls.delete(callId);
+    }
+  };
   dc.addEventListener("open", () => {
     phase("live");
     try {
@@ -233,7 +298,7 @@ export async function startOpenAiRealtimeSession(options: {
                 turn_detection: {
                   type: "semantic_vad",
                   eagerness: "high",
-                  create_response: false,
+                  create_response: true,
                   interrupt_response: true,
                 },
                 transcription: {
@@ -244,7 +309,7 @@ export async function startOpenAiRealtimeSession(options: {
               },
               output: { voice: voice ?? "alloy" },
             },
-            tools: [],
+            tools: Array.isArray(tools) ? tools : [],
             tool_choice: "auto",
             instructions: realtimeInstructions,
           },
@@ -281,6 +346,14 @@ export async function startOpenAiRealtimeSession(options: {
         };
       };
       switch (msg.type) {
+        case "response.function_call_arguments.done": {
+          void handleToolCall({
+            call_id: msg.call_id,
+            name: msg.name,
+            arguments: msg.arguments,
+          });
+          break;
+        }
         case "session.created":
         case "session.updated": {
           const s = (msg as unknown as { session?: { tools?: Array<{ name?: string }> } }).session;
@@ -318,6 +391,14 @@ export async function startOpenAiRealtimeSession(options: {
           emitParsedTranscript(msg);
           break;
         case "response.output_item.done": {
+          if (msg.item?.type === "function_call") {
+            void handleToolCall({
+              call_id: msg.item.call_id ?? msg.call_id,
+              name: msg.item.name ?? msg.name,
+              arguments: msg.item.arguments ?? msg.arguments,
+            });
+            break;
+          }
           emitParsedTranscript(msg);
           break;
         }

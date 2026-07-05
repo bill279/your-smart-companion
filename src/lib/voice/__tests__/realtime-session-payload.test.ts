@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { buildRealtimeSessionPayload } from "../realtime-session-payload";
 import { REALTIME_PRIMARY_MODEL, REALTIME_FALLBACK_MODELS } from "../realtime-errors";
+import { REALTIME_TOOLS } from "../realtime-tools";
 
 const CLIENT_SESSION_UPDATE = {
   type: "session.update",
@@ -44,15 +45,16 @@ describe("buildRealtimeSessionPayload", () => {
     expect(parsed.session.tools).toEqual([]);
   });
 
-  it("does not register tools because /api/chat is the single agent brain", () => {
+  it("can register native Realtime tools for low-latency voice agents", () => {
     const payload = buildRealtimeSessionPayload({
       model: "gpt-realtime",
       instructions: "test",
       voice: "alloy",
+      tools: REALTIME_TOOLS,
     });
 
-    expect(payload.session.tools).toEqual([]);
-    expect(payload.session.audio.input.turn_detection.create_response).toBe(false);
+    expect(payload.session.tools).toEqual(REALTIME_TOOLS);
+    expect(payload.session.audio.input.turn_detection.create_response).toBe(true);
   });
 
   it("requests input audio transcription so voice turns can sync into chat", () => {

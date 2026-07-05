@@ -8,6 +8,7 @@ export interface BuildRealtimeSessionPayloadInput {
   model: string;
   instructions: string;
   voice: string;
+  tools?: readonly unknown[];
 }
 
 export const REALTIME_TRANSCRIPTION_MODEL = "whisper-1" as const;
@@ -18,6 +19,7 @@ export function buildRealtimeSessionPayload({
   model,
   instructions,
   voice,
+  tools = [],
 }: BuildRealtimeSessionPayloadInput) {
   return {
     session: {
@@ -36,13 +38,11 @@ export function buildRealtimeSessionPayload({
             // after the final transcript lands.
             type: "semantic_vad" as const,
             eagerness: "high" as const,
-            // create_response is deliberately false: Realtime is transport
-            // only. Finished user turns are delegated to /api/chat, the
-            // single source of truth for reasoning, tools, persistence,
-            // approvals, files, research, and visual answers. Realtime only
-            // transcribes the user and speaks a short summary after the chat
-            // answer exists.
-            create_response: false,
+            // Native voice-agent mode. Let Realtime respond immediately after
+            // VAD commits the user's turn; tools are handled by a server-side
+            // dispatcher. This is closer to ChatGPT/Claude voice behavior
+            // than a transcribe-then-chat-then-speak pipeline.
+            create_response: true,
             interrupt_response: true,
           },
           transcription: {
@@ -53,10 +53,7 @@ export function buildRealtimeSessionPayload({
         },
         output: { voice },
       },
-      // Final-product architecture: no tools are registered in Realtime.
-      // Tool execution belongs to /api/chat so voice and text share the same
-      // agent brain and cannot race each other.
-      tools: [],
+      tools,
       tool_choice: "auto" as const,
     },
   };
