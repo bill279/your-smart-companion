@@ -313,7 +313,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const latestMessageRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
-  const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
+  const conversationRef = useRef<ReturnType<typeof useRealtimeVoice> | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
   const voiceStateRef = useRef<VoiceUiState>("idle");
   const startAttemptRef = useRef(0);
@@ -333,38 +333,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }, [exportOpen]);
 
   const messages = messagesQ.data ?? [];
-
-  const voiceQuotaFn = useServerFn(getVoiceQuota);
-  const voiceQuotaQ = useQuery({
-    queryKey: ["voiceQuota"],
-    queryFn: () => voiceQuotaFn(),
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
-  });
-  const quota = voiceQuotaQ.data;
-  const quotaTone =
-    quota && quota.available
-      ? quota.percentUsed >= 95
-        ? "danger"
-        : quota.percentUsed >= 80
-        ? "warn"
-        : "ok"
-      : "unknown";
-  const warnedQuotaRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!quota || !quota.available || quota.limit <= 0) return;
-    const key = quotaTone;
-    if (warnedQuotaRef.current === key) return;
-    if (quotaTone === "danger") {
-      toast.error(`Voice quota ${quota.percentUsed}% used — ${quota.remaining.toLocaleString()} chars left.`);
-      warnedQuotaRef.current = key;
-    } else if (quotaTone === "warn") {
-      toast.warning(`Voice quota ${quota.percentUsed}% used.`);
-      warnedQuotaRef.current = key;
-    } else {
-      warnedQuotaRef.current = key;
-    }
-  }, [quota, quotaTone]);
+  // (Voice usage is billed via OpenAI Realtime tokens — no separate quota UI.)
 
   function scrollToLatest() {
     const el = scrollRef.current;
