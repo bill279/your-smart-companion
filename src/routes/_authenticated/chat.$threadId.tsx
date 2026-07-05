@@ -266,11 +266,7 @@ export const Route = createFileRoute("/_authenticated/chat/$threadId")({
 
 function ThreadPage() {
   const { threadId } = useParams({ from: "/_authenticated/chat/$threadId" });
-  return (
-    <ConversationProvider>
-      <ThreadView key={threadId} threadId={threadId} />
-    </ConversationProvider>
-  );
+  return <ThreadView key={threadId} threadId={threadId} />;
 }
 
 function ThreadView({ threadId }: { threadId: string }) {
@@ -282,7 +278,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const createSession = useServerFn(createRealtimeSession);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
