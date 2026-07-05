@@ -10,6 +10,10 @@ export interface BuildRealtimeSessionPayloadInput {
   voice: string;
 }
 
+export const REALTIME_TRANSCRIPTION_MODEL = "whisper-1" as const;
+export const REALTIME_TRANSCRIPTION_PROMPT =
+  "BPA Bot voice assistant. Common terms: BP Automation, BPA, Outlook, Microsoft, Vercel, Supabase, OpenAI, Realtime, ChatGPT, Claude, Codex, PDF, DOCX, XLSX, CSV, PLC, SCADA, robotics, automation, 3D printing, stereoscopic cameras, mining, underground drilling.";
+
 export function buildRealtimeSessionPayload({
   model,
   instructions,
@@ -26,10 +30,12 @@ export function buildRealtimeSessionPayload({
         input: {
           turn_detection: {
             // Semantic VAD is closer to ChatGPT-style voice behavior: it
-            // waits through "umm..." / mid-thought pauses and is less likely
-            // to cut the user off than raw silence thresholds.
+            // waits through "umm..." / mid-thought pauses better than raw
+            // silence thresholds. Medium is the best current tradeoff here:
+            // low felt too slow in mobile testing, while high risks cutting
+            // off longer business requests.
             type: "semantic_vad" as const,
-            eagerness: "low" as const,
+            eagerness: "medium" as const,
             // create_response is deliberately false: Realtime is transport
             // only. Finished user turns are delegated to /api/chat, the
             // single source of truth for reasoning, tools, persistence,
@@ -39,7 +45,11 @@ export function buildRealtimeSessionPayload({
             create_response: false,
             interrupt_response: true,
           },
-          transcription: { model: "whisper-1" as const },
+          transcription: {
+            model: REALTIME_TRANSCRIPTION_MODEL,
+            language: "en" as const,
+            prompt: REALTIME_TRANSCRIPTION_PROMPT,
+          },
         },
         output: { voice },
       },

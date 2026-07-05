@@ -62,6 +62,18 @@ describe("buildRealtimeSessionPayload", () => {
       voice: "alloy",
     });
     expect(payload.session.audio.input.transcription.model).toBe("whisper-1");
+    expect(payload.session.audio.input.transcription.language).toBe("en");
+    expect(payload.session.audio.input.transcription.prompt).toContain("BP Automation");
+  });
+
+  it("uses medium semantic VAD for a faster mobile voice feel", () => {
+    const payload = buildRealtimeSessionPayload({
+      model: "gpt-realtime",
+      instructions: "test",
+      voice: "alloy",
+    });
+    expect(payload.session.audio.input.turn_detection.type).toBe("semantic_vad");
+    expect(payload.session.audio.input.turn_detection.eagerness).toBe("medium");
   });
 
   it("client-side session.update also includes session.type", () => {

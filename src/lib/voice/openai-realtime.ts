@@ -3,6 +3,10 @@
 // voice provider.
 
 import { supabase } from "@/integrations/supabase/client";
+import {
+  REALTIME_TRANSCRIPTION_MODEL,
+  REALTIME_TRANSCRIPTION_PROMPT,
+} from "./realtime-session-payload";
 import { transcriptEventFromRealtime } from "./realtime-transcript-events";
 
 export type RealtimePhase =
@@ -156,7 +160,14 @@ export async function startOpenAiRealtimeSession(options: {
   phase("requesting-mic");
   let mic: MediaStream;
   try {
-    mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mic = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
   } catch (err) {
     const detail =
       err instanceof Error && /permission|denied|notallowed/i.test(err.message + err.name)
@@ -221,11 +232,15 @@ export async function startOpenAiRealtimeSession(options: {
               input: {
                 turn_detection: {
                   type: "semantic_vad",
-                  eagerness: "low",
+                  eagerness: "medium",
                   create_response: false,
                   interrupt_response: true,
                 },
-                transcription: { model: "whisper-1" },
+                transcription: {
+                  model: REALTIME_TRANSCRIPTION_MODEL,
+                  language: "en",
+                  prompt: REALTIME_TRANSCRIPTION_PROMPT,
+                },
               },
               output: { voice: voice ?? "alloy" },
             },
