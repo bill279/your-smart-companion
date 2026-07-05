@@ -7,6 +7,9 @@ import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
+  validateSearch: (s: Record<string, unknown>) => ({
+    next: typeof s.next === "string" && s.next.startsWith("/") && !s.next.startsWith("//") ? s.next : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Sign in — BPA Bot" },
@@ -18,6 +21,8 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
+  const { next } = Route.useSearch();
+  const returnTo = next ?? "/chat";
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -25,9 +30,9 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      if (data.user) navigate({ to: "/chat" });
+      if (data.user) window.location.href = returnTo;
     });
-  }, [navigate]);
+  }, [navigate, returnTo]);
 
   async function handleEmail(e: React.FormEvent) {
     e.preventDefault();
@@ -37,7 +42,7 @@ function AuthPage() {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/chat` },
+          options: { emailRedirectTo: `${window.location.origin}${returnTo}` },
         });
         if (error) throw error;
         toast.success("Account created. You're in.");
@@ -45,7 +50,7 @@ function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       }
-      navigate({ to: "/chat" });
+      window.location.href = returnTo;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Auth failed");
     } finally {
@@ -56,13 +61,13 @@ function AuthPage() {
   async function handleGoogle() {
     setLoading(true);
     const res = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: `${window.location.origin}/chat`,
+      redirect_uri: `${window.location.origin}${returnTo}`,
     });
     if (res.error) {
       toast.error(res.error.message);
       setLoading(false);
     } else if (!res.redirected) {
-      navigate({ to: "/chat" });
+      window.location.href = returnTo;
     }
   }
 
