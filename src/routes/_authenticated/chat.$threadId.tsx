@@ -428,6 +428,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  const [pendingSpokenAssistant, setPendingSpokenAssistant] = useState<string>("");
   // Live interim user transcript shown while the user is still speaking
   // during an OpenAI Realtime turn. Cleared once the final user message
   // is persisted (or when the assistant finishes its reply).
@@ -548,7 +549,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
 	  useEffect(() => {
 	    scrollToLatest();
-	  }, [messages.length, pendingAssistant, pendingUser, pendingUserVoice]);
+	  }, [messages.length, pendingAssistant, pendingSpokenAssistant, pendingUser, pendingUserVoice]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -681,6 +682,12 @@ function ThreadView({ threadId }: { threadId: string }) {
 	      const brief = buildSpokenBrief(markdown);
 	      if (!brief || !openAiSessionRef.current) return;
 	      suppressRealtimeAssistantUntilRef.current = Date.now() + 12_000;
+	      // Show the spoken summary immediately, then keep it updated from
+	      // Realtime audio transcript deltas. Previously we suppressed this
+	      // transcript entirely to avoid duplicate saved messages, which made
+	      // voice feel disconnected because the chat did not move while the
+	      // assistant was talking.
+	      setPendingSpokenAssistant(brief);
 	      openAiSessionRef.current.sendEvent({
 	        type: "response.create",
 	        response: {
@@ -716,13 +723,21 @@ function ThreadView({ threadId }: { threadId: string }) {
 	        const reader = res.body.getReader();
 	        const decoder = new TextDecoder();
 	        let acc = "";
+	        let speechStarted = false;
 	        while (true) {
 	          const { value, done } = await reader.read();
 	          if (done) break;
 	          acc += decoder.decode(value, { stream: true });
 	          setPendingAssistant(cleanAssistantText(acc));
+	          if (!speechStarted) {
+	            const earlyBrief = buildSpokenBrief(acc);
+	            if (earlyBrief.length >= 50 && /[.!?]$/.test(earlyBrief)) {
+	              speechStarted = true;
+	              speakChatResultBriefly(earlyBrief);
+	            }
+	          }
 	        }
-	        speakChatResultBriefly(acc);
+	        if (!speechStarted) speakChatResultBriefly(acc);
 	        lastVisualIntentCompletedAtRef.current = Date.now();
 	      } catch (err) {
 	        toast.error(err instanceof Error ? err.message : "Voice answer failed.");
@@ -857,7 +872,9 @@ function ThreadView({ threadId }: { threadId: string }) {
 	        if (role === "assistant") {
 	          assistantBuf = text;
 	          const suppressAssistantTranscript = Date.now() < suppressRealtimeAssistantUntilRef.current;
-	          if (!suppressAssistantTranscript && !docInFlightRef.current && !visualInFlightRef.current && !looksLikeVoiceVisualPlaceholder(text)) {
+	          if (suppressAssistantTranscript) {
+	            setPendingSpokenAssistant(cleanAssistantText(text));
+	          } else if (!docInFlightRef.current && !visualInFlightRef.current && !looksLikeVoiceVisualPlaceholder(text)) {
 	            setPendingAssistant(text);
 	          }
 	          if (done && text.trim()) {
@@ -870,7 +887,14 @@ function ThreadView({ threadId }: { threadId: string }) {
 	              looksLikeVoiceVisualPlaceholder(text) ||
 	              (recentlyHandledDoc && isDocumentLimboReply(text))
 	            ) {
-	              setPendingAssistant("");
+	              if (suppressAssistantTranscript) {
+	                setPendingSpokenAssistant(cleanAssistantText(text));
+	                window.setTimeout(() => {
+	                  setPendingSpokenAssistant("");
+	                }, 1800);
+	              } else {
+	                setPendingAssistant("");
+	              }
 	              assistantBuf = "";
 	              return;
 	            }
@@ -1004,6 +1028,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     setVoicePhase("idle");
     try { await s?.stop(); } catch (err) { console.warn(err); }
     setPendingAssistant("");
+    setPendingSpokenAssistant("");
     setPendingUserVoice("");
     setVoiceUiState("idle");
   }
@@ -1314,6 +1339,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     visibleLocalVoiceMessages.length > 0 ||
     Boolean(pendingUser) ||
     pendingAssistant.trim().length > 0 ||
+    pendingSpokenAssistant.trim().length > 0 ||
     pendingUserVoice.trim().length > 0 ||
     voiceActive ||
     messagesQ.isLoading ||
@@ -1601,7 +1627,7 @@ function ThreadView({ threadId }: { threadId: string }) {
                 streaming={voiceActive}
               />
             ))}
-            {voiceActive && messages.length === 0 && visibleLocalVoiceMessages.length === 0 && !pendingUser && !pendingUserVoice.trim() && !pendingAssistant.trim() && (
+            {voiceActive && messages.length === 0 && visibleLocalVoiceMessages.length === 0 && !pendingUser && !pendingUserVoice.trim() && !pendingSpokenAssistant.trim() && !pendingAssistant.trim() && (
               <div className="pt-16 flex flex-col items-center text-center">
                 <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
                   BP
@@ -1612,6 +1638,9 @@ function ThreadView({ threadId }: { threadId: string }) {
             {pendingUser && <Bubble role="user" content={pendingUser} />}
             {pendingUserVoice.trim() && (
               <Bubble role="user" content={pendingUserVoice + " …"} streaming />
+            )}
+            {pendingSpokenAssistant.trim() && (
+              <Bubble role="assistant" content={pendingSpokenAssistant} streaming />
             )}
             {(() => {
               const p = pendingAssistant.trim();
