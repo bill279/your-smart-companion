@@ -2,43 +2,28 @@ import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-r
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useConversation, ConversationProvider } from "@elevenlabs/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Settings as SettingsIcon, FlaskConical, LayoutDashboard } from "lucide-react";
+import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
 import { exportToPdf, exportToDocx, exportToXlsx, exportToCsv } from "@/lib/chat-export";
 import { toast } from "sonner";
+import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
   addMessage,
   createThread,
   deleteThread,
+  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
   searchChats,
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
+import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
-import { getAssistantSettings } from "@/lib/assistant/settings.functions";
-import {
-  startOpenAiRealtimeSession,
-  type RealtimeSession,
-  type RealtimePhase,
-} from "@/lib/voice/openai-realtime";
-import { looksLikeDocumentIntent } from "@/lib/doc-intent";
-import { filterOutTransientVoiceErrors } from "@/lib/voice/transient-errors";
-
-const BPA_LOGO_SRC = "/icon-512.png";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
-
-VOICE OUTPUT CONTRACT:
-- Speak in 1-2 short sentences by default. Keep spoken answers under 25 words unless the user explicitly asks for detail.
-- Never think out loud, fill silence, narrate internal steps, ramble, repeat yourself, or say unrelated/random words.
-- If you are unsure, ask one concise clarifying question. Do not improvise details.
-- For tables, comparisons, email drafts, documents, code, lists, or anything long: keep the spoken response brief, but never claim the chat has details unless the details are actually rendered in chat.
-- Do not read long tables, long drafts, or long research results out loud.
-- For product/vendor research, source links, specs, or comparisons: the real answer must be visible in chat with links/table/details. Do not give only a vague spoken summary.
-- If the user interrupts, stop immediately and listen.
 
 Format answers for this chat UI. If the user asks for a table, visual table, comparison, schedule, specs, rows/columns, or tabular data, output a GitHub-Flavored Markdown table using pipes, for example:
 | Item | Detail |
@@ -47,30 +32,14 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
+// (Voice agent prompt is configured in ElevenLabs; keep this for reference / contextual updates.)
+
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automation'?s assistant\.\s*How can I help\??\s*/i;
 const STRUCTURED_TABLE_REFUSAL = /I can present the information in a clear, structured text format that you can easily copy and paste\.\s*/gi;
 const TABLE_RETRY_PROMPT = /Would you like me to provide the comparison details in that text format again\??/gi;
 
-type VoiceUiState = "idle" | "starting" | "connected" | "reconnecting" | "stopping";
-type ApprovalCardData =
-  | {
-      kind: "email";
-      title: string;
-      to?: string;
-      cc?: string;
-      subject?: string;
-      body?: string;
-    }
-  | {
-      kind: "calendar";
-      title: string;
-      eventTitle?: string;
-      dateTime?: string;
-      attendees?: string;
-      location?: string;
-      description?: string;
-    };
+type VoiceUiState = "idle" | "starting" | "connected" | "stopping";
 
 function cleanAssistantText(text: string) {
   return text
@@ -88,141 +57,6 @@ function cleanAssistantText(text: string) {
 function cleanThreadTitle(title: string) {
   const cleaned = cleanAssistantText(title);
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
-}
-
-function looksUnstableVoiceText(text: string) {
-  const s = cleanAssistantText(text).trim();
-  if (!s) return false;
-  // Only flag obvious model glitches: long runs of the same char or literal
-  // placeholder tokens. The previous heuristics (short-word runs, consonant
-  // ratios) misfired on normal speech and froze the transcript mid-turn.
-  if (/(.)\1{15,}/.test(s)) return true;
-  if (/\blorem ipsum\b/i.test(s)) return true;
-  return false;
-}
-
-function looksLikeAccidentalVoiceTranscript(text: string) {
-  const s = cleanAssistantText(text).trim();
-  if (!s) return true;
-  if (looksUnstableVoiceText(s)) return true;
-
-  // OpenAI/Whisper can hallucinate short foreign-language broadcast phrases
-  // from silence/background audio on mobile. This app is configured as an
-  // English assistant; do not save or act on a non-Latin transcript unless it
-  // also contains meaningful English. This blocks cases like
-  // "MBC 뉴스 이덕영입니다." from becoming a user command.
-  const asciiLetters = (s.match(/[A-Za-z]/g) ?? []).length;
-  const cjkChars = (s.match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g) ?? []).length;
-  if (cjkChars > 0 && asciiLetters < 4) return true;
-
-  const latinWords = (s.match(/\b[A-Za-z][A-Za-z']*\b/g) ?? []).length;
-  const allLetters = (s.match(/\p{L}/gu) ?? []).length;
-  if (allLetters >= 3 && latinWords === 0) return true;
-
-  if (/\bMBC\b/i.test(s) && cjkChars > 0) return true;
-  return false;
-}
-
-function looksLikeVoiceVisualAnswerIntent(text: string) {
-  const s = text.toLowerCase();
-  const asksForCurrentSimpleFact =
-    /\b(weather|temperature|forecast|rain|snow|wind|humidity|air quality|aqi|stock price|exchange rate|current time|time in|latest score|traffic)\b/.test(s);
-  const asksForTable =
-    /\b(table|comparison|compare|matrix|side[-\s]?by[-\s]?side|chart|spreadsheet|rows?|columns?|specs?|specifications?)\b/.test(s);
-  const asksForResearch =
-    /\b(best|top|find|research|look up|source|sources|links?|cite|citations?|options?|vendors?|products?|models?)\b/.test(s);
-  const asksForProductResearch =
-    asksForResearch &&
-    /\b(camera|cameras|sensor|sensors|machine|machines|robot|robots|plc|scada|vendor|vendors|supplier|suppliers|product|products|model|models|software|tool|tools|system|systems|equipment|component|components|part|parts)\b/.test(s);
-  const asksForMeasuredCriteria =
-    /\b(depth of field|resolution|price|cost|range|payload|accuracy|speed|rating|dimensions?|throughput|capacity)\b/.test(s);
-  const asksForBusinessResearch =
-    asksForResearch &&
-    /\b(company|business|firm|organization|organisation|website|competitor|customer|market|edmonton|bp automation|bpa)\b/.test(s);
-  return asksForCurrentSimpleFact || asksForTable || asksForProductResearch || asksForBusinessResearch || (asksForResearch && asksForMeasuredCriteria);
-}
-
-// Only route voice through the heavier /api/chat pipeline when it clearly
-// needs stateful actions, external tools, or a very long turn. Normal
-// conversational asks ("explain this", "what do you think", "how can we make
-// it better") should stay on the fast live-model path, otherwise voice feels
-// several seconds slower than ChatGPT.
-function looksLikeVoiceBrainAnswerIntent(text: string) {
-  const s = text.toLowerCase();
-  const words = s.trim().split(/\s+/).filter(Boolean).length;
-  if (words >= 70 || text.length >= 420) return true;
-  return /\b(draft|write|create|send|email|reply|respond|forward|calendar|schedule|book|meeting|invite|remind|remember|save|update|delete|morning briefing|inbox|outlook)\b/.test(s);
-}
-
-function looksLikeVoiceVisualPlaceholder(text: string) {
-  const s = text.toLowerCase();
-  return (
-    /\b(on screen|shown below|see below|you['’]ll see|details are listed|links? to each|source links?)\b/.test(s) &&
-    !/\|.+\|/.test(text) &&
-    !/\[[^\]]+\]\(https?:\/\//i.test(text)
-  );
-}
-
-function parseBoldField(text: string, label: string) {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^\\s*-?\\s*(?:\\*\\*)?${escaped}(?:\\*\\*)?\\s*:\\s*(.+?)\\s*$`, "im");
-  return text.match(re)?.[1]?.trim();
-}
-
-function parseApprovalCard(content: string): ApprovalCardData | null {
-  const text = cleanAssistantText(content);
-  if (!text || /\b(generated and sent|email(?: has been)? sent|scheduled|created)\b/i.test(text)) return null;
-
-  const emailLike =
-    /\bdraft email\b/i.test(text) ||
-    /\breply ["“']?send["”']? to send/i.test(text) ||
-    /^\s*-?\s*(?:\*\*)?to(?:\*\*)?:/im.test(text);
-  if (emailLike) {
-    const to = parseBoldField(text, "To");
-    const cc = parseBoldField(text, "Cc");
-    const subject = parseBoldField(text, "Subject");
-    if (to || subject) {
-      const dividerParts = text.split(/\n\s*---+\s*\n/);
-      const body = dividerParts.length >= 3 ? dividerParts[1].trim() : undefined;
-      return {
-        kind: "email",
-        title: "Email ready for approval",
-        to,
-        cc: cc && cc !== "(none)" ? cc : undefined,
-        subject,
-        body,
-      };
-    }
-  }
-
-  const calendarLike =
-    /\b(calendar event|draft for the calendar|draft preview|please confirm.*(?:event|meeting)|reply ["“']?(create|schedule))/i.test(text);
-  if (calendarLike) {
-    const eventTitle = parseBoldField(text, "Title");
-    const dateTime =
-      parseBoldField(text, "Date & time") ??
-      parseBoldField(text, "Date/time") ??
-      parseBoldField(text, "Time") ??
-      parseBoldField(text, "Date");
-    const attendees = parseBoldField(text, "Attendees");
-    const location = parseBoldField(text, "Location");
-    const description =
-      parseBoldField(text, "Description") ??
-      parseBoldField(text, "Agenda");
-    if (eventTitle || dateTime || attendees) {
-      return {
-        kind: "calendar",
-        title: "Calendar event ready for approval",
-        eventTitle,
-        dateTime,
-        attendees,
-        location,
-        description,
-      };
-    }
-  }
-
-  return null;
 }
 
 function groupThreadsByDate<T extends { updated_at: string }>(items: T[]): Array<{ label: string; items: T[] }> {
@@ -389,7 +223,11 @@ export const Route = createFileRoute("/_authenticated/chat/$threadId")({
 
 function ThreadPage() {
   const { threadId } = useParams({ from: "/_authenticated/chat/$threadId" });
-  return <ThreadView key={threadId} threadId={threadId} />;
+  return (
+    <ConversationProvider>
+      <ThreadView key={threadId} threadId={threadId} />
+    </ConversationProvider>
+  );
 }
 
 function ThreadView({ threadId }: { threadId: string }) {
@@ -401,46 +239,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
+  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
-  const getSettings = useServerFn(getAssistantSettings);
-  const settingsQ = useQuery({ queryKey: ["assistant-settings"], queryFn: () => getSettings({}) });
-  // ElevenLabs is deprecated. Any legacy stored value is coerced to
-  // OpenAI Realtime, and OpenAI Realtime is the default for new users.
-  const rawVoiceProvider = (settingsQ.data?.voice_provider ?? "openai_realtime") as string;
-  const voiceProvider: "openai_realtime" | "none" =
-    rawVoiceProvider === "none" ? "none" : "openai_realtime";
-  const costMode = settingsQ.data?.cost_mode ?? "balanced";
-  const openAiSessionRef = useRef<RealtimeSession | null>(null);
-  // Bumped on every start/stop request. An in-flight startOpenAiVoice() call
-  // checks this after each await; if it no longer matches the generation it
-  // captured, the user already cancelled/stopped, so the just-created
-  // session is torn down immediately instead of silently becoming active.
-  const voiceGenerationRef = useRef(0);
-  // Bounded auto-reconnect: on an unexpected connection drop (not a user
-  // stop) we retry a couple of times before giving up and surfacing a clear
-  // error, instead of silently resetting to idle.
-  const voiceReconnectAttemptsRef = useRef(0);
-  const VOICE_MAX_RECONNECT_ATTEMPTS = 2;
-  const startupPromptHandledRef = useRef(false);
-  const startupVoiceHandledRef = useRef(false);
-  // Voice document-intent dedupe guards (survive re-renders across a session).
-  const docInFlightRef = useRef(false);
-  const lastDocumentIntentKeyRef = useRef<string>("");
-  const lastDocumentIntentCompletedAtRef = useRef<number>(0);
-  // Failure counter per intent key. After 2 failures the same intent is
-  // suppressed for the completed-TTL window so we don't loop forever if the
-  // generator is down.
-  const docIntentFailureCountRef = useRef<Map<string, number>>(new Map());
-  const DOC_MAX_FAILURES_PER_INTENT = 2;
-  const visualInFlightRef = useRef(false);
-  const lastVisualIntentKeyRef = useRef("");
-  const lastVisualIntentCompletedAtRef = useRef(0);
-  // If the user says something else while a chat-brain round trip is still
-  // in flight, we used to just drop it silently. Instead, remember only the
-  // latest such utterance and run it once the in-flight one finishes.
-  const queuedVoiceTurnRef = useRef<{ text: string; visual: boolean } | null>(null);
-  const suppressRealtimeAssistantUntilRef = useRef(0);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
   const messagesQ = useQuery({
@@ -451,11 +252,6 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
-  const [pendingSpokenAssistant, setPendingSpokenAssistant] = useState<string>("");
-  // Live interim user transcript shown while the user is still speaking
-  // during an OpenAI Realtime turn. Cleared once the final user message
-  // is persisted (or when the assistant finishes its reply).
-  const [pendingUserVoice, setPendingUserVoice] = useState<string>("");
   type Attachment = { path: string; name: string; mimeType: string; size: number };
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -473,15 +269,21 @@ function ThreadView({ threadId }: { threadId: string }) {
   });
   const [voiceUiState, setVoiceUiState] = useState<VoiceUiState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  // Fine-grained phase surfaced to the mic UI so mobile users know exactly
-  // what's happening (mic prompt vs. OpenAI handshake vs. generating a doc).
-  const [voicePhase, setVoicePhase] = useState<RealtimePhase | "generating-document" | "idle">(
-    "idle",
-  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const latestMessageRef = useRef<HTMLDivElement>(null);
+  const pendingContextRef = useRef<string>("");
+  const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
+  const seenVoiceEventsRef = useRef<Set<string>>(new Set());
+  const voiceStateRef = useRef<VoiceUiState>("idle");
+  const startAttemptRef = useRef(0);
+  const connectTimeoutRef = useRef<number | null>(null);
+  const hasConnectedVoiceRef = useRef(false);
+  const voiceUserHasSpokenRef = useRef(false);
+  const lastUserSpeechAtRef = useRef<number>(0);
+  const idleTimerRef = useRef<number | null>(null);
+  const liveAssistantRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
@@ -491,74 +293,39 @@ function ThreadView({ threadId }: { threadId: string }) {
     return () => window.removeEventListener("click", onDoc);
   }, [exportOpen]);
 
-  const rawMessages = messagesQ.data ?? [];
-  // Hide legacy transient voice/session error strings that a prior code
-  // path may have persisted as assistant messages. See
-  // src/lib/voice/transient-errors.ts for the pattern list.
-  const messages = filterOutTransientVoiceErrors(rawMessages).filter(
-    (m) => !(m.role === "user" && looksLikeAccidentalVoiceTranscript(m.content || "")),
-  );
-  type LocalVoiceMessage = { id: string; role: "user" | "assistant"; content: string };
-  const [localVoiceMessages, setLocalVoiceMessages] = useState<LocalVoiceMessage[]>([]);
-  const normMessage = (s: string) => cleanAssistantText(s).trim().replace(/\s+/g, " ");
-  const addLocalVoiceMessage = (role: "user" | "assistant", content: string) => {
-    const cleaned = role === "assistant" ? cleanAssistantText(content) : content.trim();
-    if (!cleaned) return;
-    const normalized = normMessage(cleaned);
-    setLocalVoiceMessages((prev) => {
-      const last = prev[prev.length - 1];
-      if (last?.role === role && normMessage(last.content) === normalized) return prev;
-      return [
-        ...prev,
-        {
-          id: `voice-${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          role,
-          content: cleaned,
-        },
-      ].slice(-12);
-    });
-  };
-  const visibleLocalVoiceMessages = localVoiceMessages.filter((local) => {
-    const ln = normMessage(local.content);
-    if (!ln) return false;
-    return !messages.some((m) => m.role === local.role && normMessage(m.content || "") === ln);
-  });
-  useEffect(() => {
-    if (localVoiceMessages.length === 0 || messages.length === 0) return;
-    setLocalVoiceMessages((prev) =>
-      prev.filter((local) => {
-        const ln = normMessage(local.content);
-        return !messages.some((m) => m.role === local.role && normMessage(m.content || "") === ln);
-      }),
-    );
-  }, [messages.length, localVoiceMessages.length]);
+  const messages = messagesQ.data ?? [];
 
-  // Live voice session timer (used for OpenAI Realtime widget where we don't
-  // have a server-reported usage percent to show).
-  const [voiceSessionStart, setVoiceSessionStart] = useState<number | null>(null);
-  const [voiceElapsed, setVoiceElapsed] = useState(0);
+  const voiceQuotaFn = useServerFn(getVoiceQuota);
+  const voiceQuotaQ = useQuery({
+    queryKey: ["voiceQuota"],
+    queryFn: () => voiceQuotaFn(),
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+  const quota = voiceQuotaQ.data;
+  const quotaTone =
+    quota && quota.available
+      ? quota.percentUsed >= 95
+        ? "danger"
+        : quota.percentUsed >= 80
+        ? "warn"
+        : "ok"
+      : "unknown";
+  const warnedQuotaRef = useRef<string | null>(null);
   useEffect(() => {
-    if (voiceUiState === "connected") {
-      setVoiceSessionStart((s) => s ?? Date.now());
-    } else if (voiceUiState === "idle") {
-      setVoiceSessionStart(null);
-      setVoiceElapsed(0);
+    if (!quota || !quota.available || quota.limit <= 0) return;
+    const key = quotaTone;
+    if (warnedQuotaRef.current === key) return;
+    if (quotaTone === "danger") {
+      toast.error(`Voice quota ${quota.percentUsed}% used — ${quota.remaining.toLocaleString()} chars left.`);
+      warnedQuotaRef.current = key;
+    } else if (quotaTone === "warn") {
+      toast.warning(`Voice quota ${quota.percentUsed}% used.`);
+      warnedQuotaRef.current = key;
+    } else {
+      warnedQuotaRef.current = key;
     }
-  }, [voiceUiState]);
-  useEffect(() => {
-    if (!voiceSessionStart) return;
-    const id = window.setInterval(() => {
-      setVoiceElapsed(Math.floor((Date.now() - voiceSessionStart) / 1000));
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [voiceSessionStart]);
-  const fmtElapsed = (s: number) => {
-    const m = Math.floor(s / 60);
-    const r = s % 60;
-    return `${m}:${r.toString().padStart(2, "0")}`;
-  };
-  // ElevenLabs quota warnings removed — OpenAI Realtime is the sole voice
-  // provider and does not surface a client-side percent-used metric.
+  }, [quota, quotaTone]);
 
   function scrollToLatest() {
     const el = scrollRef.current;
@@ -572,9 +339,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     setShowScrollDown(false);
   }
 
-	  useEffect(() => {
-	    scrollToLatest();
-	  }, [messages.length, pendingAssistant, pendingSpokenAssistant, pendingUser, pendingUserVoice]);
+  useEffect(() => {
+    scrollToLatest();
+  }, [messages.length, pendingAssistant, pendingUser]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -595,9 +362,234 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
   }, [messages.length]);
 
+  // Guard against an ElevenLabs SDK bug where malformed error events throw
+  // `undefined is not an object (evaluating 'event.error_event.error_type')`
+  // as an unhandled rejection.
+  useEffect(() => {
+    const handler = (e: PromiseRejectionEvent) => {
+      const msg = String((e.reason as { message?: string })?.message ?? e.reason ?? "");
+      if (msg.includes("error_event") || msg.includes("error_type")) {
+        e.preventDefault();
+        console.warn("Suppressed voice malformed error event:", msg);
+      }
+    };
+    window.addEventListener("unhandledrejection", handler);
+    return () => {
+      window.removeEventListener("unhandledrejection", handler);
+      voiceStateRef.current = "idle";
+      clearVoiceConnectTimeout();
+      try {
+        conversationRef.current?.endSession();
+      } catch (err) {
+        console.warn("voice cleanup failed", err);
+      }
+    };
+  }, []);
+
+  const conversation = useConversation({
+    clientTools: {
+      show_in_chat: async (params: { markdown?: string; content?: string }) => {
+        // Render rich content (tables, lists, code, long drafts) directly in
+        // the chat WITHOUT the voice agent speaking it. The agent should call
+        // this whenever the user asks for a table/list/code/email draft so
+        // the audio stays a short spoken summary while the visual appears
+        // instantly in the transcript.
+        const md = (params.markdown ?? params.content ?? "").trim();
+        if (!md) return JSON.stringify({ error: "markdown required" });
+        try {
+          setPendingAssistant(md);
+          liveAssistantRef.current = md;
+          await add({ data: { threadId, role: "assistant", content: md } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          setPendingAssistant("");
+          liveAssistantRef.current = "";
+          return JSON.stringify({ ok: true });
+        } catch (err) {
+          console.warn("show_in_chat failed", err);
+          return JSON.stringify({ error: "failed to render" });
+        }
+      },
+      web_search: async (params: { query?: string; limit?: number }) => {
+        const query = params.query?.trim();
+        if (!query) return JSON.stringify({ error: "query required" });
+
+        const res = await fetch("/api/public/web-search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, limit: params.limit ?? 5 }),
+        });
+        const data = await res.json().catch(() => ({ error: "search failed" }));
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "search failed" });
+        return JSON.stringify(data);
+      },
+      send_email: async (params: { to?: string; subject?: string; body?: string; cc?: string }) => {
+        if (!params.to || !params.subject || !params.body) {
+          return JSON.stringify({ error: "to, subject and body are required" });
+        }
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return JSON.stringify({ error: "not signed in" });
+        const res = await fetch("/api/public/jarvis/tools/send_email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(params),
+        });
+        const data = await res.json().catch(() => ({ error: "send failed" }));
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
+        return JSON.stringify(data);
+      },
+    },
+    onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
+      // Stream agent text to the chat in real time as ElevenLabs generates it.
+      const kind = part?.type;
+      const chunk = part?.text ?? "";
+      if (kind === "start") {
+        liveAssistantRef.current = chunk;
+      } else if (kind === "delta") {
+        liveAssistantRef.current += chunk;
+      } else if (kind === "stop") {
+        if (chunk) liveAssistantRef.current += chunk;
+      }
+      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
+    },
+    onAudioAlignment: (props: { chars?: string[] }) => {
+      // Fallback live transcript: reveal each character as the audio chunk
+      // for it is generated. This guarantees the chat updates while the bot
+      // is speaking even when the agent does not stream text response parts.
+      const chars = props?.chars;
+      if (!chars || chars.length === 0) return;
+      liveAssistantRef.current += chars.join("");
+      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
+    },
+    onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
+      const corrected = props?.corrected_agent_response;
+      if (!corrected) return;
+      liveAssistantRef.current = corrected;
+      setPendingAssistant(cleanAssistantText(corrected));
+    },
+    onConnect: () => {
+      clearVoiceConnectTimeout();
+      hasConnectedVoiceRef.current = true;
+      voiceStateRef.current = "connected";
+      setVoiceUiState("connected");
+      setVoiceError(null);
+      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
+      const ctx = pendingContextRef.current;
+      pendingContextRef.current = "";
+      if (ctx) {
+        try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
+      }
+    },
+    onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
+      clearVoiceConnectTimeout();
+      if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+      const wasStopping = voiceStateRef.current === "stopping";
+      voiceStateRef.current = "idle";
+      setVoiceUiState("idle");
+      pendingContextRef.current = "";
+      if (wasStopping) return;
+      const closeText = details?.closeReason || details?.message || "";
+      if (/quota/i.test(closeText)) {
+        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+        return;
+      }
+      // If the session was previously connected and dropped for any non-error
+      // reason (typically ElevenLabs idle timeout), silently reconnect so the
+      // user stays in voice mode until they explicitly tap to stop.
+      if (hasConnectedVoiceRef.current && details?.reason !== "error") {
+        // Only auto-reconnect if the user actually spoke in the last 60s.
+        // Otherwise the session was idle and we'd just burn ElevenLabs credits.
+        const recentlyActive = Date.now() - lastUserSpeechAtRef.current < 60_000;
+        if (recentlyActive) {
+          setTimeout(() => {
+            if (voiceStateRef.current === "idle") void startVoice();
+          }, 300);
+          return;
+        }
+      }
+      voiceUserHasSpokenRef.current = false;
+      if (hasConnectedVoiceRef.current || details?.reason === "error") {
+        setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
+      }
+    },
+    onError: (e) => {
+      const msg = String(e || "");
+      if (msg.includes("error_event") || msg.includes("error_type")) return;
+      console.warn("voice error", msg);
+      clearVoiceConnectTimeout();
+      voiceStateRef.current = "idle";
+      setVoiceUiState("idle");
+      voiceUserHasSpokenRef.current = false;
+      setVoiceError(/quota/i.test(msg) ? "ElevenLabs voice quota is exhausted. Text chat still works." : msg || "Voice failed to connect. Tap the mic once to try again.");
+    },
+    onMessage: async (message: { source?: string; message?: string }) => {
+      const text = message?.message;
+      if (!text) return;
+      const voiceMessage = message as { source?: string; message?: string; event_id?: number };
+      const eventKey = `${voiceMessage.source ?? "unknown"}:${voiceMessage.event_id ?? text}`;
+      if (seenVoiceEventsRef.current.has(eventKey)) return;
+      seenVoiceEventsRef.current.add(eventKey);
+      if (seenVoiceEventsRef.current.size > 250) {
+        seenVoiceEventsRef.current = new Set(Array.from(seenVoiceEventsRef.current).slice(-120));
+      }
+      try {
+        if (message.source === "user") {
+          voiceUserHasSpokenRef.current = true;
+          lastUserSpeechAtRef.current = Date.now();
+          // Reset 90s idle auto-stop on every user utterance.
+          if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+          idleTimerRef.current = window.setTimeout(() => {
+            if (voiceStateRef.current === "connected") {
+              setVoiceError("Voice paused after 90s of silence. Tap the mic to resume.");
+              try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
+            }
+          }, 90_000);
+          try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+          // Live update: show the user's spoken turn immediately.
+          setPendingUser(text);
+          await add({ data: { threadId, role: "user", content: text } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          setPendingUser(null);
+        } else if (message.source === "ai") {
+          const cleaned = cleanAssistantText(text);
+          // Live update: show assistant turn the moment the transcript arrives.
+          setPendingAssistant(cleaned);
+          liveAssistantRef.current = cleaned;
+          await add({ data: { threadId, role: "assistant", content: cleaned } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          setPendingAssistant("");
+          liveAssistantRef.current = "";
+          const t = threads.data?.find((x) => x.id === threadId);
+          if (t && t.title === "New conversation") {
+            const title = text.slice(0, 48).replace(/\s+/g, " ").trim();
+            await rename({ data: { id: threadId, title } });
+          }
+        }
+        qc.invalidateQueries({ queryKey: ["threads"] });
+      } catch (err) {
+        console.warn("Failed to persist voice message", err);
+      }
+    },
+  });
+
+  const isConnected = conversation.status === "connected";
+  conversationRef.current = conversation;
+
+  function setVoiceState(next: VoiceUiState) {
+    voiceStateRef.current = next;
+    setVoiceUiState(next);
+  }
+
+  function clearVoiceConnectTimeout() {
+    if (connectTimeoutRef.current !== null) {
+      window.clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+  }
+
   function buildVoiceContext() {
-    const MAX_CHARS = 1400;
-    const recent = (messages ?? []).slice(-30).map(
+    const MAX_CHARS = 12000;
+    const recent = (messages ?? []).slice(-100).map(
       (m) => `${m.role === "user" ? "User" : "BPA Bot"}: ${m.role === "assistant" ? cleanAssistantText(m.content) : m.content}`,
     );
     let total = 0;
@@ -610,14 +602,17 @@ function ThreadView({ threadId }: { threadId: string }) {
     }
     const history = kept.join("\n");
     const rules = [
-      "Fast voice rules:",
+      "Behavioral rules for this session:",
       "- Do not greet or introduce yourself again.",
-      "- BE CONCISE: keep spoken replies to 1-2 short sentences and under 25 words by default. Avoid long monologues so the user can interject naturally.",
-      "- PROFESSIONAL INTELLIGENCE: lead with the useful answer, not filler. Avoid 'sure thing', 'absolutely', rambling, jokes, apologies loops, and casual throwaway phrases.",
-      "- DO NOT ANSWER FRAGMENTS: if the transcript sounds partial, noisy, background speech, canceled mid-thought, or like the user is still thinking, wait. Ignore isolated words, breathing, false starts, and short fragments unless they are clear commands like 'stop' or 'cancel'. Do not invent meaning from weak audio. If genuinely unclear, ask one short repair question. If they say wait/cancel/never mind, say 'Okay — I’ll wait.'",
-      "- NO GIBBERISH: never fill silence, think out loud, narrate internal steps, repeat random words, or say unrelated content.",
-      "- VISUAL CONTENT: for tables, comparisons, links, email drafts, documents, code, or long lists, keep speech short. The full answer belongs in chat.",
-      "- CAPABILITIES QUESTION: if asked what you can do, answer exactly one short sentence: 'I can help with research, email, calendar, PDFs/documents, comparisons, and BP Automation knowledge.'",
+      "- If asked for a table, output a GitHub-Flavored Markdown table directly.",
+      "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
+      "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
+      "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
+      "- Stay in the session. Do not end the conversation, say goodbye, or wind down even if the user is silent. Wait quietly for their next message.",
+      "- INTERRUPTION: if the user starts speaking while you are talking, stop immediately mid-sentence and listen. Never talk over the user. Resume only after they finish.",
+      "- BE CONCISE: keep spoken replies short and conversational. Avoid long monologues so the user can interject naturally.",
+      "- NO REPETITION: do NOT re-ask for information the user already provided in this thread (names, emails, recipients, dates, preferences). Read the prior conversation above first; if a detail is there, use it directly.",
+      "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
     ].join("\n");
     return history
@@ -625,453 +620,85 @@ function ThreadView({ threadId }: { threadId: string }) {
       : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
-  async function startOpenAiVoice() {
-    if (openAiSessionRef.current) return;
-    const myGeneration = ++voiceGenerationRef.current;
-    setVoiceError(null);
-    setVoiceUiState("starting");
-    setVoicePhase("preflight");
-    let assistantBuf = "";
-    // Document-intent loop guards use refs so repeated transcript fragments
-    // and re-renders can't bypass the dedupe. Key = normalized text + format.
-    const DOC_INTENT_COMPLETED_TTL_MS = 60_000;
-    const detectFormat = (t: string): string => {
-      const s = t.toLowerCase();
-      if (/\bpdf\b/.test(s)) return "pdf";
-      if (/\b(docx|word)\b/.test(s)) return "docx";
-      if (/\b(xlsx|excel|spreadsheet)\b/.test(s)) return "xlsx";
-      if (/\bcsv\b/.test(s)) return "csv";
-      if (/\bmarkdown|\bmd\b/.test(s)) return "md";
-      if (/\btxt|text file\b/.test(s)) return "txt";
-      return "auto";
-    };
-	    const normalizeIntent = (t: string) =>
-	      t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200) +
-	      "|" +
-	      detectFormat(t);
-	    const isDocumentLimboReply = (t: string) =>
-	      /\b(?:i can|i will|i'll|would you like|need .*overview|cannot|can't|unable)\b/i.test(t) &&
-	      /\b(?:pdf|document|file|summary|report)\b/i.test(t);
-	    const buildSpokenBrief = (markdown: string) => {
-	      const cleaned = cleanAssistantText(markdown)
-	        .replace(/```bpa-artifact[\s\S]*?```/gi, " ")
-	        .replace(/```[\s\S]*?```/g, " ")
-	        .split(/\r?\n/)
-	        .filter((line) => {
-	          const t = line.trim();
-	          if (!t) return false;
-	          if (/^\|/.test(t)) return false;
-	          if (/^[-:|\s]+$/.test(t)) return false;
-	          if (/^#{1,6}\s/.test(t)) return false;
-	          return true;
-	        })
-	        .join(" ")
-	        .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
-	        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-	        .replace(/[*_`>#~-]+/g, " ")
-	        .replace(/\s+/g, " ")
-	        .trim();
-	      if (!cleaned) return "";
-	      const firstSentence = cleaned.match(/^.{20,220}?[.!?](?:\s|$)/)?.[0]?.trim();
-	      return (firstSentence || cleaned.slice(0, 180).trim()).replace(/\s+[,;:]?$/, "");
-	    };
-	    const speakChatResultBriefly = (markdown: string) => {
-	      const brief = buildSpokenBrief(markdown);
-	      if (!brief || !openAiSessionRef.current) return;
-	      suppressRealtimeAssistantUntilRef.current = Date.now() + 12_000;
-	      // Show the spoken summary immediately, then keep it updated from
-	      // Realtime audio transcript deltas. Previously we suppressed this
-	      // transcript entirely to avoid duplicate saved messages, which made
-	      // voice feel disconnected because the chat did not move while the
-	      // assistant was talking.
-	      setPendingSpokenAssistant(brief);
-	      openAiSessionRef.current.sendEvent({
-	        type: "response.create",
-	        response: {
-	          instructions:
-	            `Say this result out loud in one short, natural sentence and do not call tools: ${brief}`,
-	        },
-	      });
-	    };
-	    const runDeterministicVoiceVisualAnswer = async (text: string, opts?: { visual?: boolean }) => {
-	      const visual = opts?.visual ?? true;
-	      const currentInfo = /\b(weather|temperature|forecast|rain|snow|wind|humidity|air quality|aqi|stock price|exchange rate|current time|time in|latest score|traffic)\b/i.test(text);
-	      const companyResearch = /\b(bp automation|bpa|company|business|edmonton)\b/i.test(text);
-	      setPendingAssistant(
-	        currentInfo
-	          ? "Checking the latest info…"
-	          : companyResearch
-	            ? "Researching BP Automation…"
-	            : visual
-	              ? "Building the chat answer…"
-	              : "Working on it…",
-	      );
-	      try {
-	        const { data: sess } = await supabase.auth.getSession();
-	        const token = sess.session?.access_token;
-	        if (!token) throw new Error("Session expired. Please sign in again.");
-	        const res = await fetch("/api/chat", {
-	          method: "POST",
-	          headers: {
-	            "Content-Type": "application/json",
-	            Authorization: `Bearer ${token}`,
-	          },
-	          body: JSON.stringify({
-	            threadId,
-	            content: text,
-	            attachments: [],
-	            ...(visual ? { voiceVisualIntent: true } : { voiceChatIntent: true }),
-	          }),
-	        });
-	        if (!res.ok || !res.body) {
-	          throw new Error((await res.text().catch(() => "")) || `Voice answer failed (${res.status}).`);
-	        }
-	        const reader = res.body.getReader();
-	        const decoder = new TextDecoder();
-	        let acc = "";
-	        let speechStarted = false;
-	        while (true) {
-	          const { value, done } = await reader.read();
-	          if (done) break;
-	          acc += decoder.decode(value, { stream: true });
-	          setPendingAssistant(cleanAssistantText(acc));
-	          if (!speechStarted) {
-	            const earlyBrief = buildSpokenBrief(acc);
-	            if (earlyBrief.length >= 50 && /[.!?]$/.test(earlyBrief)) {
-	              speechStarted = true;
-	              speakChatResultBriefly(earlyBrief);
-	            }
-	          }
-	        }
-	        if (!speechStarted) speakChatResultBriefly(acc);
-	        lastVisualIntentCompletedAtRef.current = Date.now();
-	      } catch (err) {
-	        toast.error(err instanceof Error ? err.message : "Voice answer failed.");
-	      } finally {
-	        visualInFlightRef.current = false;
-	        setPendingAssistant("");
-	        qc.invalidateQueries({ queryKey: ["messages", threadId] });
-	        qc.invalidateQueries({ queryKey: ["threads"] });
-	        // If the user said something else while this was in flight, don't
-	        // drop it — run the latest one now instead of silently ignoring it.
-	        const queued = queuedVoiceTurnRef.current;
-	        if (queued) {
-	          queuedVoiceTurnRef.current = null;
-	          visualInFlightRef.current = true;
-	          lastVisualIntentKeyRef.current = queued.text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
-	          void runDeterministicVoiceVisualAnswer(queued.text, { visual: queued.visual });
-	        }
-	      }
-	    };
-	    const runDeterministicVoiceDocument = async (text: string, key: string) => {
-	      setVoicePhase("generating-document");
-	      setPendingAssistant(`Generating ${detectFormat(text).toUpperCase() === "AUTO" ? "document" : detectFormat(text).toUpperCase()}…`);
-	      try {
-	        const { data: sess } = await supabase.auth.getSession();
-	        const token = sess.session?.access_token;
-	        if (!token) throw new Error("Session expired. Please sign in again.");
-	        const res = await fetch("/api/chat", {
-	          method: "POST",
-	          headers: {
-	            "Content-Type": "application/json",
-	            Authorization: `Bearer ${token}`,
-	          },
-	          body: JSON.stringify({
-	            threadId,
-	            content: text,
-	            attachments: [],
-	            voiceDocIntent: true,
-	          }),
-	        });
-	        if (!res.ok || !res.body) {
-	          throw new Error((await res.text().catch(() => "")) || `Document generation failed (${res.status}).`);
-	        }
-	        const reader = res.body.getReader();
-	        const decoder = new TextDecoder();
-	        let acc = "";
-	        while (true) {
-	          const { value, done } = await reader.read();
-	          if (done) break;
-	          acc += decoder.decode(value, { stream: true });
-	          setPendingAssistant(cleanAssistantText(acc));
-	        }
-	        speakChatResultBriefly(acc);
-	        docIntentFailureCountRef.current.delete(key);
-	        lastDocumentIntentCompletedAtRef.current = Date.now();
-	        toast.success("Document generated.");
-	      } catch (err) {
-	        const n = (docIntentFailureCountRef.current.get(key) ?? 0) + 1;
-	        docIntentFailureCountRef.current.set(key, n);
-	        if (n < DOC_MAX_FAILURES_PER_INTENT) {
-	          lastDocumentIntentKeyRef.current = "";
-	        }
-	        toast.error(err instanceof Error ? err.message : "Document generation failed.");
-	      } finally {
-	        docInFlightRef.current = false;
-	        setVoicePhase("live");
-	        setPendingAssistant("");
-	        qc.invalidateQueries({ queryKey: ["messages", threadId] });
-	        qc.invalidateQueries({ queryKey: ["threads"] });
-	      }
-	    };
-	    try {
-      const session = await startOpenAiRealtimeSession({
-        context: buildVoiceContext(),
-        onPhase: (p, detail) => {
-          setVoicePhase(p);
-          if (p === "failed" && detail) setVoiceError(detail);
-        },
-      });
-      if (myGeneration !== voiceGenerationRef.current) {
-        // User already stopped/cancelled while we were connecting. Tear the
-        // now-unwanted session down instead of letting it go live.
-        try { await session.stop(); } catch { /* ignore */ }
-        return;
-      }
-      openAiSessionRef.current = session;
-      // pc.connectionState can pass through disconnected -> failed -> closed
-      // in quick succession, firing onClose more than once for the same
-      // session. Guard so the reconnect/idle logic below only runs once.
-      let closeHandled = false;
-      session.onOpen(() => {
-        voiceReconnectAttemptsRef.current = 0;
-        setVoiceUiState("connected");
-        setVoicePhase("live");
-      });
-      session.onClose(() => {
-        if (closeHandled) return;
-        closeHandled = true;
-        // If we already nulled the ref (stopOpenAiVoice ran first), this is
-        // a user-initiated stop — nothing to reconnect.
-        const wasUserInitiated = openAiSessionRef.current === null;
-        openAiSessionRef.current = null;
-        const supersededOrUserStopped = wasUserInitiated || myGeneration !== voiceGenerationRef.current;
-        if (supersededOrUserStopped || voiceReconnectAttemptsRef.current >= VOICE_MAX_RECONNECT_ATTEMPTS) {
-          if (!supersededOrUserStopped) {
-            toast.error("Voice connection lost. Tap the mic to reconnect.");
-          }
-          setVoiceUiState("idle");
-          setVoicePhase("idle");
-          return;
-        }
-        // Unexpected drop while connected — attempt a bounded auto-reconnect
-        // instead of silently resetting to idle.
-        voiceReconnectAttemptsRef.current += 1;
-        setVoiceUiState("reconnecting");
-        setVoicePhase("connecting");
-        window.setTimeout(() => {
-          if (myGeneration !== voiceGenerationRef.current || openAiSessionRef.current) return;
-          void startOpenAiVoice();
-        }, 1200);
-      });
-      session.onError((message) => {
-        if (/cancellation failed:\s*no active response found/i.test(message)) return;
-        toast.error(message);
-        setVoiceError(message);
-        if (docInFlightRef.current) {
-          docInFlightRef.current = false;
-          lastDocumentIntentCompletedAtRef.current = Date.now();
-          setVoicePhase("live");
-        }
-      });
-      session.onTranscript((role, text, done) => {
-	        if (role === "assistant") {
-	          assistantBuf = text;
-	          const suppressAssistantTranscript = Date.now() < suppressRealtimeAssistantUntilRef.current;
-	          if (suppressAssistantTranscript) {
-	            setPendingSpokenAssistant(cleanAssistantText(text));
-	          } else if (!docInFlightRef.current && !visualInFlightRef.current && !looksLikeVoiceVisualPlaceholder(text)) {
-	            setPendingAssistant(text);
-	          }
-	          if (done && text.trim()) {
-	            const recentlyHandledDoc =
-	              Date.now() - lastDocumentIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
-	            if (
-	              docInFlightRef.current ||
-	              visualInFlightRef.current ||
-	              suppressAssistantTranscript ||
-	              looksLikeVoiceVisualPlaceholder(text) ||
-	              (recentlyHandledDoc && isDocumentLimboReply(text))
-	            ) {
-	              if (suppressAssistantTranscript) {
-	                setPendingSpokenAssistant(cleanAssistantText(text));
-	              } else {
-	                setPendingAssistant("");
-	              }
-	              assistantBuf = "";
-	              return;
-	            }
-	            setPendingUserVoice("");
-	            const finalAssistantText = cleanAssistantText(text);
-	            // Render the completed voice turn locally immediately. The
-	            // database save/refetch then catches up in the background, so
-	            // the chat never blinks empty or drops the text mid-session.
-	            addLocalVoiceMessage("assistant", finalAssistantText);
-	            setPendingAssistant("");
-	            void add({ data: { threadId, role: "assistant", content: finalAssistantText } })
-	              .then(() => {
-	                qc.invalidateQueries({ queryKey: ["messages", threadId] });
-	                qc.invalidateQueries({ queryKey: ["threads"] });
-	              })
-	              .catch((err) => {
-	                console.warn("[voice] failed to persist assistant transcript", err);
-	              });
-            assistantBuf = "";
-          }
-        } else if (role === "user" && !done) {
-          // Interim user transcript — surface a live "you're saying…"
-          // bubble so the chat updates in real time while listening.
-          if (looksLikeAccidentalVoiceTranscript(text)) {
-            setPendingUserVoice("");
-          } else {
-            setPendingUserVoice(text);
-          }
-        } else if (role === "user" && done && text.trim()) {
-          if (looksLikeAccidentalVoiceTranscript(text)) {
-            setPendingUserVoice("");
-            setPendingSpokenAssistant("");
-            return;
-          }
-          setPendingUserVoice("");
-          setPendingSpokenAssistant("");
-          addLocalVoiceMessage("user", text);
-          void add({ data: { threadId, role: "user", content: text } }).then(() => {
-            qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          }).catch((err) => {
-            console.warn("[voice] failed to persist user transcript", err);
-          });
-          const isDocumentIntent = looksLikeDocumentIntent(text);
-          const isVisualAnswerIntent = !isDocumentIntent && looksLikeVoiceVisualAnswerIntent(text);
-          const isBrainAnswerIntent = !isDocumentIntent && !isVisualAnswerIntent && looksLikeVoiceBrainAnswerIntent(text);
-          const delegateToChatBrain = isDocumentIntent || isVisualAnswerIntent || isBrainAnswerIntent;
-          // Chat brain owns anything that needs tools, research, documents,
-          // or approvals — that stays a single source of truth so it can
-          // never race the live model for those. But routing EVERY turn
-          // (including "hi"/"thanks"/"okay") through a full /api/chat round
-          // trip made voice feel slow and dead-air-y, so short acknowledgments
-          // and small talk get a fast, snappy live-model reply instead.
-          if (!delegateToChatBrain) {
-            openAiSessionRef.current?.sendEvent({ type: "response.create" });
-          }
-          if (isVisualAnswerIntent || isBrainAnswerIntent) {
-            const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
-            const completedRecently =
-              key === lastVisualIntentKeyRef.current &&
-              Date.now() - lastVisualIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
-            if (completedRecently) {
-              // no-op — same request was just answered
-            } else if (visualInFlightRef.current) {
-              // Busy with a previous turn — don't drop this one, run it next.
-              queuedVoiceTurnRef.current = { text, visual: isVisualAnswerIntent };
-            } else {
-              visualInFlightRef.current = true;
-              lastVisualIntentKeyRef.current = key;
-              void runDeterministicVoiceVisualAnswer(text, { visual: isVisualAnswerIntent });
-              setTimeout(() => {
-                if (visualInFlightRef.current) {
-                  console.warn("[realtime] deterministic voice-answer lock released by timeout");
-                  visualInFlightRef.current = false;
-                  lastVisualIntentCompletedAtRef.current = Date.now();
-                  setPendingAssistant("");
-                  const queuedAfterTimeout = queuedVoiceTurnRef.current;
-                  if (queuedAfterTimeout) {
-                    queuedVoiceTurnRef.current = null;
-                    visualInFlightRef.current = true;
-                    void runDeterministicVoiceVisualAnswer(queuedAfterTimeout.text, { visual: queuedAfterTimeout.visual });
-                  }
-                }
-              }, 45_000);
-            }
-          }
-          if (isDocumentIntent) {
-            const key = normalizeIntent(text);
-            const now = Date.now();
-            const completedRecently =
-              key === lastDocumentIntentKeyRef.current &&
-              now - lastDocumentIntentCompletedAtRef.current <
-                DOC_INTENT_COMPLETED_TTL_MS;
-            if (docInFlightRef.current) {
-              console.log("[realtime] doc-intent ignored — generation already in flight");
-            } else if (completedRecently) {
-              console.log("[realtime] doc-intent ignored — same intent completed within 60s");
-            } else {
-              lastDocumentIntentKeyRef.current = key;
-              docInFlightRef.current = true;
-              setVoicePhase("generating-document");
-	              console.log("[realtime] doc-intent detected, using deterministic document route:", text);
-	              void runDeterministicVoiceDocument(text, key);
-	              // Safety: if the tool call never resolves, release the lock.
-	              setTimeout(() => {
-                if (docInFlightRef.current) {
-                  console.warn("[realtime] doc-intent lock released by timeout");
-                  docInFlightRef.current = false;
-                  lastDocumentIntentCompletedAtRef.current = Date.now();
-                  setVoicePhase("live");
-                  // Count the timeout as a failure for repeat suppression.
-                  const k = lastDocumentIntentKeyRef.current;
-                  if (k) {
-                    const n = (docIntentFailureCountRef.current.get(k) ?? 0) + 1;
-                    docIntentFailureCountRef.current.set(k, n);
-                  }
-                }
-              }, 45_000);
-            }
-          }
-        }
-      });
-    } catch (e) {
-      if (myGeneration !== voiceGenerationRef.current) return; // superseded by a later stop/start
-      const msg = e instanceof Error ? e.message : "OpenAI voice failed to start.";
-      setVoiceError(msg);
-      toast.error(msg);
-      setVoiceUiState("idle");
-      setVoicePhase("failed");
-      openAiSessionRef.current = null;
-    }
-  }
-
-  async function stopOpenAiVoice() {
-    // Invalidate any in-flight startOpenAiVoice()/reconnect attempt so it
-    // tears itself down instead of going live after the user cancelled.
-    voiceGenerationRef.current += 1;
-    voiceReconnectAttemptsRef.current = VOICE_MAX_RECONNECT_ATTEMPTS;
-    const s = openAiSessionRef.current;
-    openAiSessionRef.current = null;
-    setVoiceUiState("stopping");
-    setVoicePhase("idle");
-    try { await s?.stop(); } catch (err) { console.warn(err); }
-    setPendingAssistant("");
-    setPendingSpokenAssistant("");
-    setPendingUserVoice("");
-    setVoiceUiState("idle");
-  }
-
   async function startVoice() {
-    if (voiceUiState === "starting" || voiceUiState === "connected") return;
-    if (voiceProvider === "none") {
-      toast.error("Voice is disabled in settings.");
+    if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
+    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
+      toast.error("Voice quota exhausted — text chat still works.");
+      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       return;
     }
-    voiceReconnectAttemptsRef.current = 0;
-    await startOpenAiVoice();
+    const attemptId = startAttemptRef.current + 1;
+    startAttemptRef.current = attemptId;
+    hasConnectedVoiceRef.current = false;
+    voiceUserHasSpokenRef.current = false;
+    setVoiceState("starting");
+    setVoiceError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      const { signedUrl } = await getAgentSignedUrl({});
+      if (startAttemptRef.current !== attemptId) return;
+      pendingContextRef.current = buildVoiceContext();
+      clearVoiceConnectTimeout();
+      connectTimeoutRef.current = window.setTimeout(() => {
+        if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
+        setVoiceState("idle");
+        pendingContextRef.current = "";
+        setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
+        try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
+      }, 20000);
+      conversation.startSession({
+        signedUrl,
+        connectionType: "websocket",
+      });
+    } catch (e) {
+      clearVoiceConnectTimeout();
+      const raw = e instanceof Error ? e.message : "Could not start voice";
+      setVoiceState("idle");
+      pendingContextRef.current = "";
+      if (/permission|notallowed/i.test(raw)) {
+        setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
+        toast.error("Microphone blocked");
+      } else if (/quota/i.test(raw)) {
+        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
+      } else {
+        console.warn("startVoice failed", raw);
+        setVoiceError("Voice failed to connect. Tap the mic once to try again.");
+      }
+    }
   }
 
   async function stopVoice() {
-    // Also stop during "starting"/"reconnecting" — otherwise tapping stop
-    // while the mic/handshake is still in flight is a no-op and voice
-    // resumes right after the user thought they'd cancelled it.
-    if (openAiSessionRef.current || voiceUiState === "starting" || voiceUiState === "reconnecting") {
-      await stopOpenAiVoice();
+    startAttemptRef.current += 1;
+    clearVoiceConnectTimeout();
+    setVoiceState("stopping");
+    pendingContextRef.current = "";
+    setVoiceError(null);
+    try {
+      await conversation.endSession();
+    } catch (err) {
+      console.warn("endSession failed", err);
+    } finally {
+      hasConnectedVoiceRef.current = false;
+      voiceUserHasSpokenRef.current = false;
+      setVoiceState("idle");
     }
   }
 
   const addMut = useMutation({
     mutationFn: async ({ content, files, regenerate }: { content: string; files: Attachment[]; regenerate?: boolean }) => {
       if (!regenerate) setPendingUser(content);
-      // Document generation involves compose + render + upload before any
-      // response body is sent, so the reader below stays empty for several
-      // seconds. Show immediate feedback instead of a blank pending state.
-      setPendingAssistant(!regenerate && looksLikeDocumentIntent(content) ? "Generating document…" : "");
+      setPendingAssistant("");
+
+      // If voice is connected, route through ElevenLabs instead.
+      if (isConnected && !regenerate) {
+        voiceUserHasSpokenRef.current = true;
+        try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
+        await add({ data: { threadId, role: "user", content } });
+        conversation.sendUserMessage(content);
+        setPendingUser(null);
+        return;
+      }
 
       // Text chat: stream from Lovable AI.
       const { data: sess } = await supabase.auth.getSession();
@@ -1142,39 +769,6 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
   });
 
-  useEffect(() => {
-    if (startupPromptHandledRef.current || addMut.isPending) return;
-    const params = new URLSearchParams(window.location.search);
-    const prompt = params.get("prompt")?.trim();
-    if (!prompt) return;
-
-    startupPromptHandledRef.current = true;
-    params.delete("prompt");
-    const nextSearch = params.toString();
-    window.history.replaceState(
-      {},
-      "",
-      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`,
-    );
-    addMut.mutate({ content: prompt, files: [] });
-  }, [threadId]);
-
-  useEffect(() => {
-    if (startupVoiceHandledRef.current || settingsQ.isLoading) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("voice") !== "1") return;
-
-    startupVoiceHandledRef.current = true;
-    params.delete("voice");
-    const nextSearch = params.toString();
-    window.history.replaceState(
-      {},
-      "",
-      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`,
-    );
-    void startVoice();
-  }, [threadId, settingsQ.isLoading]);
-
   function stopGenerating() {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -1182,7 +776,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   function regenerate() {
     if (addMut.isPending) return;
-    if (voiceActive) {
+    if (isConnected) {
       toast.error("Regenerate is for text chat. Stop voice first.");
       return;
     }
@@ -1339,24 +933,8 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceStopping = voiceUiState === "stopping";
-  const voiceActive =
-    voiceUiState === "connected" ||
-    voiceUiState === "reconnecting" ||
-    voiceStopping ||
-    voiceUiState === "starting";
+  const voiceActive = voiceUiState === "connected" || (voiceUiState === "starting" && conversation.status !== "error");
   const voiceConnecting = voiceUiState === "starting";
-  const voiceReconnecting = voiceUiState === "reconnecting";
-  const hasVisibleConversation =
-    messages.length > 0 ||
-    visibleLocalVoiceMessages.length > 0 ||
-    Boolean(pendingUser) ||
-    pendingAssistant.trim().length > 0 ||
-    pendingSpokenAssistant.trim().length > 0 ||
-    pendingUserVoice.trim().length > 0 ||
-    voiceActive ||
-    messagesQ.isLoading ||
-    messagesQ.isFetching;
 
   return (
     <div className="h-dvh flex relative overflow-hidden overflow-x-hidden touch-pan-y">
@@ -1376,7 +954,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         <div className="p-5 border-b border-border">
           <div className="flex items-start justify-between">
             <div>
-              <img src={BPA_LOGO_SRC} alt="BP Automation" className="h-12 w-auto mb-3" />
+              <img src={bpaLogo.url} alt="BP Automation" className="h-8 w-auto mb-2" />
               <div className="text-base font-semibold text-foreground">BPA Bot</div>
               <div className="text-[11px] text-muted-foreground mt-0.5">
                 BP Automation assistant
@@ -1469,16 +1047,9 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         <Link
-          to="/dashboard"
-          onClick={() => setSidebarOpen(false)}
-          className="mx-4 mt-3 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
-        >
-          <LayoutDashboard size={12} /> Dashboard
-        </Link>
-        <Link
           to="/contacts"
           onClick={() => setSidebarOpen(false)}
-          className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
+          className="mx-4 mt-3 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
         >
           <Users size={12} /> Saved contacts
         </Link>
@@ -1496,52 +1067,40 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <Sparkles size={12} /> Activity & memory
         </Link>
-        <Link
-          to="/quality"
-          onClick={() => setSidebarOpen(false)}
-          className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
-        >
-          <FlaskConical size={12} /> Quality Lab
-        </Link>
-        <Link
-          to="/settings"
-          onClick={() => setSidebarOpen(false)}
-          className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
-        >
-          <SettingsIcon size={12} /> Assistant settings
-        </Link>
-        {voiceProvider === "openai_realtime" && (
+        {quota && quota.available && quota.limit > 0 && (
           <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
-            <div className="flex items-center justify-between text-[11px] mb-1">
-              <span className="font-medium text-foreground">OpenAI Voice</span>
-              <span className={voiceActive || voicePhase === "failed" ? (voicePhase === "failed" ? "text-destructive font-semibold" : "text-primary font-semibold") : "text-muted-foreground"}>
-                {(() => {
-                  if (voicePhase === "failed") return "Failed";
-                  if (voicePhase === "generating-document") return "Generating doc…";
-                  if (voicePhase === "requesting-mic") return "Mic prompt…";
-                  if (voicePhase === "preflight") return "Checking…";
-                  if (voicePhase === "connecting") return "Connecting…";
-                  if (voicePhase === "live" || voiceUiState === "connected") return "Live";
-                  if (voiceActive) return voiceUiState;
-                  return "Idle";
-                })()}
+            <div className="flex items-center justify-between text-[11px] mb-1.5">
+              <span className="font-medium text-foreground">Voice quota</span>
+              <span
+                className={
+                  quotaTone === "danger"
+                    ? "text-destructive font-semibold"
+                    : quotaTone === "warn"
+                    ? "text-amber-500 font-semibold"
+                    : "text-muted-foreground"
+                }
+              >
+                {quota.percentUsed}% used
               </span>
             </div>
-            <div className="text-[10px] text-muted-foreground">
-              {voiceActive && voiceSessionStart
-                ? `Session ${fmtElapsed(voiceElapsed)} · ${costMode}`
-                : `Mode: ${costMode} · usage billed to OpenAI`}
+            <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+              <div
+                className={
+                  quotaTone === "danger"
+                    ? "h-full bg-destructive"
+                    : quotaTone === "warn"
+                    ? "h-full bg-amber-500"
+                    : "h-full bg-primary"
+                }
+                style={{ width: `${Math.min(100, quota.percentUsed)}%` }}
+              />
             </div>
-            {voiceError && voicePhase === "failed" && (
-              <div className="mt-1.5 text-[10px] text-destructive leading-snug">
-                {voiceError}
-              </div>
-            )}
-          </div>
-        )}
-        {voiceProvider === "none" && (
-          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5 text-[11px] text-muted-foreground">
-            Voice off · text only
+            <div className="mt-1.5 text-[10px] text-muted-foreground">
+              {quota.remaining.toLocaleString()} chars left
+              {quota.resetAt
+                ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
+                : ""}
+            </div>
           </div>
         )}
         <button
@@ -1569,53 +1128,70 @@ function ThreadView({ threadId }: { threadId: string }) {
           </div>
         </div>
         {/* Mobile header */}
-        <div className="chat-mobile-header md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pb-2 border-b border-border bg-card/95 backdrop-blur">
+        <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 py-2 border-b border-border bg-card/95 backdrop-blur">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-2.5 rounded-md hover:bg-secondary text-foreground"
+            className="p-2 rounded-md hover:bg-secondary text-foreground"
             aria-label="Open menu"
           >
-            <Menu size={22} />
+            <Menu size={20} />
           </button>
-          <img src={BPA_LOGO_SRC} alt="BP Automation" className="h-9 w-14 rounded-md object-contain" />
-          <div className="text-base font-semibold text-foreground truncate">BPA Bot</div>
-          {voiceProvider === "openai_realtime" ? (
+          <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
+          {quota && quota.available && quota.limit > 0 && (
             <span
-              title={voiceActive ? `OpenAI Voice live · ${fmtElapsed(voiceElapsed)}` : `OpenAI Voice idle · ${costMode}`}
+              title={`Voice quota: ${quota.percentUsed}% used`}
               className={
                 "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
-                (voiceActive ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground")
+                (quotaTone === "danger"
+                  ? "bg-destructive/15 text-destructive"
+                  : quotaTone === "warn"
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  : "bg-secondary text-muted-foreground")
               }
             >
-              {voiceActive ? `🎙 OpenAI live · ${fmtElapsed(voiceElapsed)}` : "🎙 OpenAI idle"}
-            </span>
-          ) : (
-            <span className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
-              Voice off
+              🎙 {quota.percentUsed}%
             </span>
           )}
-          <div className="relative ml-0.5">
+          <div className={`relative ${quota && quota.available && quota.limit > 0 ? "ml-1" : "ml-auto"}`}>
             <button
               onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
-              className="p-2.5 rounded-md hover:bg-secondary text-foreground"
+              className="p-2 rounded-md hover:bg-secondary text-foreground"
               aria-label="Export chat"
               title="Export chat"
             >
-              <MoreVertical size={20} />
+              <MoreVertical size={18} />
             </button>
             {exportOpen && <ExportMenu onPrint={exportPrint} onMarkdown={exportMarkdown} onEmail={exportEmailToMe} onPdf={exportPdf} onDocx={exportDocx} onXlsx={exportXlsx} onCsv={exportCsv} />}
           </div>
         </div>
         {/* Messages */}
-        <div ref={scrollRef} className="chat-mobile-scroll relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pb-6">
+        <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pt-16 md:pt-6 pb-6">
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 space-y-6">
-            {!hasVisibleConversation && (
-              <div className="pt-20 md:pt-24 flex flex-col items-center text-center">
-                <img src={BPA_LOGO_SRC} alt="BP Automation" className="mb-4 h-16 w-auto object-contain md:h-20" />
-                <h2 className="text-xl md:text-2xl font-semibold text-foreground">How can I help?</h2>
-                <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                  Ask in chat or tap the mic. I can research, compare, email, schedule, and create files.
-                </p>
+            {messages.length === 0 && !pendingUser && !pendingAssistant && (
+              <div className="pt-16 md:pt-24 flex flex-col items-center text-center">
+                <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
+                  BP
+                </div>
+                <h2 className="text-xl md:text-2xl font-semibold text-foreground">How can I help today?</h2>
+                <p className="text-sm text-muted-foreground mt-1">Ask anything, draft an email, search the web, or generate a document.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-6 w-full max-w-xl">
+                  {[
+                    { title: "Draft an email", body: "Draft a professional email to a client following up on our last meeting." },
+                    { title: "Compare options", body: "Compare the pros and cons of three CRMs for a small B2B team in a table." },
+                    { title: "Summarize a topic", body: "Give me a brief, executive-level summary of BP Automation's industry." },
+                    { title: "Export a report", body: "Create a one-page PDF report titled \"Weekly Update\" with sample sections." },
+                  ].map((p) => (
+                    <button
+                      key={p.title}
+                      type="button"
+                      onClick={() => setInput(p.body)}
+                      className="text-left rounded-lg border border-border bg-card hover:bg-secondary/60 transition p-3"
+                    >
+                      <div className="text-sm font-medium text-foreground">{p.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{p.body}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {messages.map((m) => {
@@ -1627,56 +1203,12 @@ function ThreadView({ threadId }: { threadId: string }) {
                   content={m.content}
                   messageId={m.id}
                   attachments={Array.isArray(att) ? att : []}
-                  onQuickReply={(text) => addMut.mutate({ content: text, files: [] })}
-                  onPrefill={setInput}
                 />
               );
             })}
-            {visibleLocalVoiceMessages.map((m) => (
-              <Bubble
-                key={m.id}
-                role={m.role}
-                content={m.content}
-                streaming={voiceActive}
-              />
-            ))}
-            {voiceActive && messages.length === 0 && visibleLocalVoiceMessages.length === 0 && !pendingUser && !pendingUserVoice.trim() && !pendingSpokenAssistant.trim() && !pendingAssistant.trim() && (
-              <div className="pt-16 flex flex-col items-center text-center">
-                <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold mb-4">
-                  BP
-                </div>
-                <p className="text-sm text-muted-foreground">Voice is live — listening…</p>
-              </div>
-            )}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
-            {pendingUserVoice.trim() && (
-              <Bubble role="user" content={pendingUserVoice + " …"} streaming />
-            )}
-            {pendingSpokenAssistant.trim() && (
-              <Bubble role="assistant" content={pendingSpokenAssistant} streaming />
-            )}
-            {(() => {
-              const p = pendingAssistant.trim();
-              if (!p) return null;
-              // Hide the streaming bubble if any recent assistant message
-              // already contains (or matches the start of) this text — that
-              // means the saved message has caught up and the pending bubble
-              // is just a stale ghost from a prior partial stream.
-              const recent = messages.slice(-3);
-              const norm = (s: string) => s.trim().replace(/\s+/g, " ");
-              const pn = norm(p);
-              const head = pn.slice(0, 60);
-              for (const m of recent) {
-                if (m.role !== "assistant") continue;
-                const mn = norm(m.content || "");
-                if (!mn) continue;
-                if (mn === pn || mn.startsWith(pn) || pn.startsWith(mn) || mn.includes(head)) {
-                  return null;
-                }
-              }
-              return <Bubble role="assistant" content={pendingAssistant} streaming />;
-            })()}
-            {addMut.isPending && !pendingAssistant && !voiceActive && (
+            {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
+            {addMut.isPending && !pendingAssistant && !isConnected && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
                 <div className="flex items-center gap-1.5 pt-3 text-muted-foreground text-sm">
@@ -1691,7 +1223,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         </div>
 
         {/* Composer */}
-        {hasVisibleConversation && (
+        {(messages.length > 0 || pendingUser || pendingAssistant) && (
           <button
             type="button"
             onClick={scrollToLatest}
@@ -1713,7 +1245,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         )}
         <form
           onSubmit={onSubmit}
-          className="relative z-10 mx-auto mb-[calc(1.25rem+env(safe-area-inset-bottom))] w-full max-w-3xl px-4 md:mb-6 md:px-6"
+          className="relative z-10 mx-auto w-full max-w-3xl px-4 md:px-6 mb-6"
         >
           <div className="rounded-2xl border border-border bg-card shadow-sm p-2 flex flex-col gap-2">
           {attachments.length > 0 && (
@@ -1746,52 +1278,25 @@ function ThreadView({ threadId }: { threadId: string }) {
           <button
             type="button"
             onClick={() => {
-              if (voiceStopping) return;
               if (voiceActive) void stopVoice();
               else void startVoice();
             }}
             title={
-              voicePhase === "preflight"
-                ? "Checking voice service…"
-                : voicePhase === "requesting-mic"
-                ? "Waiting for microphone permission…"
-                : voicePhase === "connecting"
-                ? "Connecting to OpenAI Realtime…"
-                : voicePhase === "generating-document"
-                ? "Generating document — tap to stop"
-                : voiceStopping
-                ? "Stopping voice…"
-                : voiceReconnecting
-                ? "Reconnecting… tap to stop"
+              voiceConnecting
+                ? "Connecting…"
                 : voiceActive
-                ? "Voice is live — tap to stop"
+                ? conversation.isSpeaking
+                  ? "Speaking…"
+                  : "Listening… tap to stop"
                 : "Tap to talk"
             }
-            aria-label={voiceActive ? "Stop voice mode" : "Start voice mode"}
-            disabled={voiceStopping}
-            className={`relative shrink-0 h-10 rounded-full border font-semibold transition-all duration-200 ${
+            className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
               voiceActive
-                ? "w-[8.25rem] border-destructive bg-destructive text-destructive-foreground shadow-lg shadow-destructive/30"
-                : "w-10 border-border bg-secondary hover:bg-secondary/80 text-primary"
+                ? "border-accent bg-accent/15 hud-pulse text-accent"
+                : "border-border bg-secondary hover:bg-secondary/80 text-primary"
             }`}
           >
-            <span className="relative z-10 flex h-full items-center justify-center gap-2 px-3">
-              {voiceActive ? <Square size={14} fill="currentColor" /> : <Mic size={18} />}
-              {voiceActive && (
-                <span className="flex items-center gap-1.5 text-xs uppercase">
-                  <span className="h-2 w-2 rounded-full bg-destructive-foreground" />
-                  {voicePhase === "generating-document"
-                    ? "Doc…"
-                    : voicePhase === "requesting-mic"
-                    ? "Mic…"
-                    : voicePhase === "preflight"
-                    ? "Check…"
-                    : voicePhase === "connecting"
-                    ? "Conn…"
-                    : "Stop voice"}
-                </span>
-              )}
-            </span>
+            {voiceActive ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
           <input
             ref={fileInputRef}
@@ -1827,23 +1332,17 @@ function ThreadView({ threadId }: { threadId: string }) {
             }}
             rows={1}
             placeholder={
-              voicePhase === "requesting-mic"
-                ? "Allow microphone to continue…"
-                : voicePhase === "preflight"
-                ? "Checking voice service…"
-                : voicePhase === "connecting"
-                ? "Connecting to OpenAI…"
-                : voicePhase === "generating-document"
-                ? "Generating document…"
-                : voiceReconnecting
-                ? "Reconnecting voice…"
+              voiceConnecting
+                ? "Connecting voice…"
                 : voiceActive
-                ? "Listening… or type"
+                ? conversation.isSpeaking
+                  ? "BPA Bot is speaking…"
+                  : "Listening… or type"
                 : "Message BPA Bot…"
             }
             className="flex-1 bg-transparent outline-none px-3 py-2 text-[15px] leading-6 resize-none max-h-[220px] min-h-[40px]"
           />
-          {addMut.isPending && !voiceActive ? (
+          {addMut.isPending && !isConnected ? (
             <button
               type="button"
               onClick={stopGenerating}
@@ -1865,7 +1364,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           </div>
         </form>
         {/* Regenerate action below composer when there's an assistant message and we're idle */}
-        {!addMut.isPending && !voiceActive && messages.some((m) => m.role === "assistant") && (
+        {!addMut.isPending && !isConnected && messages.some((m) => m.role === "assistant") && (
           <div className="relative z-10 -mt-4 mb-4 flex justify-center">
             <button
               type="button"
@@ -1920,20 +1419,15 @@ function Bubble({
   attachments = [],
   streaming = false,
   messageId,
-  onQuickReply,
-  onPrefill,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
   streaming?: boolean;
   messageId?: string;
-  onQuickReply?: (text: string) => void;
-  onPrefill?: (text: string) => void;
 }) {
   const isUser = role === "user";
   const displayContent = isUser ? content : cleanAssistantText(content);
-  const approvalCard = !isUser && !streaming ? parseApprovalCard(displayContent) : null;
   if (isUser) {
     return (
       <div className="group flex flex-col items-end gap-1">
@@ -1981,13 +1475,6 @@ function Bubble({
         <div
           className="prose prose-sm max-w-none text-foreground prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-pre:rounded-md prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.9em] prose-a:text-accent prose-a:underline-offset-2 prose-blockquote:border-l-primary prose-blockquote:text-muted-foreground"
         >
-          {approvalCard && (
-            <ApprovalCard
-              data={approvalCard}
-              onQuickReply={onQuickReply}
-              onPrefill={onPrefill}
-            />
-          )}
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -1996,35 +1483,11 @@ function Bubble({
                   <table {...props} className="w-full min-w-max border-collapse text-sm" />
                 </div>
               ),
-              code: ({ inline, className, children, ...props }: {
-                inline?: boolean;
-                className?: string;
-                children?: React.ReactNode;
-              }) => {
-                const lang = /language-(\w[\w-]*)/.exec(className ?? "")?.[1];
-                if (!inline && lang === "bpa-artifact") {
-                  const raw = String(children ?? "").trim();
-                  try {
-                    const data = JSON.parse(raw) as {
-                      title?: string;
-                      format?: string;
-                      filename?: string;
-                      url?: string;
-                      createdAt?: string;
-                    };
-                    if (data.url) return <ArtifactCard data={data} />;
-                  } catch {
-                    /* fall through */
-                  }
-                }
-                return (
-                  <code className={className} {...props}>
-                    {children}
-                  </code>
-                );
-              },
             }}
           >{displayContent}</ReactMarkdown>
+          {streaming && (
+            <span className="inline-block w-1.5 h-4 align-[-2px] ml-0.5 bg-foreground/70 animate-pulse rounded-sm" />
+          )}
         </div>
         {!streaming && displayContent && (
           <div className="mt-2 flex items-center gap-1 opacity-60 md:opacity-0 md:group-hover:opacity-100 transition">
@@ -2033,202 +1496,6 @@ function Bubble({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function ArtifactCard({
-  data,
-}: {
-  data: { title?: string; format?: string; filename?: string; url?: string; createdAt?: string };
-}) {
-  const [downloading, setDownloading] = useState(false);
-  const fmt = (data.format ?? "").toUpperCase();
-  const created = data.createdAt ? new Date(data.createdAt) : null;
-  const createdLabel = created
-    ? created.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
-    : null;
-  const Icon =
-    fmt === "PDF"
-      ? FileType2
-      : fmt === "DOCX"
-        ? FileText
-        : fmt === "XLSX" || fmt === "CSV"
-          ? FileSpreadsheet
-          : FileText;
-  return (
-    <div className="not-prose my-3 rounded-xl border border-primary/20 bg-card p-3 shadow-sm">
-      <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Icon size={21} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-foreground">
-            {data.title || data.filename || "Document"}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            {fmt && <span className="rounded bg-secondary px-1.5 py-0.5 font-semibold text-foreground">{fmt}</span>}
-            {data.filename && <span className="max-w-full truncate">{data.filename}</span>}
-            {createdLabel && <span>· {createdLabel}</span>}
-          </div>
-          <div className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
-            File is ready. On iPhone, Download is usually more reliable than browser preview.
-          </div>
-        </div>
-      </div>
-      {data.url && (
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
-          <a
-            href={data.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center gap-1 rounded-md border border-border bg-secondary px-3 py-2 text-xs font-semibold text-foreground hover:bg-secondary/80"
-          >
-            Open
-          </a>
-          <button
-            type="button"
-            onClick={async () => {
-              if (!data.url || downloading) return;
-              setDownloading(true);
-              try {
-                const response = await fetch(data.url);
-                if (!response.ok) throw new Error(`Download failed (${response.status})`);
-                const blob = await response.blob();
-                const objectUrl = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = objectUrl;
-                a.download = data.filename || `bpa-document.${(data.format || "file").toLowerCase()}`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
-              } catch (err) {
-                toast.error(err instanceof Error ? err.message : "Download failed. Opening source link instead.");
-                window.location.href = data.url;
-              } finally {
-                setDownloading(false);
-              }
-            }}
-            disabled={downloading}
-            className="inline-flex items-center justify-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-70"
-          >
-            <Download size={12} /> {downloading ? "Downloading…" : "Download"}
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(data.url || "");
-                toast.success("File link copied.");
-              } catch {
-                toast.error("Could not copy link.");
-              }
-            }}
-            className="col-span-2 inline-flex items-center justify-center gap-1 rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary sm:col-span-1"
-          >
-            Copy link
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ApprovalCard({
-  data,
-  onQuickReply,
-  onPrefill,
-}: {
-  data: ApprovalCardData;
-  onQuickReply?: (text: string) => void;
-  onPrefill?: (text: string) => void;
-}) {
-  const isEmail = data.kind === "email";
-  const approveText = isEmail ? "send" : "create";
-  const editText = isEmail
-    ? `Change this email: `
-    : `Change this calendar event: `;
-  return (
-    <div className="not-prose my-3 overflow-hidden rounded-xl border border-primary/25 bg-card shadow-sm">
-      <div className="flex items-center gap-3 border-b border-border bg-primary/5 px-3 py-2.5">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          {isEmail ? <Mail size={18} /> : <Check size={18} />}
-        </div>
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-foreground">{data.title}</div>
-          <div className="text-xs text-muted-foreground">
-            Review it, then approve once. No repeated confirmation loop.
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-2 px-3 py-3 text-sm">
-        {isEmail ? (
-          <>
-            <ApprovalRow label="To" value={data.to} />
-            <ApprovalRow label="Cc" value={data.cc} />
-            <ApprovalRow label="Subject" value={data.subject} />
-            {data.body && (
-              <div className="mt-1 rounded-md border border-border bg-background p-2">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Body preview
-                </div>
-                <div className="max-h-32 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-foreground">
-                  {data.body}
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <ApprovalRow label="Title" value={data.eventTitle} />
-            <ApprovalRow label="When" value={data.dateTime} />
-            <ApprovalRow label="Attendees" value={data.attendees} />
-            <ApprovalRow label="Location" value={data.location} />
-            <ApprovalRow label="Description" value={data.description} />
-          </>
-        )}
-      </div>
-
-      <div className="flex flex-wrap gap-2 border-t border-border bg-background/60 px-3 py-2.5">
-        <button
-          type="button"
-          onClick={() => onQuickReply?.(approveText)}
-          disabled={!onQuickReply}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          <Check size={13} /> {isEmail ? "Send email" : "Create event"}
-        </button>
-        <button
-          type="button"
-          onClick={() => onPrefill?.(editText)}
-          disabled={!onPrefill}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-50"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          onClick={() => onQuickReply?.("cancel")}
-          disabled={!onQuickReply}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
-        >
-          <X size={13} /> Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ApprovalRow({ label, value }: { label: string; value?: string }) {
-  if (!value || value === "(none specified)" || value === "(none)") return null;
-  return (
-    <div className="grid grid-cols-[5.5rem_1fr] gap-2">
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div className="min-w-0 break-words text-foreground">{value}</div>
     </div>
   );
 }

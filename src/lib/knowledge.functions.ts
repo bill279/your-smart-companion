@@ -9,7 +9,7 @@ const KB_ALLOWED = [
   "text/csv",
 ];
 const KB_MAX_BYTES = 20 * 1024 * 1024;
-const EMBED_MODEL = "text-embedding-3-small";
+const EMBED_MODEL = "openai/text-embedding-3-small";
 
 function sanitize(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
@@ -50,12 +50,13 @@ function chunkText(text: string, target = 1200, overlap = 200): string[] {
 }
 
 async function embedBatch(inputs: string[]): Promise<number[][]> {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OpenAI embeddings not configured");
-  const r = await fetch("https://api.openai.com/v1/embeddings", {
+  const key = process.env.LOVABLE_API_KEY;
+  if (!key) throw new Error("AI gateway not configured");
+  const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Lovable-API-Key": key,
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({ model: EMBED_MODEL, input: inputs }),

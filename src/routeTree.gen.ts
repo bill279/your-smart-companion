@@ -13,22 +13,12 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
-import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
-import { Route as AuthenticatedQualityRouteImport } from './routes/_authenticated/quality'
 import { Route as AuthenticatedKnowledgeRouteImport } from './routes/_authenticated/knowledge'
-import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedContactsRouteImport } from './routes/_authenticated/contacts'
 import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
 import { Route as AuthenticatedChatIndexRouteImport } from './routes/_authenticated/chat.index'
-import { Route as ApiRealtimeToolRouteImport } from './routes/api/realtime/tool'
-import { Route as ApiRealtimeSessionRouteImport } from './routes/api/realtime/session'
 import { Route as ApiPublicWebSearchRouteImport } from './routes/api/public/web-search'
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
-import { Route as ApiIntegrationsMicrosoftStatusRouteImport } from './routes/api/integrations/microsoft/status'
-import { Route as ApiIntegrationsMicrosoftDisconnectRouteImport } from './routes/api/integrations/microsoft/disconnect'
-import { Route as ApiIntegrationsMicrosoftConnectRouteImport } from './routes/api/integrations/microsoft/connect'
-import { Route as ApiIntegrationsMicrosoftCompleteRouteImport } from './routes/api/integrations/microsoft/complete'
-import { Route as ApiIntegrationsMicrosoftCallbackRouteImport } from './routes/api/integrations/microsoft/callback'
 import { Route as ApiPublicJarvisToolsSend_outlookRouteImport } from './routes/api/public/jarvis/tools/send_outlook'
 import { Route as ApiPublicJarvisToolsSend_gmailRouteImport } from './routes/api/public/jarvis/tools/send_gmail'
 import { Route as ApiPublicJarvisToolsSend_emailRouteImport } from './routes/api/public/jarvis/tools/send_email'
@@ -54,24 +44,9 @@ const ApiChatRoute = ApiChatRouteImport.update({
   path: '/api/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedQualityRoute = AuthenticatedQualityRouteImport.update({
-  id: '/quality',
-  path: '/quality',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedKnowledgeRoute = AuthenticatedKnowledgeRouteImport.update({
   id: '/knowledge',
   path: '/knowledge',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedContactsRoute = AuthenticatedContactsRouteImport.update({
@@ -89,16 +64,6 @@ const AuthenticatedChatIndexRoute = AuthenticatedChatIndexRouteImport.update({
   path: '/chat/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ApiRealtimeToolRoute = ApiRealtimeToolRouteImport.update({
-  id: '/api/realtime/tool',
-  path: '/api/realtime/tool',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiRealtimeSessionRoute = ApiRealtimeSessionRouteImport.update({
-  id: '/api/realtime/session',
-  path: '/api/realtime/session',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiPublicWebSearchRoute = ApiPublicWebSearchRouteImport.update({
   id: '/api/public/web-search',
   path: '/api/public/web-search',
@@ -109,36 +74,6 @@ const AuthenticatedChatThreadIdRoute =
     id: '/chat/$threadId',
     path: '/chat/$threadId',
     getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const ApiIntegrationsMicrosoftStatusRoute =
-  ApiIntegrationsMicrosoftStatusRouteImport.update({
-    id: '/api/integrations/microsoft/status',
-    path: '/api/integrations/microsoft/status',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiIntegrationsMicrosoftDisconnectRoute =
-  ApiIntegrationsMicrosoftDisconnectRouteImport.update({
-    id: '/api/integrations/microsoft/disconnect',
-    path: '/api/integrations/microsoft/disconnect',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiIntegrationsMicrosoftConnectRoute =
-  ApiIntegrationsMicrosoftConnectRouteImport.update({
-    id: '/api/integrations/microsoft/connect',
-    path: '/api/integrations/microsoft/connect',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiIntegrationsMicrosoftCompleteRoute =
-  ApiIntegrationsMicrosoftCompleteRouteImport.update({
-    id: '/api/integrations/microsoft/complete',
-    path: '/api/integrations/microsoft/complete',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiIntegrationsMicrosoftCallbackRoute =
-  ApiIntegrationsMicrosoftCallbackRouteImport.update({
-    id: '/api/integrations/microsoft/callback',
-    path: '/api/integrations/microsoft/callback',
-    getParentRoute: () => rootRouteImport,
   } as any)
 const ApiPublicJarvisToolsSend_outlookRoute =
   ApiPublicJarvisToolsSend_outlookRouteImport.update({
@@ -176,21 +111,11 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/contacts': typeof AuthenticatedContactsRoute
-  '/dashboard': typeof AuthenticatedDashboardRoute
   '/knowledge': typeof AuthenticatedKnowledgeRoute
-  '/quality': typeof AuthenticatedQualityRoute
-  '/settings': typeof AuthenticatedSettingsRoute
   '/api/chat': typeof ApiChatRoute
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
-  '/api/realtime/session': typeof ApiRealtimeSessionRoute
-  '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/chat/': typeof AuthenticatedChatIndexRoute
-  '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
-  '/api/integrations/microsoft/complete': typeof ApiIntegrationsMicrosoftCompleteRoute
-  '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
-  '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
-  '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
@@ -202,21 +127,11 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/contacts': typeof AuthenticatedContactsRoute
-  '/dashboard': typeof AuthenticatedDashboardRoute
   '/knowledge': typeof AuthenticatedKnowledgeRoute
-  '/quality': typeof AuthenticatedQualityRoute
-  '/settings': typeof AuthenticatedSettingsRoute
   '/api/chat': typeof ApiChatRoute
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
-  '/api/realtime/session': typeof ApiRealtimeSessionRoute
-  '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/chat': typeof AuthenticatedChatIndexRoute
-  '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
-  '/api/integrations/microsoft/complete': typeof ApiIntegrationsMicrosoftCompleteRoute
-  '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
-  '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
-  '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
@@ -230,21 +145,11 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/activity': typeof AuthenticatedActivityRoute
   '/_authenticated/contacts': typeof AuthenticatedContactsRoute
-  '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/knowledge': typeof AuthenticatedKnowledgeRoute
-  '/_authenticated/quality': typeof AuthenticatedQualityRoute
-  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/api/chat': typeof ApiChatRoute
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
-  '/api/realtime/session': typeof ApiRealtimeSessionRoute
-  '/api/realtime/tool': typeof ApiRealtimeToolRoute
   '/_authenticated/chat/': typeof AuthenticatedChatIndexRoute
-  '/api/integrations/microsoft/callback': typeof ApiIntegrationsMicrosoftCallbackRoute
-  '/api/integrations/microsoft/complete': typeof ApiIntegrationsMicrosoftCompleteRoute
-  '/api/integrations/microsoft/connect': typeof ApiIntegrationsMicrosoftConnectRoute
-  '/api/integrations/microsoft/disconnect': typeof ApiIntegrationsMicrosoftDisconnectRoute
-  '/api/integrations/microsoft/status': typeof ApiIntegrationsMicrosoftStatusRoute
   '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
   '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
@@ -258,21 +163,11 @@ export interface FileRouteTypes {
     | '/auth'
     | '/activity'
     | '/contacts'
-    | '/dashboard'
     | '/knowledge'
-    | '/quality'
-    | '/settings'
     | '/api/chat'
     | '/chat/$threadId'
     | '/api/public/web-search'
-    | '/api/realtime/session'
-    | '/api/realtime/tool'
     | '/chat/'
-    | '/api/integrations/microsoft/callback'
-    | '/api/integrations/microsoft/complete'
-    | '/api/integrations/microsoft/connect'
-    | '/api/integrations/microsoft/disconnect'
-    | '/api/integrations/microsoft/status'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
@@ -284,21 +179,11 @@ export interface FileRouteTypes {
     | '/auth'
     | '/activity'
     | '/contacts'
-    | '/dashboard'
     | '/knowledge'
-    | '/quality'
-    | '/settings'
     | '/api/chat'
     | '/chat/$threadId'
     | '/api/public/web-search'
-    | '/api/realtime/session'
-    | '/api/realtime/tool'
     | '/chat'
-    | '/api/integrations/microsoft/callback'
-    | '/api/integrations/microsoft/complete'
-    | '/api/integrations/microsoft/connect'
-    | '/api/integrations/microsoft/disconnect'
-    | '/api/integrations/microsoft/status'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
@@ -311,21 +196,11 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/activity'
     | '/_authenticated/contacts'
-    | '/_authenticated/dashboard'
     | '/_authenticated/knowledge'
-    | '/_authenticated/quality'
-    | '/_authenticated/settings'
     | '/api/chat'
     | '/_authenticated/chat/$threadId'
     | '/api/public/web-search'
-    | '/api/realtime/session'
-    | '/api/realtime/tool'
     | '/_authenticated/chat/'
-    | '/api/integrations/microsoft/callback'
-    | '/api/integrations/microsoft/complete'
-    | '/api/integrations/microsoft/connect'
-    | '/api/integrations/microsoft/disconnect'
-    | '/api/integrations/microsoft/status'
     | '/api/public/jarvis/tools/read_calendar'
     | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
@@ -339,13 +214,6 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ApiChatRoute: typeof ApiChatRoute
   ApiPublicWebSearchRoute: typeof ApiPublicWebSearchRoute
-  ApiRealtimeSessionRoute: typeof ApiRealtimeSessionRoute
-  ApiRealtimeToolRoute: typeof ApiRealtimeToolRoute
-  ApiIntegrationsMicrosoftCallbackRoute: typeof ApiIntegrationsMicrosoftCallbackRoute
-  ApiIntegrationsMicrosoftCompleteRoute: typeof ApiIntegrationsMicrosoftCompleteRoute
-  ApiIntegrationsMicrosoftConnectRoute: typeof ApiIntegrationsMicrosoftConnectRoute
-  ApiIntegrationsMicrosoftDisconnectRoute: typeof ApiIntegrationsMicrosoftDisconnectRoute
-  ApiIntegrationsMicrosoftStatusRoute: typeof ApiIntegrationsMicrosoftStatusRoute
   ApiPublicJarvisToolsRead_calendarRoute: typeof ApiPublicJarvisToolsRead_calendarRoute
   ApiPublicJarvisToolsSearch_webRoute: typeof ApiPublicJarvisToolsSearch_webRoute
   ApiPublicJarvisToolsSend_emailRoute: typeof ApiPublicJarvisToolsSend_emailRoute
@@ -383,32 +251,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiChatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/settings': {
-      id: '/_authenticated/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/quality': {
-      id: '/_authenticated/quality'
-      path: '/quality'
-      fullPath: '/quality'
-      preLoaderRoute: typeof AuthenticatedQualityRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/knowledge': {
       id: '/_authenticated/knowledge'
       path: '/knowledge'
       fullPath: '/knowledge'
       preLoaderRoute: typeof AuthenticatedKnowledgeRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/dashboard': {
-      id: '/_authenticated/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/contacts': {
@@ -432,20 +279,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/realtime/tool': {
-      id: '/api/realtime/tool'
-      path: '/api/realtime/tool'
-      fullPath: '/api/realtime/tool'
-      preLoaderRoute: typeof ApiRealtimeToolRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/realtime/session': {
-      id: '/api/realtime/session'
-      path: '/api/realtime/session'
-      fullPath: '/api/realtime/session'
-      preLoaderRoute: typeof ApiRealtimeSessionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/public/web-search': {
       id: '/api/public/web-search'
       path: '/api/public/web-search'
@@ -459,41 +292,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/chat/$threadId'
       preLoaderRoute: typeof AuthenticatedChatThreadIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/api/integrations/microsoft/status': {
-      id: '/api/integrations/microsoft/status'
-      path: '/api/integrations/microsoft/status'
-      fullPath: '/api/integrations/microsoft/status'
-      preLoaderRoute: typeof ApiIntegrationsMicrosoftStatusRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/integrations/microsoft/disconnect': {
-      id: '/api/integrations/microsoft/disconnect'
-      path: '/api/integrations/microsoft/disconnect'
-      fullPath: '/api/integrations/microsoft/disconnect'
-      preLoaderRoute: typeof ApiIntegrationsMicrosoftDisconnectRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/integrations/microsoft/connect': {
-      id: '/api/integrations/microsoft/connect'
-      path: '/api/integrations/microsoft/connect'
-      fullPath: '/api/integrations/microsoft/connect'
-      preLoaderRoute: typeof ApiIntegrationsMicrosoftConnectRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/integrations/microsoft/complete': {
-      id: '/api/integrations/microsoft/complete'
-      path: '/api/integrations/microsoft/complete'
-      fullPath: '/api/integrations/microsoft/complete'
-      preLoaderRoute: typeof ApiIntegrationsMicrosoftCompleteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/integrations/microsoft/callback': {
-      id: '/api/integrations/microsoft/callback'
-      path: '/api/integrations/microsoft/callback'
-      fullPath: '/api/integrations/microsoft/callback'
-      preLoaderRoute: typeof ApiIntegrationsMicrosoftCallbackRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/api/public/jarvis/tools/send_outlook': {
       id: '/api/public/jarvis/tools/send_outlook'
@@ -536,10 +334,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedActivityRoute: typeof AuthenticatedActivityRoute
   AuthenticatedContactsRoute: typeof AuthenticatedContactsRoute
-  AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedKnowledgeRoute: typeof AuthenticatedKnowledgeRoute
-  AuthenticatedQualityRoute: typeof AuthenticatedQualityRoute
-  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedChatThreadIdRoute: typeof AuthenticatedChatThreadIdRoute
   AuthenticatedChatIndexRoute: typeof AuthenticatedChatIndexRoute
 }
@@ -547,10 +342,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedActivityRoute: AuthenticatedActivityRoute,
   AuthenticatedContactsRoute: AuthenticatedContactsRoute,
-  AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedKnowledgeRoute: AuthenticatedKnowledgeRoute,
-  AuthenticatedQualityRoute: AuthenticatedQualityRoute,
-  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedChatThreadIdRoute: AuthenticatedChatThreadIdRoute,
   AuthenticatedChatIndexRoute: AuthenticatedChatIndexRoute,
 }
@@ -564,14 +356,6 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   ApiChatRoute: ApiChatRoute,
   ApiPublicWebSearchRoute: ApiPublicWebSearchRoute,
-  ApiRealtimeSessionRoute: ApiRealtimeSessionRoute,
-  ApiRealtimeToolRoute: ApiRealtimeToolRoute,
-  ApiIntegrationsMicrosoftCallbackRoute: ApiIntegrationsMicrosoftCallbackRoute,
-  ApiIntegrationsMicrosoftCompleteRoute: ApiIntegrationsMicrosoftCompleteRoute,
-  ApiIntegrationsMicrosoftConnectRoute: ApiIntegrationsMicrosoftConnectRoute,
-  ApiIntegrationsMicrosoftDisconnectRoute:
-    ApiIntegrationsMicrosoftDisconnectRoute,
-  ApiIntegrationsMicrosoftStatusRoute: ApiIntegrationsMicrosoftStatusRoute,
   ApiPublicJarvisToolsRead_calendarRoute:
     ApiPublicJarvisToolsRead_calendarRoute,
   ApiPublicJarvisToolsSearch_webRoute: ApiPublicJarvisToolsSearch_webRoute,
@@ -582,13 +366,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

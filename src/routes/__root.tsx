@@ -76,17 +76,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
-      { title: "BPA Bot" },
-      { name: "description", content: "BP Automation assistant for chat, voice, documents, email, calendar, and web research." },
-      { name: "author", content: "BP Automation" },
-      { property: "og:title", content: "BPA Bot" },
-      { property: "og:description", content: "BP Automation assistant for chat, voice, documents, email, calendar, and web research." },
+      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { title: "Lovable App" },
+      { name: "description", content: "Lovable Generated Project" },
+      { name: "author", content: "Lovable" },
+      { property: "og:title", content: "Lovable App" },
+      { property: "og:description", content: "Lovable Generated Project" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
+      { name: "twitter:site", content: "@Lovable" },
       { name: "theme-color", content: "#0b1f3a" },
-      { name: "format-detection", content: "telephone=no" },
-      { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
       { name: "apple-mobile-web-app-title", content: "BPA Bot" },
@@ -97,7 +96,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: appCss,
       },
       { rel: "manifest", href: "/manifest.webmanifest" },
-      { rel: "shortcut icon", href: "/favicon.ico" },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
       { rel: "icon", type: "image/png", sizes: "32x32", href: "/favicon-32.png" },
       { rel: "icon", type: "image/png", sizes: "192x192", href: "/icon-192.png" },
@@ -125,14 +123,6 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-
-  useEffect(() => {
-    if (!("serviceWorker" in navigator) || import.meta.env.DEV) return;
-
-    navigator.serviceWorker.register("/sw.js").catch((error) => {
-      console.warn("[PWA] Service worker registration failed", error);
-    });
-  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

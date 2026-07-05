@@ -2,30 +2,12 @@
   "name": "BPA Bot",
   "short_name": "BPA Bot",
   "description": "BP Automation assistant — chat, voice, email, and calendar.",
-  "id": "/chat",
-  "start_url": "/chat",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0b1f3a",
   "theme_color": "#0b1f3a",
-  "categories": ["business", "productivity", "utilities"],
-  "shortcuts": [
-    {
-      "name": "Morning briefing",
-      "short_name": "Briefing",
-      "description": "Open BPA Bot for your Outlook briefing.",
-      "url": "/chat?action=morning-briefing",
-      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Start voice",
-      "short_name": "Voice",
-      "description": "Open BPA Bot voice mode.",
-      "url": "/chat?action=voice",
-      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
-    }
-  ],
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }

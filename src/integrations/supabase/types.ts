@@ -47,45 +47,6 @@ export type Database = {
         }
         Relationships: []
       }
-      assistant_settings: {
-        Row: {
-          cost_mode: string
-          created_at: string
-          interaction_mode: string
-          max_voice_seconds: number
-          model_provider: string
-          require_approval: boolean
-          require_citations: boolean
-          updated_at: string
-          user_id: string
-          voice_provider: string
-        }
-        Insert: {
-          cost_mode?: string
-          created_at?: string
-          interaction_mode?: string
-          max_voice_seconds?: number
-          model_provider?: string
-          require_approval?: boolean
-          require_citations?: boolean
-          updated_at?: string
-          user_id: string
-          voice_provider?: string
-        }
-        Update: {
-          cost_mode?: string
-          created_at?: string
-          interaction_mode?: string
-          max_voice_seconds?: number
-          model_provider?: string
-          require_approval?: boolean
-          require_citations?: boolean
-          updated_at?: string
-          user_id?: string
-          voice_provider?: string
-        }
-        Relationships: []
-      }
       contacts: {
         Row: {
           created_at: string

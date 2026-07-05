@@ -26,29 +26,6 @@ export const createThread = createServerFn({ method: "POST" })
     return row;
   });
 
-export const getDashboard = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const [threads, actions] = await Promise.all([
-      context.supabase
-        .from("threads")
-        .select("id,title,updated_at")
-        .order("updated_at", { ascending: false })
-        .limit(5),
-      context.supabase
-        .from("agent_actions")
-        .select("id,action,summary,status,created_at")
-        .order("created_at", { ascending: false })
-        .limit(6),
-    ]);
-    if (threads.error) throw new Error(threads.error.message);
-    if (actions.error) throw new Error(actions.error.message);
-    return {
-      threads: threads.data ?? [],
-      actions: actions.data ?? [],
-    };
-  });
-
 export const deleteThread = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
@@ -161,4 +138,50 @@ export const renameThread = createServerFn({ method: "POST" })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+export const getElevenLabsAgentToken = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const agentId = process.env.ELEVENLABS_AGENT_ID;
+    if (!apiKey) throw new Error("ElevenLabs is not connected");
+    if (!agentId) throw new Error("ELEVENLABS_AGENT_ID is not configured");
+
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${encodeURIComponent(agentId)}`,
+      { headers: { "xi-api-key": apiKey } },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 429 && /concurrent|capacity|rate/i.test(text)) {
+        throw new Error("Voice is still closing another session. Wait a few seconds, then tap the mic once.");
+      }
+      throw new Error(`Voice connection failed (${res.status}). Please try again.`);
+    }
+    const json = (await res.json()) as { token: string };
+    return { token: json.token, agentId };
+  });
+
+export const getElevenLabsAgentSignedUrl = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const agentId = process.env.ELEVENLABS_AGENT_ID;
+    if (!apiKey) throw new Error("ElevenLabs is not connected");
+    if (!agentId) throw new Error("ELEVENLABS_AGENT_ID is not configured");
+
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`,
+      { headers: { "xi-api-key": apiKey } },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 429 && /concurrent|capacity|rate/i.test(text)) {
+        throw new Error("Voice is still closing another session. Wait a few seconds, then tap the mic once.");
+      }
+      throw new Error(`Voice connection failed (${res.status}). Please try again.`);
+    }
+    const json = (await res.json()) as { signed_url: string };
+    return { signedUrl: json.signed_url, agentId };
   });

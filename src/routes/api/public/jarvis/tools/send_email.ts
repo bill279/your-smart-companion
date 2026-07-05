@@ -2,8 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { gatewayHeaders, json } from "@/lib/jarvis-tools.server";
-import { sendOutlookMail } from "@/lib/microsoft-integration.server";
-import type { Database } from "@/integrations/supabase/types";
 import { marked } from "marked";
 
 const Body = z.object({
@@ -72,13 +70,10 @@ export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
         if (!auth?.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
         const token = auth.slice(7);
 
-        const supabase = createClient<Database>(
+        const supabase = createClient(
           process.env.SUPABASE_URL!,
           process.env.SUPABASE_PUBLISHABLE_KEY!,
-          {
-            global: { headers: { Authorization: `Bearer ${token}` } },
-            auth: { persistSession: false, autoRefreshToken: false },
-          },
+          { auth: { persistSession: false, autoRefreshToken: false } },
         );
         const { data: claims, error: cerr } = await supabase.auth.getClaims(token);
         if (cerr || !claims?.claims?.sub) return json({ error: "unauthorized" }, 401);
@@ -86,16 +81,6 @@ export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
         const parsed = Body.safeParse(await request.json().catch(() => ({})));
         if (!parsed.success) return json({ error: parsed.error.message }, 400);
         const data = parsed.data;
-        const userId = claims.claims.sub as string;
-
-        try {
-          await sendOutlookMail(supabase, userId, data);
-          return json({ ok: true, provider: "microsoft" });
-        } catch (error) {
-          if (!String((error as Error).message).includes("not connected")) {
-            return json({ error: (error as Error).message }, 502);
-          }
-        }
 
         // Prefer Outlook if connected, fall back to Gmail.
         if (process.env.MICROSOFT_OUTLOOK_API_KEY) {

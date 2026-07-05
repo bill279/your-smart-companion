@@ -1,1 +1,0 @@
-UPDATE public.assistant_settings SET voice_provider = 'openai_realtime' WHERE voice_provider IN ('elevenlabs', 'el');
