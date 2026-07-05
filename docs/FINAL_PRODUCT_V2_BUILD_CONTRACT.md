@@ -195,3 +195,32 @@ Stop treating the current voice system as the final product.
 
 Use the current app as the foundation, but rebuild voice around one source of truth: the main chat agent.
 
+## July 5, 2026 reset decision
+
+After live mobile testing, the current production voice experience is still not acceptable.
+
+What failed:
+
+- Response timing does not feel like ChatGPT or Claude voice.
+- Chat text does not remain reliably synchronized with spoken output.
+- The voice layer can mis-handle background/noisy audio.
+- Realtime-tool experiments added instability rather than making the product feel better.
+- Patch-by-patch changes are making the voice system harder to reason about.
+
+Decision:
+
+- Do not keep shipping voice experiments directly to `main`.
+- Keep the current Vercel/GitHub app separate from any Lovable restore.
+- Rebuild voice on an isolated branch first.
+- Treat the existing voice implementation as prototype code, not the final voice architecture.
+- Do not merge a new voice implementation until it passes the Quality Lab and manual iPhone checks.
+
+Current rebuild branch:
+
+- `codex/voice-v3-clean-rebuild`
+
+Required v3 direction:
+
+- Voice v3 must be a clean module, not another patch inside the current chat component.
+- The first milestone is excellent normal conversation: fast, stable, natural, chat-synced.
+- Only after that works should email, PDFs, research, and calendar actions be layered back in one by one.
