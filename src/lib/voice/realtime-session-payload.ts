@@ -32,7 +32,15 @@ export function buildRealtimeSessionPayload({
             // to cut the user off than raw silence thresholds.
             type: "semantic_vad" as const,
             eagerness: "low" as const,
-            create_response: true,
+            // create_response is deliberately false: the client decides,
+            // per finished user turn, whether the live model should answer
+            // or whether the request gets delegated to the deterministic
+            // /api/chat path (documents, research tables, long-form asks).
+            // With auto-response on, both could fire for the same utterance
+            // and race — that was the source of duplicate documents and
+            // repeated confirmations. Only one path may ever create a
+            // response for a given turn now.
+            create_response: false,
             interrupt_response: true,
           },
           transcription: { model: "whisper-1" as const },

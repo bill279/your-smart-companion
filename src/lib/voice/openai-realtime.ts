@@ -272,7 +272,11 @@ export async function startOpenAiRealtimeSession(options: {
                   turn_detection: {
                     type: "semantic_vad",
                     eagerness: "low",
-                    create_response: true,
+                    // Kept in sync with realtime-session-payload.ts: the
+                    // client always decides explicitly (via response.create)
+                    // whether the live model answers a turn, so it never
+                    // races the deterministic /api/chat delegation path.
+                    create_response: false,
                     interrupt_response: true,
                   },
                   transcription: { model: "whisper-1" },
