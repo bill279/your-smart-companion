@@ -118,13 +118,6 @@ function looksLikeVoiceVisualAnswerIntent(text: string) {
   return asksForCurrentSimpleFact || asksForTable || asksForProductResearch || (asksForResearch && asksForMeasuredCriteria);
 }
 
-function looksLikeVoiceBrainAnswerIntent(text: string) {
-  const s = text.toLowerCase();
-  const words = s.trim().split(/\s+/).filter(Boolean).length;
-  if (words >= 35 || text.length >= 220) return true;
-  return /\b(explain|walk me through|plan|strategy|summari[sz]e|summary|draft|write|create|analy[sz]e|recommend|proposal|compare|research|find|look up|email|reply|calendar|schedule|what should|how can|make it better)\b/.test(s);
-}
-
 function looksLikeVoiceVisualPlaceholder(text: string) {
   const s = text.toLowerCase();
   return (
@@ -755,6 +748,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 	          acc += decoder.decode(value, { stream: true });
 	          setPendingAssistant(cleanAssistantText(acc));
 	        }
+	        speakChatResultBriefly(acc);
 	        docIntentFailureCountRef.current.delete(key);
 	        lastDocumentIntentCompletedAtRef.current = Date.now();
 	        toast.success("Document generated.");
@@ -928,17 +922,12 @@ function ThreadView({ threadId }: { threadId: string }) {
           });
           const isDocumentIntent = looksLikeDocumentIntent(text);
           const isVisualAnswerIntent = !isDocumentIntent && looksLikeVoiceVisualAnswerIntent(text);
-          const isBrainAnswerIntent = !isDocumentIntent && !isVisualAnswerIntent && looksLikeVoiceBrainAnswerIntent(text);
-          const delegateToChatBrain = isDocumentIntent || isVisualAnswerIntent || isBrainAnswerIntent;
-          // Single-owner turn: with create_response:false on the session,
-          // nothing answers this turn until we say so. Either the live
-          // model answers directly, or it's delegated to the deterministic
-          // /api/chat path below — never both, so the two can no longer
-          // race and produce duplicate documents/replies for one utterance.
-          if (!delegateToChatBrain) {
-            openAiSessionRef.current?.sendEvent({ type: "response.create" });
-          }
-          if (isVisualAnswerIntent || isBrainAnswerIntent) {
+          // Final-product architecture: voice is transport only. Every
+          // completed user voice turn is answered by /api/chat, which owns
+          // reasoning, tools, approvals, documents, research, and persistence.
+          // Realtime never creates its own answer for the user's utterance;
+          // it only speaks a short summary after the chat answer exists.
+          if (!isDocumentIntent) {
             const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
             const completedRecently =
               key === lastVisualIntentKeyRef.current &&
