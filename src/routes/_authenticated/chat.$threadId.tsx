@@ -29,7 +29,12 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 | --- | --- |
 | Example | Value |
 
-Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
+Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.
+
+TOOL USE — non-negotiable:
+- For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
+- For ANY factual question about real companies, people, prices, addresses, news, or anything time-sensitive: CALL web_search FIRST. Never invent facts, addresses, phone numbers, or pricing.
+- If the user asks you to create, generate, export, download, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs — the app will download the file for them. Choose a sensible short filename.`;
 
 // Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
 const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
@@ -73,6 +78,32 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         cc: { type: "string" },
       },
       required: ["to", "subject", "body"],
+    },
+  },
+  {
+    type: "function",
+    name: "generate_document",
+    description:
+      "Generate and download a document file (PDF, DOCX, XLSX, or CSV) from provided content. Use this whenever the user asks to export, save, download, or convert content to a PDF, Word doc, spreadsheet, or CSV. NEVER refuse; NEVER tell the user to copy into another app. After calling, say a brief spoken confirmation like 'Your PDF is downloading.'",
+    parameters: {
+      type: "object",
+      properties: {
+        format: {
+          type: "string",
+          enum: ["pdf", "docx", "xlsx", "csv"],
+          description: "Output file format.",
+        },
+        title: {
+          type: "string",
+          description: "Document title / filename base (no extension).",
+        },
+        content: {
+          type: "string",
+          description:
+            "Markdown content to render. Include GFM tables — they will be rendered as real tables in PDF/DOCX and as sheet rows in XLSX/CSV.",
+        },
+      },
+      required: ["format", "title", "content"],
     },
   },
 ];
@@ -444,6 +475,42 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
         return JSON.stringify(data);
       },
+      generate_document: async (params) => {
+        const p = params as {
+          format?: string;
+          title?: string;
+          content?: string;
+        };
+        const format = (p.format ?? "pdf").toLowerCase();
+        const title = (p.title ?? "BPA Bot document").slice(0, 80);
+        const content = String(p.content ?? "").trim();
+        if (!content) return JSON.stringify({ error: "content required" });
+        if (!["pdf", "docx", "xlsx", "csv"].includes(format)) {
+          return JSON.stringify({ error: "format must be pdf, docx, xlsx or csv" });
+        }
+        try {
+          const messages: Array<{ role: string; content: string; created_at: string }> = [
+            { role: "assistant", content, created_at: new Date().toISOString() },
+          ];
+          // Render into the chat too so the user sees what was exported.
+          setPendingAssistant(content);
+          liveAssistantRef.current = content;
+          await add({ data: { threadId, role: "assistant", content } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          setPendingAssistant("");
+          liveAssistantRef.current = "";
+
+          if (format === "pdf") exportToPdf(title, messages);
+          else if (format === "docx") await exportToDocx(title, messages);
+          else if (format === "xlsx") exportToXlsx(title, messages);
+          else exportToCsv(title, messages);
+          toast.success(`Downloading ${format.toUpperCase()}`);
+          return JSON.stringify({ ok: true, format, title });
+        } catch (err) {
+          console.warn("generate_document failed", err);
+          return JSON.stringify({ error: err instanceof Error ? err.message : "generate failed" });
+        }
+      },
     },
     onAssistantDelta: (part) => {
       // Stream assistant transcript in real time as OpenAI Realtime generates it.
@@ -583,7 +650,9 @@ function ThreadView({ threadId }: { threadId: string }) {
     const rules = [
       "Behavioral rules for this session:",
       "- Do not greet or introduce yourself again.",
-      "- If asked for a table, output a GitHub-Flavored Markdown table directly.",
+      "- TABLES / LONG STRUCTURED CONTENT: call the show_in_chat tool with the full Markdown table. Do NOT read the table aloud. After the tool returns, say one short spoken sentence (e.g. \"Here's the table.\").",
+      "- FACTS: for any real company, person, address, price, phone number, or current event, call web_search FIRST. Never invent details.",
+      "- FILE EXPORTS: if the user asks to create, generate, export, download, save, or convert to PDF, Word, DOCX, Excel, XLSX, or CSV, CALL the generate_document tool. Never say you cannot make a file. Never tell them to copy into Word or Google Docs.",
       "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
       "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
       "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
