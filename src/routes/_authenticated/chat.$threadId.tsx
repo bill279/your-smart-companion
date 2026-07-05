@@ -475,6 +475,42 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
         return JSON.stringify(data);
       },
+      generate_document: async (params) => {
+        const p = params as {
+          format?: string;
+          title?: string;
+          content?: string;
+        };
+        const format = (p.format ?? "pdf").toLowerCase();
+        const title = (p.title ?? "BPA Bot document").slice(0, 80);
+        const content = String(p.content ?? "").trim();
+        if (!content) return JSON.stringify({ error: "content required" });
+        if (!["pdf", "docx", "xlsx", "csv"].includes(format)) {
+          return JSON.stringify({ error: "format must be pdf, docx, xlsx or csv" });
+        }
+        try {
+          const messages: Array<{ role: string; content: string; created_at: string }> = [
+            { role: "assistant", content, created_at: new Date().toISOString() },
+          ];
+          // Render into the chat too so the user sees what was exported.
+          setPendingAssistant(content);
+          liveAssistantRef.current = content;
+          await add({ data: { threadId, role: "assistant", content } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          setPendingAssistant("");
+          liveAssistantRef.current = "";
+
+          if (format === "pdf") exportToPdf(title, messages);
+          else if (format === "docx") await exportToDocx(title, messages);
+          else if (format === "xlsx") exportToXlsx(title, messages);
+          else exportToCsv(title, messages);
+          toast.success(`Downloading ${format.toUpperCase()}`);
+          return JSON.stringify({ ok: true, format, title });
+        } catch (err) {
+          console.warn("generate_document failed", err);
+          return JSON.stringify({ error: err instanceof Error ? err.message : "generate failed" });
+        }
+      },
     },
     onAssistantDelta: (part) => {
       // Stream assistant transcript in real time as OpenAI Realtime generates it.
