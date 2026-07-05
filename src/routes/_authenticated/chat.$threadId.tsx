@@ -383,6 +383,16 @@ function ThreadView({ threadId }: { threadId: string }) {
     rawVoiceProvider === "none" ? "none" : "openai_realtime";
   const costMode = settingsQ.data?.cost_mode ?? "balanced";
   const openAiSessionRef = useRef<RealtimeSession | null>(null);
+  // Bumped on every start/stop request. An in-flight startOpenAiVoice() call
+  // checks this after each await; if it no longer matches the generation it
+  // captured, the user already cancelled/stopped, so the just-created
+  // session is torn down immediately instead of silently becoming active.
+  const voiceGenerationRef = useRef(0);
+  // Bounded auto-reconnect: on an unexpected connection drop (not a user
+  // stop) we retry a couple of times before giving up and surfacing a clear
+  // error, instead of silently resetting to idle.
+  const voiceReconnectAttemptsRef = useRef(0);
+  const VOICE_MAX_RECONNECT_ATTEMPTS = 2;
   const startupPromptHandledRef = useRef(false);
   const startupVoiceHandledRef = useRef(false);
   // Voice document-intent dedupe guards (survive re-renders across a session).
@@ -596,6 +606,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function startOpenAiVoice() {
     if (openAiSessionRef.current) return;
+    const myGeneration = ++voiceGenerationRef.current;
     setVoiceError(null);
     setVoiceUiState("starting");
     setVoicePhase("preflight");
@@ -603,6 +614,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     // missing or the tools payload is broken, fail with a clear message
     // instead of asking for microphone permissions and then dying.
     const pre = await preflightOpenAiRealtime();
+    if (myGeneration !== voiceGenerationRef.current) return; // cancelled while awaiting preflight
     if (!pre.ok) {
       const msg = pre.message ?? "OpenAI Realtime is not available.";
       setVoiceError(msg);
@@ -769,15 +781,47 @@ function ThreadView({ threadId }: { threadId: string }) {
           if (p === "failed" && detail) setVoiceError(detail);
         },
       });
+      if (myGeneration !== voiceGenerationRef.current) {
+        // User already stopped/cancelled while we were connecting. Tear the
+        // now-unwanted session down instead of letting it go live.
+        try { await session.stop(); } catch { /* ignore */ }
+        return;
+      }
       openAiSessionRef.current = session;
+      // pc.connectionState can pass through disconnected -> failed -> closed
+      // in quick succession, firing onClose more than once for the same
+      // session. Guard so the reconnect/idle logic below only runs once.
+      let closeHandled = false;
       session.onOpen(() => {
+        voiceReconnectAttemptsRef.current = 0;
         setVoiceUiState("connected");
         setVoicePhase("live");
       });
       session.onClose(() => {
+        if (closeHandled) return;
+        closeHandled = true;
+        // If we already nulled the ref (stopOpenAiVoice ran first), this is
+        // a user-initiated stop — nothing to reconnect.
+        const wasUserInitiated = openAiSessionRef.current === null;
         openAiSessionRef.current = null;
-        setVoiceUiState("idle");
-        setVoicePhase("idle");
+        const supersededOrUserStopped = wasUserInitiated || myGeneration !== voiceGenerationRef.current;
+        if (supersededOrUserStopped || voiceReconnectAttemptsRef.current >= VOICE_MAX_RECONNECT_ATTEMPTS) {
+          if (!supersededOrUserStopped) {
+            toast.error("Voice connection lost. Tap the mic to reconnect.");
+          }
+          setVoiceUiState("idle");
+          setVoicePhase("idle");
+          return;
+        }
+        // Unexpected drop while connected — attempt a bounded auto-reconnect
+        // instead of silently resetting to idle.
+        voiceReconnectAttemptsRef.current += 1;
+        setVoiceUiState("reconnecting");
+        setVoicePhase("connecting");
+        window.setTimeout(() => {
+          if (myGeneration !== voiceGenerationRef.current || openAiSessionRef.current) return;
+          void startOpenAiVoice();
+        }, 1200);
       });
       session.onError((message) => {
         if (/cancellation failed:\s*no active response found/i.test(message)) return;
@@ -885,6 +929,15 @@ function ThreadView({ threadId }: { threadId: string }) {
           const isDocumentIntent = looksLikeDocumentIntent(text);
           const isVisualAnswerIntent = !isDocumentIntent && looksLikeVoiceVisualAnswerIntent(text);
           const isBrainAnswerIntent = !isDocumentIntent && !isVisualAnswerIntent && looksLikeVoiceBrainAnswerIntent(text);
+          const delegateToChatBrain = isDocumentIntent || isVisualAnswerIntent || isBrainAnswerIntent;
+          // Single-owner turn: with create_response:false on the session,
+          // nothing answers this turn until we say so. Either the live
+          // model answers directly, or it's delegated to the deterministic
+          // /api/chat path below — never both, so the two can no longer
+          // race and produce duplicate documents/replies for one utterance.
+          if (!delegateToChatBrain) {
+            openAiSessionRef.current?.sendEvent({ type: "response.create" });
+          }
           if (isVisualAnswerIntent || isBrainAnswerIntent) {
             const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
             const completedRecently =
@@ -893,7 +946,6 @@ function ThreadView({ threadId }: { threadId: string }) {
             if (!visualInFlightRef.current && !completedRecently) {
               visualInFlightRef.current = true;
               lastVisualIntentKeyRef.current = key;
-              openAiSessionRef.current?.sendEvent({ type: "response.cancel" });
               void runDeterministicVoiceVisualAnswer(text, { visual: isVisualAnswerIntent });
               setTimeout(() => {
                 if (visualInFlightRef.current) {
@@ -942,6 +994,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         }
       });
     } catch (e) {
+      if (myGeneration !== voiceGenerationRef.current) return; // superseded by a later stop/start
       const msg = e instanceof Error ? e.message : "OpenAI voice failed to start.";
       setVoiceError(msg);
       toast.error(msg);
@@ -952,6 +1005,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   async function stopOpenAiVoice() {
+    // Invalidate any in-flight startOpenAiVoice()/reconnect attempt so it
+    // tears itself down instead of going live after the user cancelled.
+    voiceGenerationRef.current += 1;
+    voiceReconnectAttemptsRef.current = VOICE_MAX_RECONNECT_ATTEMPTS;
     const s = openAiSessionRef.current;
     openAiSessionRef.current = null;
     setVoiceUiState("stopping");
@@ -968,17 +1025,26 @@ function ThreadView({ threadId }: { threadId: string }) {
       toast.error("Voice is disabled in settings.");
       return;
     }
+    voiceReconnectAttemptsRef.current = 0;
     await startOpenAiVoice();
   }
 
   async function stopVoice() {
-    if (openAiSessionRef.current) await stopOpenAiVoice();
+    // Also stop during "starting"/"reconnecting" — otherwise tapping stop
+    // while the mic/handshake is still in flight is a no-op and voice
+    // resumes right after the user thought they'd cancelled it.
+    if (openAiSessionRef.current || voiceUiState === "starting" || voiceUiState === "reconnecting") {
+      await stopOpenAiVoice();
+    }
   }
 
   const addMut = useMutation({
     mutationFn: async ({ content, files, regenerate }: { content: string; files: Attachment[]; regenerate?: boolean }) => {
       if (!regenerate) setPendingUser(content);
-      setPendingAssistant("");
+      // Document generation involves compose + render + upload before any
+      // response body is sent, so the reader below stays empty for several
+      // seconds. Show immediate feedback instead of a blank pending state.
+      setPendingAssistant(!regenerate && looksLikeDocumentIntent(content) ? "Generating document…" : "");
 
       // Text chat: stream from Lovable AI.
       const { data: sess } = await supabase.auth.getSession();

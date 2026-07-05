@@ -269,7 +269,14 @@ const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table d
 function isHighReasoningRequest(text: string, opts?: { voiceVisualIntent?: boolean; voiceDocIntent?: boolean; voiceChatIntent?: boolean }) {
   const s = text.toLowerCase();
   if (opts?.voiceVisualIntent || opts?.voiceDocIntent || opts?.voiceChatIntent) return true;
-  return /\b(compare|comparison|table|matrix|research|look up|find the best|best .* for|top .* for|evaluate|analy[sz]e|recommend|recommendation|strategy|proposal|report|pdf|document|spreadsheet|cite|sources?|links?|specs?|specifications?|requirements?|technical|vendor|product)\b/.test(s);
+  // A keyword-only classifier silently downgrades genuinely hard requests
+  // that don't happen to contain a trigger word (e.g. "why does my
+  // transformer keep tripping when ambient temp rises") to the
+  // cheaper/faster model. A long, detailed ask is itself a signal, so treat
+  // length as a fallback trigger alongside a broader keyword list.
+  const wordCount = s.trim().split(/\s+/).filter(Boolean).length;
+  if (wordCount >= 40) return true;
+  return /\b(compare|comparison|table|matrix|research|look up|find the best|best .* for|top .* for|evaluate|analy[sz]e|recommend|recommendation|strategy|proposal|report|pdf|document|spreadsheet|cite|sources?|links?|specs?|specifications?|requirements?|technical|vendor|product|explain|why|how (?:do|does|can|should)|debug|troubleshoot|diagnose|root cause|design|architecture|trade-?off|optimi[sz]e|algorithm|calculate|walk me through|step[- ]by[- ]step|difference between|pros and cons|implement|migrate|migration|risk|plan)\b/.test(s);
 }
 
 function cleanAssistantText(text: string) {
@@ -377,11 +384,18 @@ type PendingEmailDraft = {
 };
 
 function parsePendingEmailDraft(content: string): PendingEmailDraft | null {
-  if (!/\*\*Draft email\s*—\s*please review\*\*/i.test(content)) return null;
-  if (!/reply\s+["“]?send["”]?\s+to send it/i.test(content)) return null;
-  const to = content.match(/-\s*\*\*To:\*\*\s*([^\n]+)/i)?.[1]?.trim();
-  const ccRaw = content.match(/-\s*\*\*Cc:\*\*\s*([^\n]+)/i)?.[1]?.trim();
-  const subject = content.match(/-\s*\*\*Subject:\*\*\s*([^\n]+)/i)?.[1]?.trim();
+  // Loosely detect "this looks like a draft awaiting approval" instead of
+  // requiring one exact literal preamble (specific dash glyph, casing, and
+  // wording all drift slightly across model turns/paraphrases). The real
+  // safety net is the field extraction below: an ordinary reply won't
+  // accidentally contain a complete To/Subject/body draft structure, so a
+  // successful extraction plus either loose signal is enough.
+  const looksLikeDraftHeader = /\*\*\s*draft\s+email\b/i.test(content) || /draft\s+email[\s\S]{0,20}?review/i.test(content);
+  const looksLikeApprovalPrompt = /reply\s+["“'‘]?send["”'’]?|say\s+["“'‘]?send["”'’]?|send["”'’]?\s+to\s+send/i.test(content);
+  if (!looksLikeDraftHeader && !looksLikeApprovalPrompt) return null;
+  const to = content.match(/-?\s*\*\*To:\*\*\s*([^\n]+)/i)?.[1]?.trim();
+  const ccRaw = content.match(/-?\s*\*\*Cc:\*\*\s*([^\n]+)/i)?.[1]?.trim();
+  const subject = content.match(/-?\s*\*\*Subject:\*\*\s*([^\n]+)/i)?.[1]?.trim();
   const sections = content.split(/\n-{3,}\n/);
   const body = sections.length >= 3 ? sections.slice(1, -1).join("\n---\n").trim() : "";
   if (!to || !subject || !body) return null;
@@ -760,12 +774,80 @@ export const Route = createFileRoute("/api/chat")({
           }
         }
 
+        // Shared, read-only research helpers used both by the main tool loop
+        // further below AND by the deterministic email/document shortcuts.
+        // Previously the shortcuts called generateText with no tools at all,
+        // so a request like "research X and email/PDF me a summary" could
+        // not actually search the web or the knowledge base — it just wrote
+        // from the model's training data. Defined once here so the KB-search
+        // logic isn't duplicated between the shortcut path and the main tool.
+        const searchKnowledgeBase = async (query: string, limit?: number) => {
+          try {
+            const r = await fetch("https://api.openai.com/v1/embeddings", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${OPENAI_API_KEY}`,
+              },
+              body: JSON.stringify({ model: "text-embedding-3-small", input: query }),
+            });
+            if (!r.ok) return { error: `Embedding failed (${r.status})` };
+            const j = (await r.json()) as { data: Array<{ embedding: number[] }> };
+            const qvec = j.data[0]?.embedding;
+            if (!qvec) return { error: "No embedding returned" };
+            const { data: matches, error } = await supabase.rpc("match_kb_chunks", {
+              query_embedding: qvec as unknown as string,
+              match_user_id: userId,
+              match_count: limit ?? 6,
+            });
+            if (error) return { error: error.message };
+            await logAction("search_knowledge_base", `KB search: ${query.slice(0, 60)}`, {
+              query,
+              hits: matches?.length ?? 0,
+            });
+            return {
+              results: (matches ?? []).map((m) => ({
+                document: m.document_name,
+                similarity: Number(m.similarity?.toFixed(3) ?? 0),
+                content: m.content,
+              })),
+            };
+          } catch (e) {
+            return { error: e instanceof Error ? e.message : String(e) };
+          }
+        };
+        const researchTools = {
+          web_search: tool({
+            description:
+              "Search the live web. Returns a provider, query, optional answer, and results[] with title, url, and snippet. Use for current events, facts, prices, anything time-sensitive. Cite result URLs as clickable Markdown links in the final text.",
+            inputSchema: z.object({
+              query: z.string().describe("The search query"),
+              limit: z.number().int().min(1).max(10).optional(),
+            }),
+            execute: async ({ query, limit }) => searchWeb(query, limit ?? 5),
+          }),
+          web_scrape: tool({
+            description: "Fetch the readable markdown contents of a specific URL.",
+            inputSchema: z.object({ url: z.string().url() }),
+            execute: async ({ url }) => scrapeWeb(url),
+          }),
+          search_knowledge_base: tool({
+            description:
+              "Semantic search over the signed-in user's uploaded knowledge base (company docs, SOPs, PDFs). Use first for any company/internal question.",
+            inputSchema: z.object({
+              query: z.string().min(1).max(500),
+              limit: z.number().int().min(1).max(10).optional(),
+            }),
+            execute: async ({ query, limit }) => searchKnowledgeBase(query, limit),
+          }),
+        };
+
         const deterministicEmailDraft =
           !body.regenerate && attachments.length === 0 && !isExplicitEmailApproval(userText)
             ? detectEmailDraftIntent(userText, userEmail)
             : null;
         if (deterministicEmailDraft) {
-          const draft = await generateText({
+          const draftResult = streamText({
             model: gateway(modelId),
             system: systemWithUser,
             messages: [
@@ -775,6 +857,8 @@ export const Route = createFileRoute("/api/chat")({
                 content: `Create a concise professional email draft for this request: ${userText}
 
 Recipient: ${deterministicEmailDraft.to}
+
+If you need current information to write this draft (e.g. the user asked you to summarize research, news, or company knowledge in the email), use web_search / web_scrape / search_knowledge_base first, then write the draft.
 
 Return EXACTLY this Markdown structure:
 **Draft email — please review**
@@ -790,25 +874,30 @@ Return EXACTLY this Markdown structure:
 
 Reply "send" to send it, or tell me what to change.
 
-Do not say it was sent. Do not call or mention tools.`,
+Do not say it was sent. Do not call the send_email tool.`,
               },
             ],
+            tools: researchTools,
+            stopWhen: stepCountIs(4),
             providerOptions: { openai: { reasoningEffort: "minimal" } },
+            onError: ({ error }) => {
+              console.error("[chat] deterministic email draft stream error", error);
+            },
+            onFinish: async ({ text }) => {
+              const assistantText = cleanAssistantText(text.trim());
+              await supabase.from("messages").insert({
+                thread_id: body.threadId!,
+                user_id: userId,
+                role: "assistant",
+                content: assistantText,
+              });
+              await supabase
+                .from("threads")
+                .update({ updated_at: new Date().toISOString() })
+                .eq("id", body.threadId!);
+            },
           });
-          const assistantText = cleanAssistantText(draft.text.trim());
-          await supabase.from("messages").insert({
-            thread_id: body.threadId!,
-            user_id: userId,
-            role: "assistant",
-            content: assistantText,
-          });
-          await supabase
-            .from("threads")
-            .update({ updated_at: new Date().toISOString() })
-            .eq("id", body.threadId!);
-          return new Response(assistantText, {
-            headers: { "Content-Type": "text/plain; charset=utf-8" },
-          });
+          return draftResult.toTextStreamResponse();
         }
 
         // ── Deterministic document-generation shortcut ─────────────────────
@@ -824,7 +913,7 @@ Do not say it was sent. Do not call or mention tools.`,
         }
         if (docIntent) {
           try {
-            const composePrompt = `The user asked: ${userText}\n\nWrite the full body of the requested document in clean GitHub-Flavored Markdown. Use ## headings, short paragraphs, bullet lists, and tables where useful. Do NOT include the title, date, executive summary, or a Sources section — those are added automatically. Output ONLY the Markdown body. No preamble, no explanations, no outer code fences.`;
+            const composePrompt = `The user asked: ${userText}\n\nIf this needs current information, facts you don't already know, or company knowledge to write accurately, call web_search / web_scrape / search_knowledge_base first — then write the document from those results. Write the full body of the requested document in clean GitHub-Flavored Markdown. Use ## headings, short paragraphs, bullet lists, and tables where useful. Do NOT include the title, date, executive summary, or a Sources section — those are added automatically. Output ONLY the Markdown body. No preamble, no explanations, no outer code fences.`;
             const composed = await generateText({
               model: gateway(modelId),
               system: systemWithUser,
@@ -832,6 +921,8 @@ Do not say it was sent. Do not call or mention tools.`,
                 ...baseMessages.slice(0, -1),
                 { role: "user", content: composePrompt },
               ],
+              tools: researchTools,
+              stopWhen: stepCountIs(4),
               providerOptions: { openai: { reasoningEffort } },
             });
             const bodyMd = composed.text.trim() || `# ${docIntent.title}\n\n(No content generated.)`;
@@ -943,24 +1034,7 @@ Do not say it was sent. Do not call or mention tools.`,
             console.error("[chat streamText error]", error);
           },
           tools: {
-            web_search: tool({
-              description:
-                "Search the live web. Returns a provider, query, optional answer, and results[] with title, url, and snippet. Use for current events, facts, prices, anything time-sensitive. The final answer MUST cite result URLs as clickable Markdown links.",
-              inputSchema: z.object({
-                query: z.string().describe("The search query"),
-                limit: z.number().int().min(1).max(10).optional(),
-              }),
-              execute: async ({ query, limit }) => {
-                return searchWeb(query, limit ?? 5);
-              },
-            }),
-            web_scrape: tool({
-              description: "Fetch the readable markdown contents of a specific URL.",
-              inputSchema: z.object({ url: z.string().url() }),
-              execute: async ({ url }) => {
-                return scrapeWeb(url);
-              },
-            }),
+            ...researchTools,
             get_outlook_briefing: tool({
               description:
                 "Create a workday briefing from the user's connected Outlook mailbox and calendar: unread/actionable emails, emails that may need replies, upcoming events, and suggested priorities.",
@@ -1559,55 +1633,6 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 if (error) return { error: error.message };
                 await logAction("save_lesson", `Lesson: ${lesson.slice(0, 80)}`, { lesson, context });
                 return { ok: true };
-              },
-            }),
-            search_knowledge_base: tool({
-              description:
-                "Semantic search over the signed-in user's uploaded knowledge base (company docs, SOPs, PDFs). Returns the most relevant chunks with the source document name. Use first for any company/internal question.",
-              inputSchema: z.object({
-                query: z.string().min(1).max(500),
-                limit: z.number().int().min(1).max(10).optional(),
-              }),
-              execute: async ({ query, limit }) => {
-                try {
-                  const r = await fetch("https://api.openai.com/v1/embeddings", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${OPENAI_API_KEY}`,
-                    },
-                    body: JSON.stringify({
-                      model: "text-embedding-3-small",
-                      input: query,
-                    }),
-                  });
-                  if (!r.ok) {
-                    return { error: `Embedding failed (${r.status})` };
-                  }
-                  const j = (await r.json()) as { data: Array<{ embedding: number[] }> };
-                  const qvec = j.data[0]?.embedding;
-                  if (!qvec) return { error: "No embedding returned" };
-                  const { data: matches, error } = await supabase.rpc("match_kb_chunks", {
-                    query_embedding: qvec as unknown as string,
-                    match_user_id: userId,
-                    match_count: limit ?? 6,
-                  });
-                  if (error) return { error: error.message };
-                  await logAction(
-                    "search_knowledge_base",
-                    `KB search: ${query.slice(0, 60)}`,
-                    { query, hits: matches?.length ?? 0 },
-                  );
-                  return {
-                    results: (matches ?? []).map((m) => ({
-                      document: m.document_name,
-                      similarity: Number(m.similarity?.toFixed(3) ?? 0),
-                      content: m.content,
-                    })),
-                  };
-                } catch (e) {
-                  return { error: e instanceof Error ? e.message : String(e) };
-                }
               },
             }),
             generate_document: tool({
