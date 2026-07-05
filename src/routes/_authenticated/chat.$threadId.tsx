@@ -2,7 +2,8 @@ import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-r
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useConversation, ConversationProvider } from "@elevenlabs/react";
+import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
+import { createRealtimeSession } from "@/lib/realtime-voice.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
@@ -13,14 +14,12 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
   searchChats,
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
-import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
@@ -32,7 +31,51 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
-// (Voice agent prompt is configured in ElevenLabs; keep this for reference / contextual updates.)
+// Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
+const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
+  {
+    type: "function",
+    name: "show_in_chat",
+    description:
+      "Render rich markdown (tables, lists, code, long drafts, email drafts) directly in the chat WITHOUT speaking it. Use this whenever the user asks for a table, list, code, or any long content. Then say a brief one-sentence spoken summary — never read the content aloud.",
+    parameters: {
+      type: "object",
+      properties: {
+        markdown: { type: "string", description: "Full markdown content." },
+      },
+      required: ["markdown"],
+    },
+  },
+  {
+    type: "function",
+    name: "web_search",
+    description: "Search the web for current information. Returns a compact list of results.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number", description: "Max results, default 5" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "send_email",
+    description:
+      "Send an email on the user's behalf. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string" },
+        cc: { type: "string" },
+      },
+      required: ["to", "subject", "body"],
+    },
+  },
+];
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automation'?s assistant\.\s*How can I help\??\s*/i;
@@ -223,11 +266,7 @@ export const Route = createFileRoute("/_authenticated/chat/$threadId")({
 
 function ThreadPage() {
   const { threadId } = useParams({ from: "/_authenticated/chat/$threadId" });
-  return (
-    <ConversationProvider>
-      <ThreadView key={threadId} threadId={threadId} />
-    </ConversationProvider>
-  );
+  return <ThreadView key={threadId} threadId={threadId} />;
 }
 
 function ThreadView({ threadId }: { threadId: string }) {
@@ -239,7 +278,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const getAgentSignedUrl = useServerFn(getElevenLabsAgentSignedUrl);
+  const createSession = useServerFn(createRealtimeSession);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -274,7 +313,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const latestMessageRef = useRef<HTMLDivElement>(null);
   const pendingContextRef = useRef<string>("");
-  const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
+  const conversationRef = useRef<ReturnType<typeof useRealtimeVoice> | null>(null);
   const seenVoiceEventsRef = useRef<Set<string>>(new Set());
   const voiceStateRef = useRef<VoiceUiState>("idle");
   const startAttemptRef = useRef(0);
@@ -294,38 +333,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }, [exportOpen]);
 
   const messages = messagesQ.data ?? [];
-
-  const voiceQuotaFn = useServerFn(getVoiceQuota);
-  const voiceQuotaQ = useQuery({
-    queryKey: ["voiceQuota"],
-    queryFn: () => voiceQuotaFn(),
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
-  });
-  const quota = voiceQuotaQ.data;
-  const quotaTone =
-    quota && quota.available
-      ? quota.percentUsed >= 95
-        ? "danger"
-        : quota.percentUsed >= 80
-        ? "warn"
-        : "ok"
-      : "unknown";
-  const warnedQuotaRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!quota || !quota.available || quota.limit <= 0) return;
-    const key = quotaTone;
-    if (warnedQuotaRef.current === key) return;
-    if (quotaTone === "danger") {
-      toast.error(`Voice quota ${quota.percentUsed}% used — ${quota.remaining.toLocaleString()} chars left.`);
-      warnedQuotaRef.current = key;
-    } else if (quotaTone === "warn") {
-      toast.warning(`Voice quota ${quota.percentUsed}% used.`);
-      warnedQuotaRef.current = key;
-    } else {
-      warnedQuotaRef.current = key;
-    }
-  }, [quota, quotaTone]);
+  // (Voice usage is billed via OpenAI Realtime tokens — no separate quota UI.)
 
   function scrollToLatest() {
     const el = scrollRef.current;
@@ -386,15 +394,11 @@ function ThreadView({ threadId }: { threadId: string }) {
     };
   }, []);
 
-  const conversation = useConversation({
+  const conversation = useRealtimeVoice({
+    toolDefs: REALTIME_TOOL_DEFS,
     clientTools: {
-      show_in_chat: async (params: { markdown?: string; content?: string }) => {
-        // Render rich content (tables, lists, code, long drafts) directly in
-        // the chat WITHOUT the voice agent speaking it. The agent should call
-        // this whenever the user asks for a table/list/code/email draft so
-        // the audio stays a short spoken summary while the visual appears
-        // instantly in the transcript.
-        const md = (params.markdown ?? params.content ?? "").trim();
+      show_in_chat: async (params) => {
+        const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
         if (!md) return JSON.stringify({ error: "markdown required" });
         try {
           setPendingAssistant(md);
@@ -409,21 +413,23 @@ function ThreadView({ threadId }: { threadId: string }) {
           return JSON.stringify({ error: "failed to render" });
         }
       },
-      web_search: async (params: { query?: string; limit?: number }) => {
-        const query = params.query?.trim();
+      web_search: async (params) => {
+        const p = params as { query?: string; limit?: number };
+        const query = p.query?.trim();
         if (!query) return JSON.stringify({ error: "query required" });
 
         const res = await fetch("/api/public/web-search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, limit: params.limit ?? 5 }),
+          body: JSON.stringify({ query, limit: p.limit ?? 5 }),
         });
         const data = await res.json().catch(() => ({ error: "search failed" }));
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "search failed" });
         return JSON.stringify(data);
       },
-      send_email: async (params: { to?: string; subject?: string; body?: string; cc?: string }) => {
-        if (!params.to || !params.subject || !params.body) {
+      send_email: async (params) => {
+        const p = params as { to?: string; subject?: string; body?: string; cc?: string };
+        if (!p.to || !p.subject || !p.body) {
           return JSON.stringify({ error: "to, subject and body are required" });
         }
         const { data: sess } = await supabase.auth.getSession();
@@ -432,17 +438,17 @@ function ThreadView({ threadId }: { threadId: string }) {
         const res = await fetch("/api/public/jarvis/tools/send_email", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(params),
+          body: JSON.stringify(p),
         });
         const data = await res.json().catch(() => ({ error: "send failed" }));
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
         return JSON.stringify(data);
       },
     },
-    onAgentChatResponsePart: (part: { text?: string; type?: "start" | "delta" | "stop"; event_id?: number }) => {
-      // Stream agent text to the chat in real time as ElevenLabs generates it.
-      const kind = part?.type;
-      const chunk = part?.text ?? "";
+    onAssistantDelta: (part) => {
+      // Stream assistant transcript in real time as OpenAI Realtime generates it.
+      const kind = part.kind;
+      const chunk = part.text;
       if (kind === "start") {
         liveAssistantRef.current = chunk;
       } else if (kind === "delta") {
@@ -452,35 +458,16 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
       setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
     },
-    onAudioAlignment: (props: { chars?: string[] }) => {
-      // Fallback live transcript: reveal each character as the audio chunk
-      // for it is generated. This guarantees the chat updates while the bot
-      // is speaking even when the agent does not stream text response parts.
-      const chars = props?.chars;
-      if (!chars || chars.length === 0) return;
-      liveAssistantRef.current += chars.join("");
-      setPendingAssistant(cleanAssistantText(liveAssistantRef.current));
-    },
-    onAgentResponseCorrection: (props: { corrected_agent_response?: string }) => {
-      const corrected = props?.corrected_agent_response;
-      if (!corrected) return;
-      liveAssistantRef.current = corrected;
-      setPendingAssistant(cleanAssistantText(corrected));
-    },
     onConnect: () => {
       clearVoiceConnectTimeout();
       hasConnectedVoiceRef.current = true;
       voiceStateRef.current = "connected";
       setVoiceUiState("connected");
       setVoiceError(null);
-      try { conversationRef.current?.setVolume({ volume: voiceUserHasSpokenRef.current ? 1 : 0 }); } catch (err) { console.warn(err); }
-      const ctx = pendingContextRef.current;
+      // Instructions were already sent inside session.update on data-channel open.
       pendingContextRef.current = "";
-      if (ctx) {
-        try { conversationRef.current?.sendContextualUpdate(ctx); } catch (err) { console.warn(err); }
-      }
     },
-    onDisconnect: (details?: { reason?: string; message?: string; closeCode?: number; closeReason?: string }) => {
+    onDisconnect: (details) => {
       clearVoiceConnectTimeout();
       if (idleTimerRef.current) { window.clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
       const wasStopping = voiceStateRef.current === "stopping";
@@ -488,17 +475,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       setVoiceUiState("idle");
       pendingContextRef.current = "";
       if (wasStopping) return;
-      const closeText = details?.closeReason || details?.message || "";
-      if (/quota/i.test(closeText)) {
-        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-        return;
-      }
-      // If the session was previously connected and dropped for any non-error
-      // reason (typically ElevenLabs idle timeout), silently reconnect so the
-      // user stays in voice mode until they explicitly tap to stop.
+      const closeText = details?.message ?? "";
+      // If the session was previously connected and dropped, silently reconnect
+      // so the user stays in voice mode until they explicitly tap to stop.
       if (hasConnectedVoiceRef.current && details?.reason !== "error") {
         // Only auto-reconnect if the user actually spoke in the last 60s.
-        // Otherwise the session was idle and we'd just burn ElevenLabs credits.
         const recentlyActive = Date.now() - lastUserSpeechAtRef.current < 60_000;
         if (recentlyActive) {
           setTimeout(() => {
@@ -512,21 +493,19 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
       }
     },
-    onError: (e) => {
+    onError: (e: string) => {
       const msg = String(e || "");
-      if (msg.includes("error_event") || msg.includes("error_type")) return;
       console.warn("voice error", msg);
       clearVoiceConnectTimeout();
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      setVoiceError(/quota/i.test(msg) ? "ElevenLabs voice quota is exhausted. Text chat still works." : msg || "Voice failed to connect. Tap the mic once to try again.");
+      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
     },
-    onMessage: async (message: { source?: string; message?: string }) => {
+    onMessage: async (message) => {
       const text = message?.message;
       if (!text) return;
-      const voiceMessage = message as { source?: string; message?: string; event_id?: number };
-      const eventKey = `${voiceMessage.source ?? "unknown"}:${voiceMessage.event_id ?? text}`;
+      const eventKey = `${message.source}:${message.event_id ?? text}`;
       if (seenVoiceEventsRef.current.has(eventKey)) return;
       seenVoiceEventsRef.current.add(eventKey);
       if (seenVoiceEventsRef.current.size > 250) {
@@ -622,11 +601,6 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function startVoice() {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
-    if (quota && quota.available && quota.limit > 0 && quota.remaining <= 0) {
-      toast.error("Voice quota exhausted — text chat still works.");
-      setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
-      return;
-    }
     const attemptId = startAttemptRef.current + 1;
     startAttemptRef.current = attemptId;
     hasConnectedVoiceRef.current = false;
@@ -636,9 +610,10 @@ function ThreadView({ threadId }: { threadId: string }) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
-      const { signedUrl } = await getAgentSignedUrl({});
+      const session = await createSession({});
       if (startAttemptRef.current !== attemptId) return;
-      pendingContextRef.current = buildVoiceContext();
+      const instructions = `${VOICE_SESSION_PROMPT}\n\n${buildVoiceContext()}`;
+      pendingContextRef.current = "";
       clearVoiceConnectTimeout();
       connectTimeoutRef.current = window.setTimeout(() => {
         if (startAttemptRef.current !== attemptId || voiceStateRef.current !== "starting") return;
@@ -647,9 +622,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
-      conversation.startSession({
-        signedUrl,
-        connectionType: "websocket",
+      await conversation.startSession({
+        clientSecret: session.clientSecret,
+        model: session.model,
+        instructions,
       });
     } catch (e) {
       clearVoiceConnectTimeout();
@@ -659,8 +635,6 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (/permission|notallowed/i.test(raw)) {
         setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
         toast.error("Microphone blocked");
-      } else if (/quota/i.test(raw)) {
-        setVoiceError("ElevenLabs voice quota is exhausted. Text chat still works.");
       } else {
         console.warn("startVoice failed", raw);
         setVoiceError("Voice failed to connect. Tap the mic once to try again.");
@@ -933,7 +907,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     navigate({ to: "/auth" });
   }
 
-  const voiceActive = voiceUiState === "connected" || (voiceUiState === "starting" && conversation.status !== "error");
+  const voiceActive = voiceUiState === "connected" || voiceUiState === "starting";
   const voiceConnecting = voiceUiState === "starting";
 
   return (
@@ -1067,42 +1041,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         >
           <Sparkles size={12} /> Activity & memory
         </Link>
-        {quota && quota.available && quota.limit > 0 && (
-          <div className="mx-4 mt-3 rounded-md border border-border bg-card p-2.5">
-            <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="font-medium text-foreground">Voice quota</span>
-              <span
-                className={
-                  quotaTone === "danger"
-                    ? "text-destructive font-semibold"
-                    : quotaTone === "warn"
-                    ? "text-amber-500 font-semibold"
-                    : "text-muted-foreground"
-                }
-              >
-                {quota.percentUsed}% used
-              </span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-              <div
-                className={
-                  quotaTone === "danger"
-                    ? "h-full bg-destructive"
-                    : quotaTone === "warn"
-                    ? "h-full bg-amber-500"
-                    : "h-full bg-primary"
-                }
-                style={{ width: `${Math.min(100, quota.percentUsed)}%` }}
-              />
-            </div>
-            <div className="mt-1.5 text-[10px] text-muted-foreground">
-              {quota.remaining.toLocaleString()} chars left
-              {quota.resetAt
-                ? ` · resets ${new Date(quota.resetAt).toLocaleDateString()}`
-                : ""}
-            </div>
-          </div>
-        )}
         <button
           onClick={signOut}
           className="m-4 flex items-center gap-2 justify-center py-2 text-xs text-muted-foreground hover:text-foreground"
@@ -1137,22 +1075,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             <Menu size={20} />
           </button>
           <div className="text-sm font-semibold text-foreground truncate">BPA Bot</div>
-          {quota && quota.available && quota.limit > 0 && (
-            <span
-              title={`Voice quota: ${quota.percentUsed}% used`}
-              className={
-                "ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full " +
-                (quotaTone === "danger"
-                  ? "bg-destructive/15 text-destructive"
-                  : quotaTone === "warn"
-                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  : "bg-secondary text-muted-foreground")
-              }
-            >
-              🎙 {quota.percentUsed}%
-            </span>
-          )}
-          <div className={`relative ${quota && quota.available && quota.limit > 0 ? "ml-1" : "ml-auto"}`}>
+          <div className="relative ml-auto">
             <button
               onClick={(e) => { e.stopPropagation(); setExportOpen((o) => !o); }}
               className="p-2 rounded-md hover:bg-secondary text-foreground"
