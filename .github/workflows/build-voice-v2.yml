@@ -1,0 +1,129 @@
+name: Build claude-cowork/voice-v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      reset:
+        description: 'Reset branch from main (deletes existing branch)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "Claude Cowork"
+          git config user.email "claude-cowork@noreply.github.com"
+
+      - name: Create or leset branch
+        run: |
+          # Delete remote branch if reset requested
+          if [ "${{ inputs.reset }}" = "true" ]; then
+            git push origin --delete claude-cowork/voice-v2 2>/dev/null || true
+          fi
+          git branch -D claude-cowork/voice-v2 2>/dev/null || true
+          git checkout -b claude-cowork/voice-v2
+
+      - name: Patch openai-realtime.ts
+        run: |
+          python3 << 'PYEOF'
+          with open('src/lib/voice/openai-realtime.ts', 'r') as f:
+              c = f.read()
+          # Fix 1: Audio DOM attach
+          o1 = '  const audioEl = document.createElement("audio");\n  audioEl.autoplay = true;\n  pc.ontrack = (e) => {\n    audioEl.srcObject = e.streams[0];\n  };'
+          n1 = '  const audioEl = document.createElement("audio");\n  audioEl.autoplay = true;\n  audioEl.setAttribute("playsinline", "true");\n  audioEl.style.display = "none";\n  document.body.appendChild(audioEl);\n  pc.ontrack = (e) => {\n    audioEl.srcObject = e.streams[0];\n    audioEl.play().catch(() => {});\n  };'
+          if o1 in c: c = c.replace(o1, n1); print('Fix 1 ok')
+          else: print('Fix 1 skipped')
+          # Fix 2: VAD eagerness
+          if 'eagerness: "low"' in c: c = c.replace('eagerness: "low"', 'eagerness: "medium"'); print('Fix 2 ok')
+          else: print('Fix 2 skipped')
+          # Fix 3: visibility listener
+          m = '  pc.addEventListener("connectionstatechange", () => {'
+          vl = '\n  const handleVisibilityChange = () => {\n    if (!document.hidden && audioEl.srcObject) audioEl.play().catch(()=>{});\n  };\n  document.addEventListener("visibilitychange", handleVisibilityChange);\n'
+          if 'handleVisibilityChange' not in c and m in c: c = c.replace(m, vl + m); print('Fix 3 ok')
+          else: print('Fix 3 skipped')
+          # Fix 4: stop() cleanup
+          os = '      try { audioEl.srcObject = null; } catch { /* ignore */ }'
+          ns = '      try { audioEl.pause(); audioEl.srcObject = null; } catch {}\n      try { document.body.removeChild(audioEl); } catch {}\n      try { document.removeEventListener("visibilitychange", handleVisibilityChange); } catch {}'
+          if os in c: c = c.replace(os, ns); print('Fix 4 ok')
+          else: print('Fix 4 skipped')
+          with open('src/lib/voice/openai-realtime.ts', 'w') as f: f.write(c)
+          print('Done')
+          PYEOF
+
+      - name: Patch session.ts
+        run: |
+          python3 << 'PYEOF'
+          with open('src/routes/api/realtime/session.ts', 'r') as f: c = f.read()
+          if '"alloy"' in c and 'REALTIME_VOICE' in c:
+              c = c.replace('const REALTIME_VOICE = "alloy";', 'const REALTIME_VOICE = "shimmer";')
+              print('shimmer ok')
+          else: print('shimmer skipped')
+          or = '"Do not repeat yourself across turns. If you already asked for confirmation, wait for yes/no/edits. If the user approves, act immediately. If the user is silent, stay quiet.",'
+          nr = '"Do not repeat yourself across turns. If you already asked for confirmation, wait silently -- never re-ask the same question. If the user approves with any affirmative (yes, ok, send, do it, go ahead, confirm, sure), act immediately. If the user is silent, stay quiet.",'
+          if or in c: c = c.replace(or, nr); print('no-repeat ok')
+          else: print('no-repeat skipped')
+          with open('src/routes/api/realtime/session.ts', 'w') as f: f.write(c)
+          print('Done')
+          PYEOF
+
+      - name: Patch chat.$threadId.tsx
+        run: |
+          python3 << 'PYEOF'
+          with open('src/routes/_authenticated/chat.$threadId.tsx', 'r') as f: c = f.read()
+          # Flash fix: mobile header safe area
+          oh = '"chat-mobile-header md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pb-2 border-b border-border bg-card/95 backdrop-blur"'
+          nh = '"chat-mobile-header md:hidden fixed top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pt-[env(safe-area-inset-top)] pb-2 border-b border-border bg-card/95 backdrop-blur"'
+          if oh in c: c = c.replace(oh, nh); print('mobile header ok')
+          else: print('mobile header skipped')
+          # Scroll area padding
+          os = '"chat-mobile-scroll relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pb-6"'
+          ns = '"chat-mobile-scroll relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-x-none touch-pan-y pb-6 pt-[calc(3.5rem+env(safe-area-inset-top))] md:pt-0"'
+          if os in c: c = c.replace(os, ns); print('scroll pad ok')
+          else: print('scroll pad skipped')
+          # Brain routing threshold
+          ob = 'if (words >= 35 || text.length >= 220) return true;'
+          nb = 'if (words >= 20 || text.length >= 140) return true;'
+          if ob in c: c = c.replace(ob, nb); print('brain threshold ok')
+          else: print('brain threshold skipped')
+          # No homepage jump during voice
+          oe = '{!hasVisibleConversation && ('
+          ne = '{!hasVisibleConversation && !voiceActive && ('
+          idx = c.find(oe)
+          if idx >= 0 and 'How can I help' in c[idx:idx+200]: c = c.replace(oe, ne, 1); print('no-jump ok')
+          else: print('no-jump skipped')
+          with open('src/routes/_authenticated/chat.$threadId.tsx', 'w') as f: f.write(c)
+          print('Done')
+          PYEOF
+
+      - name: Commit and push to claude-cowork/voice-v2
+        run: |
+          git add -A
+          git commit -m "feat(voice-v2): voice+chat polish, mobile safe area, smarter routing, no flash"
+          git push origin claude-cowork/voice-v2 --force
+
+      - name: Create PR
+        run: |
+          gh pr create \
+            --title "feat: BPA Bot Voice v2 â Claude Cowork" \
+            --body "Claude Cowork voice-v2: iOS audio fix, shimmer, no flash, mobile safe area, smarter routing. DO NOT MERGE TO MAIN." \
+            --base main --head claude-cowork/voice-v2 2>/dev/null || echo "PR already exists or failed -- branch pushed"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "â claude-cowork/voice-v2 pushed"
+          echo "PR: https://github.com/${{ github.repository }}/pull/new"

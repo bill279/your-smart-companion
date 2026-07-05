@@ -17,7 +17,7 @@ import { microsoftIntegrationStatus } from "@/lib/microsoft-integration.server";
 // can use directly against api.openai.com for the WebRTC SDP exchange.
 
 const REALTIME_MODEL = REALTIME_PRIMARY_MODEL;
-const REALTIME_VOICE = "alloy";
+const REALTIME_VOICE = "shimmer";
 // Current OpenAI Realtime ephemeral-secret endpoint. The legacy
 // `/v1/realtime/sessions` route now returns 404 for many keys; the
 // documented replacement is `/v1/realtime/client_secrets`, which returns
