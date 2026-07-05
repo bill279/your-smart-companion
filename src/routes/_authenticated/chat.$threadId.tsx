@@ -29,7 +29,12 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 | --- | --- |
 | Example | Value |
 
-Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
+Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.
+
+TOOL USE — non-negotiable:
+- For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
+- For ANY factual question about real companies, people, prices, addresses, news, or anything time-sensitive: CALL web_search FIRST. Never invent facts, addresses, phone numbers, or pricing.
+- If the user asks you to create, generate, export, download, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs — the app will download the file for them. Choose a sensible short filename.`;
 
 // Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
 const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
@@ -73,6 +78,32 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         cc: { type: "string" },
       },
       required: ["to", "subject", "body"],
+    },
+  },
+  {
+    type: "function",
+    name: "generate_document",
+    description:
+      "Generate and download a document file (PDF, DOCX, XLSX, or CSV) from provided content. Use this whenever the user asks to export, save, download, or convert content to a PDF, Word doc, spreadsheet, or CSV. NEVER refuse; NEVER tell the user to copy into another app. After calling, say a brief spoken confirmation like 'Your PDF is downloading.'",
+    parameters: {
+      type: "object",
+      properties: {
+        format: {
+          type: "string",
+          enum: ["pdf", "docx", "xlsx", "csv"],
+          description: "Output file format.",
+        },
+        title: {
+          type: "string",
+          description: "Document title / filename base (no extension).",
+        },
+        content: {
+          type: "string",
+          description:
+            "Markdown content to render. Include GFM tables — they will be rendered as real tables in PDF/DOCX and as sheet rows in XLSX/CSV.",
+        },
+      },
+      required: ["format", "title", "content"],
     },
   },
 ];
