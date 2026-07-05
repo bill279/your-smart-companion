@@ -2,7 +2,8 @@ import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-r
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useConversation, ConversationProvider } from "@elevenlabs/react";
+import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
+import { createRealtimeSession } from "@/lib/realtime-voice.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
@@ -13,14 +14,12 @@ import {
   addMessage,
   createThread,
   deleteThread,
-  getElevenLabsAgentSignedUrl,
   getThreadMessages,
   listThreads,
   renameThread,
   searchChats,
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
-import { getVoiceQuota } from "@/lib/voice-quota.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
@@ -32,7 +31,51 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.`;
 
-// (Voice agent prompt is configured in ElevenLabs; keep this for reference / contextual updates.)
+// Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
+const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
+  {
+    type: "function",
+    name: "show_in_chat",
+    description:
+      "Render rich markdown (tables, lists, code, long drafts, email drafts) directly in the chat WITHOUT speaking it. Use this whenever the user asks for a table, list, code, or any long content. Then say a brief one-sentence spoken summary — never read the content aloud.",
+    parameters: {
+      type: "object",
+      properties: {
+        markdown: { type: "string", description: "Full markdown content." },
+      },
+      required: ["markdown"],
+    },
+  },
+  {
+    type: "function",
+    name: "web_search",
+    description: "Search the web for current information. Returns a compact list of results.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number", description: "Max results, default 5" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "send_email",
+    description:
+      "Send an email on the user's behalf. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string" },
+        cc: { type: "string" },
+      },
+      required: ["to", "subject", "body"],
+    },
+  },
+];
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 const BPA_INTRO = /^\s*(?:Hi,?\s*)?I(?:'m| am)\s+BPA Bot\s*[—-]\s*BP Automation'?s assistant\.\s*How can I help\??\s*/i;
