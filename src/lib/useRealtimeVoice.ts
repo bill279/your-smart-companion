@@ -201,13 +201,18 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           sendEvent({
             type: "session.update",
             session: {
+              type: "realtime",
               instructions: opts.instructions ?? "",
-              input_audio_transcription: { model: "whisper-1" },
-              turn_detection: {
-                type: "server_vad",
-                threshold: 0.5,
-                prefix_padding_ms: 300,
-                silence_duration_ms: 600,
+              audio: {
+                input: {
+                  transcription: { model: "whisper-1" },
+                  turn_detection: {
+                    type: "server_vad",
+                    threshold: 0.5,
+                    prefix_padding_ms: 300,
+                    silence_duration_ms: 600,
+                  },
+                },
               },
               tools,
               tool_choice: tools.length > 0 ? "auto" : "none",
