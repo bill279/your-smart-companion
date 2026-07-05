@@ -118,6 +118,19 @@ function looksLikeVoiceVisualAnswerIntent(text: string) {
   return asksForCurrentSimpleFact || asksForTable || asksForProductResearch || (asksForResearch && asksForMeasuredCriteria);
 }
 
+// Anything long or substantive enough that it needs the full chat-brain
+// pipeline (tools, memory, multi-step reasoning) rather than a snappy live
+// reply. Short acknowledgments and small talk ("hi", "thanks", "okay",
+// "sounds good") intentionally do NOT match this, so they stay on the fast
+// live-model path instead of taking a multi-second round trip through
+// /api/chat for no reason.
+function looksLikeVoiceBrainAnswerIntent(text: string) {
+  const s = text.toLowerCase();
+  const words = s.trim().split(/\s+/).filter(Boolean).length;
+  if (words >= 35 || text.length >= 220) return true;
+  return /\b(explain|walk me through|plan|strategy|summari[sz]e|summary|draft|write|create|analy[sz]e|recommend|proposal|compare|research|find|look up|email|reply|calendar|schedule|what should|how can|make it better)\b/.test(s);
+}
+
 function looksLikeVoiceVisualPlaceholder(text: string) {
   const s = text.toLowerCase();
   return (
@@ -400,6 +413,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const visualInFlightRef = useRef(false);
   const lastVisualIntentKeyRef = useRef("");
   const lastVisualIntentCompletedAtRef = useRef(0);
+  // If the user says something else while a chat-brain round trip is still
+  // in flight, we used to just drop it silently. Instead, remember only the
+  // latest such utterance and run it once the in-flight one finishes.
+  const queuedVoiceTurnRef = useRef<{ text: string; visual: boolean } | null>(null);
   const suppressRealtimeAssistantUntilRef = useRef(0);
 
   const threads = useQuery({ queryKey: ["threads"], queryFn: () => list({}) });
@@ -714,6 +731,15 @@ function ThreadView({ threadId }: { threadId: string }) {
 	        setPendingAssistant("");
 	        qc.invalidateQueries({ queryKey: ["messages", threadId] });
 	        qc.invalidateQueries({ queryKey: ["threads"] });
+	        // If the user said something else while this was in flight, don't
+	        // drop it — run the latest one now instead of silently ignoring it.
+	        const queued = queuedVoiceTurnRef.current;
+	        if (queued) {
+	          queuedVoiceTurnRef.current = null;
+	          visualInFlightRef.current = true;
+	          lastVisualIntentKeyRef.current = queued.text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
+	          void runDeterministicVoiceVisualAnswer(queued.text, { visual: queued.visual });
+	        }
 	      }
 	    };
 	    const runDeterministicVoiceDocument = async (text: string, key: string) => {
@@ -922,17 +948,28 @@ function ThreadView({ threadId }: { threadId: string }) {
           });
           const isDocumentIntent = looksLikeDocumentIntent(text);
           const isVisualAnswerIntent = !isDocumentIntent && looksLikeVoiceVisualAnswerIntent(text);
-          // Final-product architecture: voice is transport only. Every
-          // completed user voice turn is answered by /api/chat, which owns
-          // reasoning, tools, approvals, documents, research, and persistence.
-          // Realtime never creates its own answer for the user's utterance;
-          // it only speaks a short summary after the chat answer exists.
-          if (!isDocumentIntent) {
+          const isBrainAnswerIntent = !isDocumentIntent && !isVisualAnswerIntent && looksLikeVoiceBrainAnswerIntent(text);
+          const delegateToChatBrain = isDocumentIntent || isVisualAnswerIntent || isBrainAnswerIntent;
+          // Chat brain owns anything that needs tools, research, documents,
+          // or approvals — that stays a single source of truth so it can
+          // never race the live model for those. But routing EVERY turn
+          // (including "hi"/"thanks"/"okay") through a full /api/chat round
+          // trip made voice feel slow and dead-air-y, so short acknowledgments
+          // and small talk get a fast, snappy live-model reply instead.
+          if (!delegateToChatBrain) {
+            openAiSessionRef.current?.sendEvent({ type: "response.create" });
+          }
+          if (isVisualAnswerIntent || isBrainAnswerIntent) {
             const key = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 200);
             const completedRecently =
               key === lastVisualIntentKeyRef.current &&
               Date.now() - lastVisualIntentCompletedAtRef.current < DOC_INTENT_COMPLETED_TTL_MS;
-            if (!visualInFlightRef.current && !completedRecently) {
+            if (completedRecently) {
+              // no-op — same request was just answered
+            } else if (visualInFlightRef.current) {
+              // Busy with a previous turn — don't drop this one, run it next.
+              queuedVoiceTurnRef.current = { text, visual: isVisualAnswerIntent };
+            } else {
               visualInFlightRef.current = true;
               lastVisualIntentKeyRef.current = key;
               void runDeterministicVoiceVisualAnswer(text, { visual: isVisualAnswerIntent });
@@ -942,6 +979,12 @@ function ThreadView({ threadId }: { threadId: string }) {
                   visualInFlightRef.current = false;
                   lastVisualIntentCompletedAtRef.current = Date.now();
                   setPendingAssistant("");
+                  const queuedAfterTimeout = queuedVoiceTurnRef.current;
+                  if (queuedAfterTimeout) {
+                    queuedVoiceTurnRef.current = null;
+                    visualInFlightRef.current = true;
+                    void runDeterministicVoiceVisualAnswer(queuedAfterTimeout.text, { visual: queuedAfterTimeout.visual });
+                  }
                 }
               }, 45_000);
             }
