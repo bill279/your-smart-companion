@@ -97,7 +97,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       }
 
       // User speech transcription complete.
-      if (type === "conversation.item.input_audio_transcription.completed") {
+      if (
+        type === "conversation.item.input_audio_transcription.completed" ||
+        type === "conversation.item.input_audio_transcription.done"
+      ) {
         const text = String(msg.transcript ?? "").trim();
         if (text) {
           opts.onMessage?.({ source: "user", message: text, event_id: String(msg.item_id ?? "") });
@@ -106,7 +109,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       }
 
       // Assistant transcript streaming.
-      if (type === "response.audio_transcript.delta") {
+      if (
+        type === "response.audio_transcript.delta" ||
+        type === "response.output_audio_transcript.delta"
+      ) {
         const responseId = String(msg.response_id ?? "");
         const delta = String(msg.delta ?? "");
         const cur = assistantAccumRef.current.get(responseId) ?? "";
@@ -116,7 +122,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         opts.onAssistantDelta?.({ text: delta, kind, event_id: responseId });
         return;
       }
-      if (type === "response.audio_transcript.done") {
+      if (
+        type === "response.audio_transcript.done" ||
+        type === "response.output_audio_transcript.done"
+      ) {
         const responseId = String(msg.response_id ?? "");
         const full = String(msg.transcript ?? assistantAccumRef.current.get(responseId) ?? "").trim();
         assistantAccumRef.current.delete(responseId);
