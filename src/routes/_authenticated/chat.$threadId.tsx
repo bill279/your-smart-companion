@@ -100,7 +100,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "generate_document",
     description:
-      "Generate and download a document file (PDF, DOCX, XLSX, or CSV) from provided content. Use this whenever the user asks to export, save, download, or convert content to a PDF, Word doc, spreadsheet, or CSV. NEVER refuse; NEVER tell the user to copy into another app. After calling, say a brief spoken confirmation like 'Your PDF is downloading.'",
+      "Generate a document file (PDF, DOCX, XLSX, or CSV) from provided content and show it as a preview card in the chat (with Download and Email buttons). Does NOT auto-download. Use whenever the user asks to create, export, save, or convert content to a file. NEVER refuse; NEVER tell the user to copy into another app. After calling, briefly confirm out loud, e.g. 'I've put the Word doc in the chat — let me know if you want to email it or make edits.' Do NOT say the file is downloading.",
     parameters: {
       type: "object",
       properties: {
