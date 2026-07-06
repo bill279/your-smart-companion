@@ -481,17 +481,31 @@ function ThreadView({ threadId }: { threadId: string }) {
         return JSON.stringify(data);
       },
       send_email: async (params) => {
-        const p = params as { to?: string; subject?: string; body?: string; cc?: string };
+        const p = params as { to?: string; subject?: string; body?: string; cc?: string; attach_last_document?: boolean };
         if (!p.to || !p.subject || !p.body) {
           return JSON.stringify({ error: "to, subject and body are required" });
         }
         const { data: sess } = await supabase.auth.getSession();
         const token = sess.session?.access_token;
         if (!token) return JSON.stringify({ error: "not signed in" });
+        let attachment: { filename: string; mimeType: string; contentBase64: string } | undefined;
+        if (p.attach_last_document) {
+          const art = getLatestArtifact();
+          if (!art) {
+            return JSON.stringify({ error: "no document to attach — generate one first" });
+          }
+          attachment = { filename: art.filename, mimeType: art.mimeType, contentBase64: art.base64 };
+        }
         const res = await fetch("/api/public/jarvis/tools/send_email", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(p),
+          body: JSON.stringify({
+            to: p.to,
+            subject: p.subject,
+            body: p.body,
+            cc: p.cc,
+            ...(attachment ? { attachment } : {}),
+          }),
         });
         const data = await res.json().catch(() => ({ error: "send failed" }));
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
@@ -514,20 +528,44 @@ function ThreadView({ threadId }: { threadId: string }) {
           const messages: Array<{ role: string; content: string; created_at: string }> = [
             { role: "assistant", content, created_at: new Date().toISOString() },
           ];
-          // Render into the chat too so the user sees what was exported.
-          setPendingAssistant(content);
-          liveAssistantRef.current = content;
-          await add({ data: { threadId, role: "assistant", content } });
+          // Build the file bytes but do NOT auto-download. Save it as an
+          // artifact so the assistant message can render a preview card.
+          let built: { blob: Blob; filename: string; mimeType: string };
+          let formatLabel: string;
+          if (format === "pdf") { built = buildPdf(title, messages); formatLabel = "PDF"; }
+          else if (format === "docx") { built = await buildDocx(title, messages); formatLabel = "Word"; }
+          else if (format === "xlsx") { built = buildXlsx(title, messages); formatLabel = "Excel"; }
+          else { built = buildCsv(title, messages); formatLabel = "CSV"; }
+
+          const base64 = await blobToBase64(built.blob);
+          const art = saveArtifact({
+            filename: built.filename,
+            mimeType: built.mimeType,
+            base64,
+            size: built.blob.size,
+            formatLabel,
+          });
+
+          // Post an assistant message with the artifact marker so the Bubble
+          // renders a preview + download card next to the content.
+          const previewSnippet = content.length > 600 ? `${content.slice(0, 600)}…` : content;
+          const messageBody = `${previewSnippet}\n\n${artifactMarker(art.id)}`;
+          setPendingAssistant(messageBody);
+          liveAssistantRef.current = messageBody;
+          await add({ data: { threadId, role: "assistant", content: messageBody } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingAssistant("");
           liveAssistantRef.current = "";
 
-          if (format === "pdf") exportToPdf(title, messages);
-          else if (format === "docx") await exportToDocx(title, messages);
-          else if (format === "xlsx") exportToXlsx(title, messages);
-          else exportToCsv(title, messages);
-          toast.success(`Downloading ${format.toUpperCase()}`);
-          return JSON.stringify({ ok: true, format, title });
+          toast.success(`${formatLabel} ready in the chat`);
+          return JSON.stringify({
+            ok: true,
+            format,
+            title,
+            filename: built.filename,
+            artifact_id: art.id,
+            note: "File is previewed in the chat with Download and Email buttons. Did NOT auto-download.",
+          });
         } catch (err) {
           console.warn("generate_document failed", err);
           return JSON.stringify({ error: err instanceof Error ? err.message : "generate failed" });
