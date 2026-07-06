@@ -169,18 +169,19 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
   let event = (await response.json()) as GraphEvent;
   let joinUrl = teamsJoinUrl(event);
 
-  if (wantsTeams && event.id && !joinUrl) {
+  const createdEventId = event.id;
+  if (wantsTeams && createdEventId && !joinUrl) {
     for (let attempt = 0; attempt < 8 && !joinUrl; attempt += 1) {
       await wait(attempt < 3 ? 700 : 1200);
       if (attempt === 2) {
-        await graphFetch(userId, `/me/events/${encodeURIComponent(event.id)}`, {
+        await graphFetch(userId, `/me/events/${encodeURIComponent(createdEventId)}`, {
           method: "PATCH",
           body: JSON.stringify({ isOnlineMeeting: true, onlineMeetingProvider: "teamsForBusiness" }),
         }).catch(() => undefined);
       }
       const fresh = await graphFetch(
         userId,
-        `/me/events/${encodeURIComponent(event.id)}?$select=${encodeURIComponent(EVENT_SELECT)}`,
+        `/me/events/${encodeURIComponent(createdEventId)}?$select=${encodeURIComponent(EVENT_SELECT)}`,
         { method: "GET", headers: { Prefer: `outlook.timezone="${timezone}"` } },
       );
       if (fresh?.ok) {

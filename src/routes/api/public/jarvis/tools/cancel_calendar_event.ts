@@ -17,8 +17,9 @@ async function userIdFromRequest(request: Request) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const { data, error } = await supabase.auth.getClaims(token);
-  if (error || !data.claims?.sub) return null;
-  return data.claims.sub;
+  const sub = data?.claims?.sub;
+  if (error || !sub) return null;
+  return sub;
 }
 
 export const Route = createFileRoute("/api/public/jarvis/tools/cancel_calendar_event")({
