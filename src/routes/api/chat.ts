@@ -29,7 +29,8 @@ This assistant is also spoken aloud. Long replies break voice mode. Always:
 - Continue from the existing thread history. Do not introduce yourself or greet again after the first exchange.
 - If the user asks for a table, output the Markdown table immediately instead of explaining limitations.
 - Forbidden response: "I am unable to display a visual table directly in this chat interface." Do not say anything equivalent.
-- If the user asks for a file (PDF, Word, Excel, CSV, TXT, report, export, attachment, download), you MUST call the \`generate_document\` tool and return the resulting download link. Never claim you cannot generate, attach, or create files in this chat.
+- If the user asks for a file (PDF, Word, Excel, CSV, report, export, attachment, download), you MUST call the \`generate_document\` tool and return the resulting download link. Never claim you cannot generate, attach, or create files in this chat.
+- Match the file type to what the user asked for. "PDF" → format:"pdf". "Word/doc/docx" → "docx". "Excel/spreadsheet/xlsx" → "xlsx". "CSV" → "csv". If unspecified, DEFAULT TO "pdf". Never silently downgrade to a plain text file.
 - Forbidden responses (and any paraphrase): "I cannot generate a downloadable .pdf file directly in this chat", "I am unable to create files", "I can't attach files", "as a text-based AI I cannot…". If you catch yourself about to say one of these, call \`generate_document\` instead.
 
 # Live web access
@@ -45,7 +46,7 @@ You have tools:
 - remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
 - search_knowledge_base — semantic search over the user's uploaded company documents/SOPs (PDFs, docs, notes). Use this FIRST whenever the user asks about internal/company-specific info, processes, products, pricing sheets, policies, or anything that sounds like it would live in their files. Cite the document name in the answer.
-- generate_document — create a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown content and return a download link. Use this whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc. Never say you cannot generate or attach a file — call this tool, then present the returned URL as a Markdown link like [Download report.pdf](url).
+- generate_document — create a downloadable PDF, Word (.docx), Excel (.xlsx), or CSV file from Markdown content and return a download link. Use this whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc. Default to PDF unless the user specified another format. Never say you cannot generate or attach a file — call this tool, then present the returned URL as a Markdown link like [Download report.pdf](url).
 - save_lesson — silently record a lesson the assistant should apply forever (e.g. user corrections, recurring preferences, "next time do X not Y"). Call this whenever the user corrects you, gives a thumbs-down explanation, or expresses a workflow preference. Do NOT announce it.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
@@ -872,7 +873,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               description:
                 "Generate a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown and return a signed download URL. Use whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc.",
               inputSchema: z.object({
-                format: z.enum(["pdf", "docx", "xlsx", "csv", "txt"]),
+                format: z
+                  .enum(["pdf", "docx", "xlsx", "csv"])
+                  .describe(
+                    "File type. Default to 'pdf' unless the user explicitly asked for Word/Excel/CSV. NEVER pick a format the user didn't ask for.",
+                  ),
                 filename: z.string().min(1).max(120).describe("Base filename without extension"),
                 title: z.string().min(1).max(200),
                 markdown: z
