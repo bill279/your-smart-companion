@@ -1305,8 +1305,15 @@ function ThreadView({ threadId }: { threadId: string }) {
               );
             })}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
-            {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
-            {addMut.isPending && !pendingAssistant && !isConnected && (
+            {(pendingAssistant || pendingActivity.length > 0) && (
+              <Bubble
+                role="assistant"
+                content={pendingAssistant}
+                streaming
+                liveActivity={pendingActivity}
+              />
+            )}
+            {addMut.isPending && !pendingAssistant && pendingActivity.length === 0 && !isConnected && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
                   <img src={bpaLogo.url} alt="BPA Bot" className="w-full h-full object-contain p-1" />
