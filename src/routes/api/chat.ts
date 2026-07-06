@@ -1147,12 +1147,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   if (delta) controller.enqueue(encoder.encode(delta));
                 } else if (part.type === "tool-call") {
                   const name = (part as { toolName: string }).toolName;
-                  if (name === "web_search" || name === "web_scrape") {
+                  if (name === "web_search" || name === "web_scrape" || name === "product_search") {
                     const rawInput = (part as { input?: Record<string, unknown> }).input ?? {};
                     const ev: ToolEvent = {
                       t: "call",
                       id: (part as { toolCallId: string }).toolCallId,
-                      name,
+                      name: name as ToolEvent["name"],
                       input: rawInput as { query?: string; url?: string; limit?: number },
                     };
                     collectedActivity.splice(
@@ -1166,13 +1166,13 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   }
                 } else if (part.type === "tool-result") {
                   const name = (part as { toolName: string }).toolName;
-                  if (name === "web_search" || name === "web_scrape") {
+                  if (name === "web_search" || name === "web_scrape" || name === "product_search") {
                     const output = (part as { output?: unknown; result?: unknown }).output
                       ?? (part as { result?: unknown }).result;
                     const ev: ToolEvent = {
                       t: "result",
                       id: (part as { toolCallId: string }).toolCallId,
-                      name,
+                      name: name as ToolEvent["name"],
                       output,
                     };
                     collectedActivity.splice(
