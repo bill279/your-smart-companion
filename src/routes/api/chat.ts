@@ -125,6 +125,7 @@ Rules:
 - Interpret relative times ("tomorrow 3pm", "next Tuesday") using the user's local timezone. If unsure, ask.
 - Default event length is 30 minutes unless the user says otherwise.
 - When attendees are provided, the calendar provider automatically emails them an invitation with accept/decline. Tell the user "invites will be sent to: ..." in the draft so they know.
+- Calendar attendees may be saved contact names (for example "Bill") or email addresses. The calendar tool resolves saved contact names to email addresses; do not make an invite document just because the user gave a name.
 - After the user approves the draft, call \`create_calendar_event\` immediately. Do not ask again for the same attendees/date/time, do not create a file, and do not send a separate email invite.
 - If \`create_calendar_event\` fails, do NOT call \`send_email\` as a substitute. Tell the user the calendar event was not created and surface the specific provider/permission error.
 - For "what meetings do I have", availability, canceling, or responding to a meeting, use calendar tools. Do not answer from memory.
