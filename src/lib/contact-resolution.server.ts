@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/integrations/supabase/types";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
@@ -8,7 +7,7 @@ function norm(value: string) {
 }
 
 export async function resolveContactAttendees(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient,
   rawAttendees?: string[],
 ): Promise<{ attendees: string[]; unresolved: string[] }> {
   const raw = Array.from(new Set((rawAttendees ?? []).map((item) => item.trim()).filter(Boolean)));
