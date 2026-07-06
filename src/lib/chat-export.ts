@@ -63,7 +63,7 @@ function fileBase(title: string) {
 }
 
 // --- PDF -------------------------------------------------------------------
-export function exportToPdf(title: string, messages: ExportMessage[]) {
+export function buildPdf(title: string, messages: ExportMessage[]): { blob: Blob; filename: string; mimeType: string } {
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const margin = 48;
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -102,7 +102,13 @@ export function exportToPdf(title: string, messages: ExportMessage[]) {
     }
     y += 10;
   }
-  doc.save(`${fileBase(title)}.pdf`);
+  const blob = doc.output("blob");
+  return { blob, filename: `${fileBase(title)}.pdf`, mimeType: "application/pdf" };
+}
+
+export function exportToPdf(title: string, messages: ExportMessage[]) {
+  const { blob, filename } = buildPdf(title, messages);
+  saveAs(blob, filename);
 }
 
 function stripMarkdown(s: string): string {
@@ -117,7 +123,7 @@ function stripMarkdown(s: string): string {
 }
 
 // --- Word ------------------------------------------------------------------
-export async function exportToDocx(title: string, messages: ExportMessage[]) {
+export async function buildDocx(title: string, messages: ExportMessage[]): Promise<{ blob: Blob; filename: string; mimeType: string }> {
   const children: (Paragraph | Table)[] = [
     new Paragraph({
       heading: HeadingLevel.HEADING_1,
@@ -159,7 +165,16 @@ export async function exportToDocx(title: string, messages: ExportMessage[]) {
 
   const doc = new Document({ sections: [{ children }] });
   const blob = await Packer.toBlob(doc);
-  saveAs(blob, `${fileBase(title)}.docx`);
+  return {
+    blob,
+    filename: `${fileBase(title)}.docx`,
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+}
+
+export async function exportToDocx(title: string, messages: ExportMessage[]) {
+  const { blob, filename } = await buildDocx(title, messages);
+  saveAs(blob, filename);
 }
 
 function buildDocxTable(rows: string[][]): Table {
@@ -187,7 +202,7 @@ function buildDocxTable(rows: string[][]): Table {
 }
 
 // --- Excel -----------------------------------------------------------------
-export function exportToXlsx(title: string, messages: ExportMessage[]) {
+export function buildXlsx(title: string, messages: ExportMessage[]): { blob: Blob; filename: string; mimeType: string } {
   const wb = XLSX.utils.book_new();
 
   const convo = [["Role", "Timestamp", "Message"]];
@@ -211,12 +226,20 @@ export function exportToXlsx(title: string, messages: ExportMessage[]) {
     }
   }
 
-  XLSX.writeFile(wb, `${fileBase(title)}.xlsx`);
+  const array = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+  const mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  return { blob: new Blob([array], { type: mimeType }), filename: `${fileBase(title)}.xlsx`, mimeType };
+}
+
+export function exportToXlsx(title: string, messages: ExportMessage[]) {
+  const { blob, filename } = buildXlsx(title, messages);
+  saveAs(blob, filename);
 }
 
 // --- CSV (handy for the largest table) -------------------------------------
-export function exportToCsv(title: string, messages: ExportMessage[]) {
+export function buildCsv(title: string, messages: ExportMessage[]): { blob: Blob; filename: string; mimeType: string } {
   const allTables = messages.flatMap((m) => parseMarkdownTables(m.content));
+  const mimeType = "text/csv;charset=utf-8";
   if (allTables.length === 0) {
     // Fall back to conversation CSV
     const rows = [["Role", "Timestamp", "Message"], ...messages.map((m) => [
@@ -225,12 +248,16 @@ export function exportToCsv(title: string, messages: ExportMessage[]) {
       stripMarkdown(m.content),
     ])];
     const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");
-    saveAs(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${fileBase(title)}.csv`);
-    return;
+    return { blob: new Blob([csv], { type: mimeType }), filename: `${fileBase(title)}.csv`, mimeType };
   }
   const biggest = allTables.sort((a, b) => b.length - a.length)[0];
   const csv = biggest.map((r) => r.map(csvCell).join(",")).join("\n");
-  saveAs(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${fileBase(title)}-table.csv`);
+  return { blob: new Blob([csv], { type: mimeType }), filename: `${fileBase(title)}-table.csv`, mimeType };
+}
+
+export function exportToCsv(title: string, messages: ExportMessage[]) {
+  const { blob, filename } = buildCsv(title, messages);
+  saveAs(blob, filename);
 }
 
 function csvCell(v: string): string {
