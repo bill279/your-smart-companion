@@ -6,7 +6,7 @@ import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
 import { createRealtimeSession } from "@/lib/realtime-voice.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Mic, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
 import {
   exportToPdf,
   exportToDocx,
@@ -1355,11 +1355,11 @@ function ThreadView({ threadId }: { threadId: string }) {
             }
             className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
               voiceActive
-                ? "border-accent bg-accent/15 hud-pulse text-accent"
+                ? "border-red-500 bg-red-500 text-white hud-pulse shadow-[0_0_0_4px_rgba(239,68,68,0.25)]"
                 : "border-border bg-secondary hover:bg-secondary/80 text-primary"
             }`}
           >
-            {voiceActive ? <MicOff size={18} /> : <Mic size={18} />}
+            <Mic size={18} />
           </button>
           <input
             ref={fileInputRef}
