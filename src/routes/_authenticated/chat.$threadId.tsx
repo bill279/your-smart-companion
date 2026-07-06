@@ -379,6 +379,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   });
 
   const [input, setInput] = useState("");
+  const [webSearchOn, setWebSearchOn] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
   const [pendingActivity, setPendingActivity] = useState<ToolActivity[]>([]);
