@@ -4,6 +4,13 @@ import { streamText, tool, stepCountIs } from "ai";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
+import {
+  TOOL_FRAME_DELIM,
+  encodeToolActivityMarker,
+  foldToolEvent,
+  type ToolActivity,
+  type ToolEvent,
+} from "@/lib/tool-activity";
 
 const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
 
