@@ -757,7 +757,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             list_calendar_events: tool({
               description:
-                "List upcoming events from the user's connected calendar (Outlook preferred, Google fallback) within a date range.",
+                "List upcoming events from the user's connected Outlook calendar within a date range.",
               inputSchema: z.object({
                 days: z.number().int().min(1).max(60).optional().describe("How many days ahead to look. Default 7."),
                 max_results: z.number().int().min(1).max(50).optional(),
@@ -767,7 +767,10 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 const now = new Date();
                 const end = new Date(now.getTime() + (days ?? 7) * 86400000);
                 const top = String(max_results ?? 10);
-                if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                if (!process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                  return { error: "Outlook is not connected." };
+                }
+                {
                   const params = new URLSearchParams({
                     startDateTime: now.toISOString(),
                     endDateTime: end.toISOString(),
@@ -809,52 +812,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     })),
                   };
                 }
-                if (!process.env.GOOGLE_CALENDAR_API_KEY) {
-                  return { error: "No calendar provider connected." };
-                }
-                const gparams = new URLSearchParams({
-                  timeMin: now.toISOString(),
-                  timeMax: end.toISOString(),
-                  singleEvents: "true",
-                  orderBy: "startTime",
-                  maxResults: top,
-                });
-                const r = await fetch(
-                  `https://connector-gateway.lovable.dev/google_calendar/calendar/v3/calendars/primary/events?${gparams}`,
-                  { headers: gatewayHeaders("GOOGLE_CALENDAR_API_KEY") },
-                );
-                if (!r.ok) {
-                  const t = await r.text();
-                  return { error: `Calendar read failed (${r.status})`, detail: t.slice(0, 200) };
-                }
-                const j = (await r.json()) as {
-                  items?: Array<{
-                    id: string;
-                    summary?: string;
-                    start?: { dateTime?: string; date?: string; timeZone?: string };
-                    end?: { dateTime?: string; date?: string; timeZone?: string };
-                    location?: string;
-                    htmlLink?: string;
-                    attendees?: Array<{ email?: string }>;
-                  }>;
-                };
-                return {
-                  provider: "google",
-                  events: (j.items ?? []).map((e) => ({
-                    id: e.id,
-                    title: e.summary ?? "(no title)",
-                    start: e.start?.dateTime ?? e.start?.date,
-                    end: e.end?.dateTime ?? e.end?.date,
-                    location: e.location,
-                    link: e.htmlLink,
-                    attendees: (e.attendees ?? []).map((a) => a.email).filter(Boolean),
-                  })),
-                };
               },
             }),
             create_calendar_event: tool({
               description:
-                "Create a new event on the user's connected calendar (Outlook preferred, Google fallback). Only call after the user has approved the draft.",
+                "Create a new event on the user's connected Outlook calendar. Set online_meeting=true to attach a Microsoft Teams meeting with a join link. Only call after the user has approved the draft.",
               inputSchema: z.object({
                 title: z.string().min(1).max(200),
                 start: z.string().describe("ISO 8601 start datetime, e.g. 2026-07-01T15:00:00-04:00"),
@@ -863,10 +825,18 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 location: z.string().max(500).optional(),
                 attendees: z.array(z.string().email()).optional(),
                 timezone: z.string().optional().describe("IANA timezone, e.g. America/New_York"),
+                online_meeting: z
+                  .boolean()
+                  .optional()
+                  .describe("Attach a Microsoft Teams meeting with a join link. Default true when attendees are present."),
               }),
-              execute: async ({ title, start, end, description, location, attendees, timezone }) => {
+              execute: async ({ title, start, end, description, location, attendees, timezone, online_meeting }) => {
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
-                if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                if (!process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                  return { error: "Outlook is not connected." };
+                }
+                {
+                  const wantsTeams = online_meeting ?? (attendees?.length ?? 0) > 0;
                   const r = await fetch(
                     "https://connector-gateway.lovable.dev/microsoft_outlook/me/events",
                     {
@@ -888,6 +858,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                               })),
                             }
                           : {}),
+                        ...(wantsTeams
+                          ? {
+                              isOnlineMeeting: true,
+                              onlineMeetingProvider: "teamsForBusiness",
+                            }
+                          : {}),
                       }),
                     },
                   );
@@ -895,37 +871,25 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     const t = await r.text();
                     return { error: `Outlook calendar create failed (${r.status})`, detail: t.slice(0, 200) };
                   }
-                  const j = (await r.json()) as { id?: string; webLink?: string };
-                  await logAction("create_calendar_event", `Created event "${title}" on Outlook`, { title, start, end, attendees, location, provider: "outlook" });
-                  return { ok: true, provider: "outlook", id: j.id, link: j.webLink };
+                  const j = (await r.json()) as {
+                    id?: string;
+                    webLink?: string;
+                    onlineMeeting?: { joinUrl?: string };
+                  };
+                  const joinUrl = j.onlineMeeting?.joinUrl;
+                  await logAction(
+                    "create_calendar_event",
+                    `Created event "${title}" on Outlook${joinUrl ? " with Teams meeting" : ""}`,
+                    { title, start, end, attendees, location, provider: "outlook", teams: !!joinUrl },
+                  );
+                  return {
+                    ok: true,
+                    provider: "outlook",
+                    id: j.id,
+                    link: j.webLink,
+                    ...(joinUrl ? { teams_join_url: joinUrl } : {}),
+                  };
                 }
-                if (!process.env.GOOGLE_CALENDAR_API_KEY) {
-                  return { error: "No calendar provider connected." };
-                }
-                const r = await fetch(
-                  "https://connector-gateway.lovable.dev/google_calendar/calendar/v3/calendars/primary/events",
-                  {
-                    method: "POST",
-                    headers: gatewayHeaders("GOOGLE_CALENDAR_API_KEY"),
-                    body: JSON.stringify({
-                      summary: title,
-                      description,
-                      location,
-                      start: { dateTime: start, ...(timezone ? { timeZone: timezone } : {}) },
-                      end: { dateTime: end, ...(timezone ? { timeZone: timezone } : {}) },
-                      ...(attendees && attendees.length
-                        ? { attendees: attendees.map((email) => ({ email })) }
-                        : {}),
-                    }),
-                  },
-                );
-                if (!r.ok) {
-                  const t = await r.text();
-                  return { error: `Calendar create failed (${r.status})`, detail: t.slice(0, 200) };
-                }
-                const j = (await r.json()) as { id?: string; htmlLink?: string };
-                await logAction("create_calendar_event", `Created event "${title}" on Google`, { title, start, end, attendees, location, provider: "google" });
-                return { ok: true, provider: "google", id: j.id, link: j.htmlLink };
               },
             }),
             recall_facts: tool({
