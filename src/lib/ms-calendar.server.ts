@@ -190,8 +190,9 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
     }
   }
 
-  if (event.id && joinUrl) {
-    await graphFetch(userId, `/me/events/${encodeURIComponent(event.id)}`, {
+  const eventId = event.id;
+  if (eventId && joinUrl) {
+    await graphFetch(userId, `/me/events/${encodeURIComponent(eventId)}`, {
       method: "PATCH",
       body: JSON.stringify({ body: { contentType: "HTML", content: htmlWithTeamsLink(input.description, joinUrl) } }),
     }).catch(() => undefined);
@@ -200,7 +201,7 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
   return {
     ok: true,
     provider: "outlook" as const,
-    id: event.id,
+    id: eventId,
     link: event.webLink,
     invite_sent: attendees.length > 0,
     attendees,

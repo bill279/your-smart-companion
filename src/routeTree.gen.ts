@@ -26,7 +26,10 @@ import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as ApiPublicMsOauthCallbackRouteImport } from './routes/api/public/ms-oauth/callback'
 import { Route as ApiPublicJarvisToolsSend_emailRouteImport } from './routes/api/public/jarvis/tools/send_email'
+import { Route as ApiPublicJarvisToolsRespond_calendar_eventRouteImport } from './routes/api/public/jarvis/tools/respond_calendar_event'
+import { Route as ApiPublicJarvisToolsList_calendar_eventsRouteImport } from './routes/api/public/jarvis/tools/list_calendar_events'
 import { Route as ApiPublicJarvisToolsCreate_calendar_eventRouteImport } from './routes/api/public/jarvis/tools/create_calendar_event'
+import { Route as ApiPublicJarvisToolsCancel_calendar_eventRouteImport } from './routes/api/public/jarvis/tools/cancel_calendar_event'
 
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
@@ -118,10 +121,28 @@ const ApiPublicJarvisToolsSend_emailRoute =
     path: '/api/public/jarvis/tools/send_email',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicJarvisToolsRespond_calendar_eventRoute =
+  ApiPublicJarvisToolsRespond_calendar_eventRouteImport.update({
+    id: '/api/public/jarvis/tools/respond_calendar_event',
+    path: '/api/public/jarvis/tools/respond_calendar_event',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicJarvisToolsList_calendar_eventsRoute =
+  ApiPublicJarvisToolsList_calendar_eventsRouteImport.update({
+    id: '/api/public/jarvis/tools/list_calendar_events',
+    path: '/api/public/jarvis/tools/list_calendar_events',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicJarvisToolsCreate_calendar_eventRoute =
   ApiPublicJarvisToolsCreate_calendar_eventRouteImport.update({
     id: '/api/public/jarvis/tools/create_calendar_event',
     path: '/api/public/jarvis/tools/create_calendar_event',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicJarvisToolsCancel_calendar_eventRoute =
+  ApiPublicJarvisToolsCancel_calendar_eventRouteImport.update({
+    id: '/api/public/jarvis/tools/cancel_calendar_event',
+    path: '/api/public/jarvis/tools/cancel_calendar_event',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -141,7 +162,10 @@ export interface FileRoutesByFullPath {
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/chat/': typeof AuthenticatedChatIndexRoute
   '/api/public/ms-oauth/callback': typeof ApiPublicMsOauthCallbackRoute
+  '/api/public/jarvis/tools/cancel_calendar_event': typeof ApiPublicJarvisToolsCancel_calendar_eventRoute
   '/api/public/jarvis/tools/create_calendar_event': typeof ApiPublicJarvisToolsCreate_calendar_eventRoute
+  '/api/public/jarvis/tools/list_calendar_events': typeof ApiPublicJarvisToolsList_calendar_eventsRoute
+  '/api/public/jarvis/tools/respond_calendar_event': typeof ApiPublicJarvisToolsRespond_calendar_eventRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
 }
 export interface FileRoutesByTo {
@@ -160,7 +184,10 @@ export interface FileRoutesByTo {
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/chat': typeof AuthenticatedChatIndexRoute
   '/api/public/ms-oauth/callback': typeof ApiPublicMsOauthCallbackRoute
+  '/api/public/jarvis/tools/cancel_calendar_event': typeof ApiPublicJarvisToolsCancel_calendar_eventRoute
   '/api/public/jarvis/tools/create_calendar_event': typeof ApiPublicJarvisToolsCreate_calendar_eventRoute
+  '/api/public/jarvis/tools/list_calendar_events': typeof ApiPublicJarvisToolsList_calendar_eventsRoute
+  '/api/public/jarvis/tools/respond_calendar_event': typeof ApiPublicJarvisToolsRespond_calendar_eventRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
 }
 export interface FileRoutesById {
@@ -181,7 +208,10 @@ export interface FileRoutesById {
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/_authenticated/chat/': typeof AuthenticatedChatIndexRoute
   '/api/public/ms-oauth/callback': typeof ApiPublicMsOauthCallbackRoute
+  '/api/public/jarvis/tools/cancel_calendar_event': typeof ApiPublicJarvisToolsCancel_calendar_eventRoute
   '/api/public/jarvis/tools/create_calendar_event': typeof ApiPublicJarvisToolsCreate_calendar_eventRoute
+  '/api/public/jarvis/tools/list_calendar_events': typeof ApiPublicJarvisToolsList_calendar_eventsRoute
+  '/api/public/jarvis/tools/respond_calendar_event': typeof ApiPublicJarvisToolsRespond_calendar_eventRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
 }
 export interface FileRouteTypes {
@@ -202,7 +232,10 @@ export interface FileRouteTypes {
     | '/api/public/web-search'
     | '/chat/'
     | '/api/public/ms-oauth/callback'
+    | '/api/public/jarvis/tools/cancel_calendar_event'
     | '/api/public/jarvis/tools/create_calendar_event'
+    | '/api/public/jarvis/tools/list_calendar_events'
+    | '/api/public/jarvis/tools/respond_calendar_event'
     | '/api/public/jarvis/tools/send_email'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -221,7 +254,10 @@ export interface FileRouteTypes {
     | '/api/public/web-search'
     | '/chat'
     | '/api/public/ms-oauth/callback'
+    | '/api/public/jarvis/tools/cancel_calendar_event'
     | '/api/public/jarvis/tools/create_calendar_event'
+    | '/api/public/jarvis/tools/list_calendar_events'
+    | '/api/public/jarvis/tools/respond_calendar_event'
     | '/api/public/jarvis/tools/send_email'
   id:
     | '__root__'
@@ -241,7 +277,10 @@ export interface FileRouteTypes {
     | '/api/public/web-search'
     | '/_authenticated/chat/'
     | '/api/public/ms-oauth/callback'
+    | '/api/public/jarvis/tools/cancel_calendar_event'
     | '/api/public/jarvis/tools/create_calendar_event'
+    | '/api/public/jarvis/tools/list_calendar_events'
+    | '/api/public/jarvis/tools/respond_calendar_event'
     | '/api/public/jarvis/tools/send_email'
   fileRoutesById: FileRoutesById
 }
@@ -257,7 +296,10 @@ export interface RootRouteChildren {
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
   ApiPublicWebSearchRoute: typeof ApiPublicWebSearchRoute
   ApiPublicMsOauthCallbackRoute: typeof ApiPublicMsOauthCallbackRoute
+  ApiPublicJarvisToolsCancel_calendar_eventRoute: typeof ApiPublicJarvisToolsCancel_calendar_eventRoute
   ApiPublicJarvisToolsCreate_calendar_eventRoute: typeof ApiPublicJarvisToolsCreate_calendar_eventRoute
+  ApiPublicJarvisToolsList_calendar_eventsRoute: typeof ApiPublicJarvisToolsList_calendar_eventsRoute
+  ApiPublicJarvisToolsRespond_calendar_eventRoute: typeof ApiPublicJarvisToolsRespond_calendar_eventRoute
   ApiPublicJarvisToolsSend_emailRoute: typeof ApiPublicJarvisToolsSend_emailRoute
 }
 
@@ -382,11 +424,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicJarvisToolsSend_emailRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/jarvis/tools/respond_calendar_event': {
+      id: '/api/public/jarvis/tools/respond_calendar_event'
+      path: '/api/public/jarvis/tools/respond_calendar_event'
+      fullPath: '/api/public/jarvis/tools/respond_calendar_event'
+      preLoaderRoute: typeof ApiPublicJarvisToolsRespond_calendar_eventRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/jarvis/tools/list_calendar_events': {
+      id: '/api/public/jarvis/tools/list_calendar_events'
+      path: '/api/public/jarvis/tools/list_calendar_events'
+      fullPath: '/api/public/jarvis/tools/list_calendar_events'
+      preLoaderRoute: typeof ApiPublicJarvisToolsList_calendar_eventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/jarvis/tools/create_calendar_event': {
       id: '/api/public/jarvis/tools/create_calendar_event'
       path: '/api/public/jarvis/tools/create_calendar_event'
       fullPath: '/api/public/jarvis/tools/create_calendar_event'
       preLoaderRoute: typeof ApiPublicJarvisToolsCreate_calendar_eventRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/jarvis/tools/cancel_calendar_event': {
+      id: '/api/public/jarvis/tools/cancel_calendar_event'
+      path: '/api/public/jarvis/tools/cancel_calendar_event'
+      fullPath: '/api/public/jarvis/tools/cancel_calendar_event'
+      preLoaderRoute: typeof ApiPublicJarvisToolsCancel_calendar_eventRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -424,8 +487,14 @@ const rootRouteChildren: RootRouteChildren = {
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
   ApiPublicWebSearchRoute: ApiPublicWebSearchRoute,
   ApiPublicMsOauthCallbackRoute: ApiPublicMsOauthCallbackRoute,
+  ApiPublicJarvisToolsCancel_calendar_eventRoute:
+    ApiPublicJarvisToolsCancel_calendar_eventRoute,
   ApiPublicJarvisToolsCreate_calendar_eventRoute:
     ApiPublicJarvisToolsCreate_calendar_eventRoute,
+  ApiPublicJarvisToolsList_calendar_eventsRoute:
+    ApiPublicJarvisToolsList_calendar_eventsRoute,
+  ApiPublicJarvisToolsRespond_calendar_eventRoute:
+    ApiPublicJarvisToolsRespond_calendar_eventRoute,
   ApiPublicJarvisToolsSend_emailRoute: ApiPublicJarvisToolsSend_emailRoute,
 }
 export const routeTree = rootRouteImport
