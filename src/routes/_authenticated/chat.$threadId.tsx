@@ -23,14 +23,15 @@ import {
   getLatestArtifact,
   downloadArtifact,
   blobToBase64,
+  base64ToBlob,
   artifactMarker,
   ARTIFACT_MARKER_RE,
 } from "@/lib/artifacts";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { base64ToBlob } from "@/lib/artifacts";
 import mammoth from "mammoth";
+import { Eye } from "lucide-react";
 import {
   addMessage,
   createThread,
