@@ -1637,6 +1637,107 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function ToolActivityList({
+  items,
+  streaming = false,
+}: {
+  items: ToolActivity[];
+  streaming?: boolean;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  return (
+    <div className="mb-3 flex flex-col gap-1.5">
+      {items.map((a, idx) => {
+        const isLast = idx === items.length - 1;
+        const pending = streaming && isLast && !a.results && !a.scraped && !a.error;
+        const isOpen = expandedId === a.id;
+        const label =
+          a.name === "web_search"
+            ? pending
+              ? `Searching the web…`
+              : `Searched the web`
+            : pending
+              ? `Opening ${hostOf(a.url) || "page"}…`
+              : `Read ${hostOf(a.url) || "page"}`;
+        const canExpand =
+          a.name === "web_search" && (a.results?.length ?? 0) > 0;
+        return (
+          <div
+            key={a.id}
+            className="rounded-lg border border-border bg-secondary/40 text-[13px] overflow-hidden"
+          >
+            <button
+              type="button"
+              onClick={() => canExpand && setExpandedId(isOpen ? null : a.id)}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left ${canExpand ? "hover:bg-secondary/70 cursor-pointer" : "cursor-default"}`}
+            >
+              <Search size={13} className="text-muted-foreground shrink-0" />
+              <span className="text-muted-foreground shrink-0">{label}</span>
+              {a.query && (
+                <span className="text-foreground font-medium truncate">
+                  {a.query}
+                </span>
+              )}
+              {a.name === "web_scrape" && a.url && (
+                <span className="text-foreground font-medium truncate">
+                  {hostOf(a.url)}
+                </span>
+              )}
+              {pending && (
+                <span className="ml-auto flex items-center gap-1 text-muted-foreground">
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
+                </span>
+              )}
+              {!pending && canExpand && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {a.results?.length} result{(a.results?.length ?? 0) === 1 ? "" : "s"}
+                </span>
+              )}
+            </button>
+            {isOpen && a.results && a.results.length > 0 && (
+              <div className="border-t border-border bg-background/40 divide-y divide-border">
+                {a.results.map((r, i) => {
+                  const fav = faviconFor(r.url);
+                  return (
+                    <a
+                      key={`${a.id}-${i}`}
+                      href={r.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-start gap-2.5 px-3 py-2 hover:bg-secondary/40"
+                    >
+                      {fav ? (
+                        <img
+                          src={fav}
+                          alt=""
+                          className="w-4 h-4 mt-0.5 rounded-sm shrink-0"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-4 h-4 mt-0.5 rounded-sm bg-muted shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] text-foreground truncate">
+                          {r.title || r.url}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {hostOf(r.url)}
+                        </div>
+                      </div>
+                    </a>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ArtifactCard({ artifactId }: { artifactId: string }) {
   const art = getArtifact(artifactId);
   const [sending, setSending] = useState(false);
