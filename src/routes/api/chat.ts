@@ -254,6 +254,7 @@ export const Route = createFileRoute("/api/chat")({
           content?: string;
           attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
           regenerate?: boolean;
+          forceWebSearch?: boolean;
         };
         const attachments = body.attachments ?? [];
         if (!body.threadId || (!body.regenerate && !body.content?.trim() && attachments.length === 0)) {
