@@ -59,12 +59,13 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.
 
 TOOL USE — non-negotiable:
-- CALENDAR MEETINGS COME FIRST: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. With attendees, set online_meeting=true.
+- CALENDAR MEETINGS COME FIRST: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting.
+- CALENDAR MANAGEMENT: For "what meetings do I have", availability, canceling, accepting, tentatively accepting, or declining meetings, use the calendar tools. If cancel/respond is ambiguous, list events first and confirm which one.
 - For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
 - For ANY factual question about real companies, people, prices, addresses, news, or anything time-sensitive: CALL web_search FIRST. Never invent facts, addresses, phone numbers, or pricing.
 - If the user asks you to create, generate, export, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. This does NOT apply to calendar/meeting invites. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs. The tool shows the file as a preview card in the chat — it does NOT auto-download. After calling, say something like "I've put the document in the chat — you can preview it, download it, or ask me to email it." Do NOT say "downloading now." Choose a sensible short filename.
 - If the user asks you to email a document you just generated (e.g. "email me that Word doc"): call send_email with attach_last_document=true so the file is attached. Confirm the recipient address first.
-- CALENDAR MEETINGS: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Teams meeting, do NOT create a document and do NOT use send_email. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. When attendees are included, set online_meeting=true so Outlook sends real calendar invites with a Teams join link.`;
+- CALENDAR MEETINGS: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Teams meeting, do NOT create a document and do NOT use send_email. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. Default to Teams for every meeting so Outlook sends real calendar invites with a Teams join link.`;
 
 function stopMediaStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => {
@@ -145,7 +146,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "create_calendar_event",
     description:
-      "Create a real Outlook calendar event. Use this for booking/scheduling meetings, calendar invites, meeting invites, appointments, and Teams meetings. ALWAYS show a meeting draft first and wait for explicit approval before calling. When attendees are present, set online_meeting=true so Outlook emails the calendar invite and includes a Microsoft Teams join link.",
+      "Create a real Outlook calendar event. Use this for booking/scheduling meetings, calendar invites, meeting invites, appointments, and Teams meetings. ALWAYS show a meeting draft first and wait for explicit approval before calling. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting. Outlook emails the invite to attendees with accept/decline.",
     parameters: {
       type: "object",
       properties: {
@@ -156,9 +157,51 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         location: { type: "string" },
         attendees: { type: "array", items: { type: "string" } },
         timezone: { type: "string", description: "IANA timezone, e.g. America/Toronto" },
-        online_meeting: { type: "boolean", description: "True for Teams meetings; default true when attendees are present." },
+        online_meeting: { type: "boolean", description: "True for Teams meetings; default true for all meetings unless user explicitly says no online meeting." },
       },
       required: ["title", "start", "end"],
+    },
+  },
+  {
+    type: "function",
+    name: "list_calendar_events",
+    description: "List upcoming Outlook calendar events/meetings. Use for calendar questions, availability, and before canceling/responding when the event is ambiguous.",
+    parameters: {
+      type: "object",
+      properties: {
+        days: { type: "number", description: "How many days ahead to look. Default 7." },
+        max_results: { type: "number", description: "Maximum events to return. Default 10." },
+        start: { type: "string", description: "Optional ISO range start." },
+        end: { type: "string", description: "Optional ISO range end." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "cancel_calendar_event",
+    description: "Cancel/delete an Outlook calendar event and notify attendees when possible. If the event is ambiguous, list events first and confirm which one.",
+    parameters: {
+      type: "object",
+      properties: {
+        event_id: { type: "string", description: "Outlook event id from list_calendar_events." },
+        comment: { type: "string", description: "Optional cancellation message." },
+      },
+      required: ["event_id"],
+    },
+  },
+  {
+    type: "function",
+    name: "respond_calendar_event",
+    description: "Accept, tentatively accept, or decline an Outlook meeting invitation. If the event is ambiguous, list events first and confirm which one.",
+    parameters: {
+      type: "object",
+      properties: {
+        event_id: { type: "string", description: "Outlook event id from list_calendar_events." },
+        response: { type: "string", enum: ["accept", "tentative", "decline"] },
+        comment: { type: "string" },
+        send_response: { type: "boolean", description: "Whether to send the organizer a response. Default true." },
+      },
+      required: ["event_id", "response"],
     },
   },
   {
