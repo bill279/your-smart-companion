@@ -11,6 +11,44 @@ import {
   type ToolActivity,
   type ToolEvent,
 } from "@/lib/tool-activity";
+import { getMicrosoftAccessToken } from "@/lib/ms-graph.server";
+
+/**
+ * Call Microsoft Graph on behalf of `userId`.
+ * Prefers the user's own OAuth connection (full delegated scopes including calendar + Teams).
+ * Falls back to the Lovable Outlook connector gateway (mail-only) only if the user has not connected yet.
+ * Returns null when neither path is available.
+ */
+async function msGraphFetch(
+  userId: string,
+  graphPath: string,
+  init: RequestInit & { forceUserToken?: boolean } = {},
+): Promise<{ response: Response; via: "user" | "gateway" } | null> {
+  const { forceUserToken, headers, ...rest } = init;
+  const user = await getMicrosoftAccessToken(userId);
+  if (user) {
+    const r = await fetch(`https://graph.microsoft.com/v1.0${graphPath}`, {
+      ...rest,
+      headers: {
+        Authorization: `Bearer ${user.accessToken}`,
+        "Content-Type": "application/json",
+        ...(headers ?? {}),
+      },
+    });
+    return { response: r, via: "user" };
+  }
+  if (forceUserToken) return null;
+  if (!process.env.MICROSOFT_OUTLOOK_API_KEY) return null;
+  const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
+  const r = await fetch(`https://connector-gateway.lovable.dev/microsoft_outlook${graphPath}`, {
+    ...rest,
+    headers: {
+      ...gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
+      ...(headers ?? {}),
+    },
+  });
+  return { response: r, via: "gateway" };
+}
 
 const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
 
