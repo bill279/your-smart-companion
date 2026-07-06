@@ -386,6 +386,15 @@ export const Route = createFileRoute("/api/chat")({
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(50),
+          // Push the model toward richer, more thorough answers instead of
+          // the terse default it tends to give. GPT-5.4 exposes both
+          // reasoning-effort and text-verbosity knobs.
+          providerOptions: {
+            openai: {
+              reasoningEffort: "high",
+              textVerbosity: "high",
+            },
+          },
           tools: {
             web_search: tool({
               description:
