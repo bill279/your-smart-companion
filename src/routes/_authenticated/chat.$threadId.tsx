@@ -1526,15 +1526,23 @@ function Bubble({
   attachments = [],
   streaming = false,
   messageId,
+  liveActivity,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
   streaming?: boolean;
   messageId?: string;
+  liveActivity?: ToolActivity[];
 }) {
   const isUser = role === "user";
-  const cleanedRaw = isUser ? content : cleanAssistantText(content);
+  // Pull tool-activity marker out of persisted assistant messages so we can
+  // render Claude-style search chips above the answer.
+  const { activities: storedActivity, content: withoutActivity } = isUser
+    ? { activities: [] as ToolActivity[], content }
+    : extractToolActivity(content);
+  const cleanedRaw = isUser ? content : cleanAssistantText(withoutActivity);
+  const activities = liveActivity && liveActivity.length > 0 ? liveActivity : storedActivity;
   // Extract artifact markers so we can render preview cards.
   const artifactIds: string[] = [];
   const displayContent = cleanedRaw
