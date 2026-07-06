@@ -113,7 +113,7 @@ export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
         if (!parsed.success) return json({ error: parsed.error.message }, 400);
         const data = parsed.data;
 
-        // Prefer Outlook if connected, fall back to Gmail.
+        // Send via Outlook.
         if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
           const payload = {
             message: {
@@ -151,23 +151,7 @@ export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
           }
           return json({ ok: true, provider: "outlook" });
         }
-
-        if (process.env.GOOGLE_MAIL_API_KEY) {
-          const raw = buildRfc2822(data);
-          const res = await fetch(
-            "https://connector-gateway.lovable.dev/google_mail/gmail/v1/users/me/messages/send",
-            {
-              method: "POST",
-              headers: gatewayHeaders("GOOGLE_MAIL_API_KEY"),
-              body: JSON.stringify({ raw }),
-            },
-          );
-          const text = await res.text();
-          if (!res.ok) return json({ error: `gmail send failed (${res.status})`, detail: text.slice(0, 300) }, 502);
-          return json({ ok: true, provider: "gmail" });
-        }
-
-        return json({ error: "No email provider connected. Connect Gmail or Outlook in integrations." }, 503);
+        return json({ error: "Outlook is not connected." }, 503);
       },
     },
   },
