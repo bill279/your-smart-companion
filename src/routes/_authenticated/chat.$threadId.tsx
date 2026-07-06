@@ -7,8 +7,16 @@ import { createRealtimeSession } from "@/lib/realtime-voice.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
-import { exportToPdf, exportToDocx, exportToXlsx, exportToCsv } from "@/lib/chat-export";
-import { buildPdf, buildDocx, buildXlsx, buildCsv } from "@/lib/chat-export";
+import {
+  exportToPdf,
+  exportToDocx,
+  exportToXlsx,
+  exportToCsv,
+  buildPdf,
+  buildDocx,
+  buildXlsx,
+  buildCsv,
+} from "@/lib/chat-export";
 import {
   saveArtifact,
   getArtifact,
@@ -17,7 +25,6 @@ import {
   blobToBase64,
   artifactMarker,
   ARTIFACT_MARKER_RE,
-  type Artifact,
 } from "@/lib/artifacts";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
