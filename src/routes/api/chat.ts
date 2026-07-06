@@ -862,7 +862,23 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     webLink?: string;
                     onlineMeeting?: { joinUrl?: string };
                   };
-                  const joinUrl = j.onlineMeeting?.joinUrl;
+                  let joinUrl = j.onlineMeeting?.joinUrl;
+                  if (wantsTeams && j.id && !joinUrl && call.via === "user") {
+                    const access = await getMicrosoftAccessToken(userId);
+                    if (access) {
+                      for (let attempt = 0; attempt < 3 && !joinUrl; attempt += 1) {
+                        await new Promise((resolve) => setTimeout(resolve, 700));
+                        const followUp = await fetch(
+                          `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(j.id)}?$select=id,webLink,onlineMeeting`,
+                          { headers: { Authorization: `Bearer ${access.accessToken}` } },
+                        );
+                        if (followUp.ok) {
+                          const fresh = (await followUp.json()) as { onlineMeeting?: { joinUrl?: string } };
+                          joinUrl = fresh.onlineMeeting?.joinUrl;
+                        }
+                      }
+                    }
+                  }
                   await logAction(
                     "create_calendar_event",
                     `Created event "${title}" on Outlook${joinUrl ? " with Teams meeting" : ""}`,
@@ -874,6 +890,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     id: j.id,
                     link: j.webLink,
                     ...(joinUrl ? { teams_join_url: joinUrl } : {}),
+                    ...(wantsTeams && !joinUrl
+                      ? {
+                          warning:
+                            "Outlook created the meeting, but Microsoft did not return the Teams join link yet. Open the Outlook event to view the link.",
+                        }
+                      : {}),
                   };
                 }
               },
