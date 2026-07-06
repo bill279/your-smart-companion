@@ -867,7 +867,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ threadId, content, attachments: files, regenerate }),
+        body: JSON.stringify({ threadId, content, attachments: files, regenerate, forceWebSearch }),
         signal: controller.signal,
       });
       } catch (err) {
