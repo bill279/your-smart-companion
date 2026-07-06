@@ -19,7 +19,6 @@ import {
   getArtifact,
   getLatestArtifact,
   downloadArtifact,
-  blobToBase64,
   base64ToBlob,
   artifactMarker,
   ARTIFACT_MARKER_RE,
