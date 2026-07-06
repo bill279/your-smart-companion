@@ -45,7 +45,8 @@ Never say you are unable to display a visual table directly in this chat interfa
 TOOL USE — non-negotiable:
 - For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
 - For ANY factual question about real companies, people, prices, addresses, news, or anything time-sensitive: CALL web_search FIRST. Never invent facts, addresses, phone numbers, or pricing.
-- If the user asks you to create, generate, export, download, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs — the app will download the file for them. Choose a sensible short filename.`;
+- If the user asks you to create, generate, export, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs. The tool shows the file as a preview card in the chat — it does NOT auto-download. After calling, say something like "I've put the document in the chat — you can preview it, download it, or ask me to email it." Do NOT say "downloading now." Choose a sensible short filename.
+- If the user asks you to email a document you just generated (e.g. "email me that Word doc"): call send_email with attach_last_document=true so the file is attached. Confirm the recipient address first.`;
 
 // Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
 const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
