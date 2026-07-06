@@ -23,6 +23,15 @@ import {
   artifactMarker,
   ARTIFACT_MARKER_RE,
 } from "@/lib/artifacts";
+import {
+  TOOL_FRAME_DELIM,
+  extractToolActivity,
+  foldToolEvent,
+  faviconFor,
+  hostOf,
+  type ToolActivity,
+  type ToolEvent,
+} from "@/lib/tool-activity";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
