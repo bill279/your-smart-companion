@@ -5,6 +5,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, Brain, Trash2, Mail, Calendar, UserPlus, Sparkles, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { listActions, listFacts, deleteFact } from "@/lib/memory.functions";
+import {
+  getMicrosoftAuthorizeUrl,
+  getMicrosoftConnectionStatus,
+  disconnectMicrosoftAccount,
+} from "@/lib/ms-oauth.functions";
 
 export const Route = createFileRoute("/_authenticated/activity")({
   ssr: false,
@@ -25,10 +30,31 @@ function ActivityPage() {
   const acts = useServerFn(listActions);
   const facts = useServerFn(listFacts);
   const del = useServerFn(deleteFact);
+  const msStatus = useServerFn(getMicrosoftConnectionStatus);
+  const msAuthorize = useServerFn(getMicrosoftAuthorizeUrl);
+  const msDisconnect = useServerFn(disconnectMicrosoftAccount);
   const [tab, setTab] = useState<"activity" | "memory">("activity");
 
   const actionsQ = useQuery({ queryKey: ["agent-actions"], queryFn: () => acts({}) });
   const factsQ = useQuery({ queryKey: ["user-facts"], queryFn: () => facts({}) });
+  const msQ = useQuery({ queryKey: ["ms-connection"], queryFn: () => msStatus({}) });
+
+  const connectMs = useMutation({
+    mutationFn: async () => msAuthorize({ data: { origin: window.location.origin } }),
+    onSuccess: (r) => {
+      window.location.href = r.url;
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const disconnectMs = useMutation({
+    mutationFn: () => msDisconnect({}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ms-connection"] });
+      toast.success("Microsoft disconnected");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const delMut = useMutation({
     mutationFn: (id: string) => del({ data: { id } }),
@@ -49,6 +75,54 @@ function ActivityPage() {
       </header>
 
       <div className="max-w-3xl mx-auto px-4 py-4">
+        {/* Microsoft connection card */}
+        <div className="rounded-md border border-border bg-card p-4 mb-4 flex items-start gap-3">
+          <div className="mt-0.5 text-primary"><Mail size={18} /></div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Microsoft (Outlook + Teams)</div>
+            {msQ.isLoading ? (
+              <div className="text-xs text-muted-foreground mt-0.5">Checking…</div>
+            ) : msQ.data?.connected ? (
+              <>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Connected as <span className="text-foreground">{msQ.data.email ?? "your Microsoft account"}</span>. BPA Bot can send email, read your calendar, and create Teams meetings on your behalf.
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => connectMs.mutate()}
+                    disabled={connectMs.isPending}
+                    className="text-xs px-2.5 py-1 rounded border border-border hover:bg-muted"
+                  >
+                    Reconnect
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm("Disconnect Microsoft from BPA Bot?")) disconnectMs.mutate();
+                    }}
+                    disabled={disconnectMs.isPending}
+                    className="text-xs px-2.5 py-1 rounded border border-border text-destructive hover:bg-muted"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Sign in with your Microsoft account so BPA Bot can send email, read your calendar, and create real Teams meetings with join links.
+                </div>
+                <button
+                  onClick={() => connectMs.mutate()}
+                  disabled={connectMs.isPending}
+                  className="mt-2 text-xs px-2.5 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
+                >
+                  {connectMs.isPending ? "Opening Microsoft…" : "Connect Microsoft"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="inline-flex rounded-md border border-border bg-card p-0.5 mb-4">
           <button
             onClick={() => setTab("activity")}
