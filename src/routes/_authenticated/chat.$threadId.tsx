@@ -1273,7 +1273,9 @@ function ThreadView({ threadId }: { threadId: string }) {
             {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
             {addMut.isPending && !pendingAssistant && !isConnected && (
               <div className="flex gap-3 justify-start">
-                <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+                  <img src={bpaLogo.url} alt="BPA Bot" className="w-full h-full object-contain p-1" />
+                </div>
                 <div className="flex items-center gap-1.5 pt-3 text-muted-foreground text-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
                   <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -1526,8 +1528,8 @@ function Bubble({
   }
   return (
     <div className="group flex gap-3">
-      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0 mt-0.5">
-        BP
+      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 overflow-hidden">
+        <img src={bpaLogo.url} alt="BPA Bot" className="w-full h-full object-contain p-1" />
       </div>
       <div className="flex-1 min-w-0">
         {attachments.length > 0 && (
