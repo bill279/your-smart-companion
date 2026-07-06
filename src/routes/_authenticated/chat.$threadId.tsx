@@ -7,7 +7,25 @@ import { createRealtimeSession } from "@/lib/realtime-voice.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
-import { exportToPdf, exportToDocx, exportToXlsx, exportToCsv } from "@/lib/chat-export";
+import {
+  exportToPdf,
+  exportToDocx,
+  exportToXlsx,
+  exportToCsv,
+  buildPdf,
+  buildDocx,
+  buildXlsx,
+  buildCsv,
+} from "@/lib/chat-export";
+import {
+  saveArtifact,
+  getArtifact,
+  getLatestArtifact,
+  downloadArtifact,
+  blobToBase64,
+  artifactMarker,
+  ARTIFACT_MARKER_RE,
+} from "@/lib/artifacts";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import {
@@ -34,7 +52,8 @@ Never say you are unable to display a visual table directly in this chat interfa
 TOOL USE — non-negotiable:
 - For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
 - For ANY factual question about real companies, people, prices, addresses, news, or anything time-sensitive: CALL web_search FIRST. Never invent facts, addresses, phone numbers, or pricing.
-- If the user asks you to create, generate, export, download, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs — the app will download the file for them. Choose a sensible short filename.`;
+- If the user asks you to create, generate, export, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs. The tool shows the file as a preview card in the chat — it does NOT auto-download. After calling, say something like "I've put the document in the chat — you can preview it, download it, or ask me to email it." Do NOT say "downloading now." Choose a sensible short filename.
+- If the user asks you to email a document you just generated (e.g. "email me that Word doc"): call send_email with attach_last_document=true so the file is attached. Confirm the recipient address first.`;
 
 // Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
 const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
@@ -68,7 +87,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "send_email",
     description:
-      "Send an email on the user's behalf. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling.",
+      "Send an email on the user's behalf. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling. Set attach_last_document=true to attach the most recent document you generated via generate_document.",
     parameters: {
       type: "object",
       properties: {
@@ -76,6 +95,10 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         subject: { type: "string" },
         body: { type: "string" },
         cc: { type: "string" },
+        attach_last_document: {
+          type: "boolean",
+          description: "If true, attach the most recently generated document (from generate_document) to this email.",
+        },
       },
       required: ["to", "subject", "body"],
     },
@@ -84,7 +107,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "generate_document",
     description:
-      "Generate and download a document file (PDF, DOCX, XLSX, or CSV) from provided content. Use this whenever the user asks to export, save, download, or convert content to a PDF, Word doc, spreadsheet, or CSV. NEVER refuse; NEVER tell the user to copy into another app. After calling, say a brief spoken confirmation like 'Your PDF is downloading.'",
+      "Generate a document file (PDF, DOCX, XLSX, or CSV) from provided content and show it as a preview card in the chat (with Download and Email buttons). Does NOT auto-download. Use whenever the user asks to create, export, save, or convert content to a file. NEVER refuse; NEVER tell the user to copy into another app. After calling, briefly confirm out loud, e.g. 'I've put the Word doc in the chat — let me know if you want to email it or make edits.' Do NOT say the file is downloading.",
     parameters: {
       type: "object",
       properties: {
@@ -465,17 +488,31 @@ function ThreadView({ threadId }: { threadId: string }) {
         return JSON.stringify(data);
       },
       send_email: async (params) => {
-        const p = params as { to?: string; subject?: string; body?: string; cc?: string };
+        const p = params as { to?: string; subject?: string; body?: string; cc?: string; attach_last_document?: boolean };
         if (!p.to || !p.subject || !p.body) {
           return JSON.stringify({ error: "to, subject and body are required" });
         }
         const { data: sess } = await supabase.auth.getSession();
         const token = sess.session?.access_token;
         if (!token) return JSON.stringify({ error: "not signed in" });
+        let attachment: { filename: string; mimeType: string; contentBase64: string } | undefined;
+        if (p.attach_last_document) {
+          const art = getLatestArtifact();
+          if (!art) {
+            return JSON.stringify({ error: "no document to attach — generate one first" });
+          }
+          attachment = { filename: art.filename, mimeType: art.mimeType, contentBase64: art.base64 };
+        }
         const res = await fetch("/api/public/jarvis/tools/send_email", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(p),
+          body: JSON.stringify({
+            to: p.to,
+            subject: p.subject,
+            body: p.body,
+            cc: p.cc,
+            ...(attachment ? { attachment } : {}),
+          }),
         });
         const data = await res.json().catch(() => ({ error: "send failed" }));
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
@@ -498,20 +535,44 @@ function ThreadView({ threadId }: { threadId: string }) {
           const messages: Array<{ role: string; content: string; created_at: string }> = [
             { role: "assistant", content, created_at: new Date().toISOString() },
           ];
-          // Render into the chat too so the user sees what was exported.
-          setPendingAssistant(content);
-          liveAssistantRef.current = content;
-          await add({ data: { threadId, role: "assistant", content } });
+          // Build the file bytes but do NOT auto-download. Save it as an
+          // artifact so the assistant message can render a preview card.
+          let built: { blob: Blob; filename: string; mimeType: string };
+          let formatLabel: string;
+          if (format === "pdf") { built = buildPdf(title, messages); formatLabel = "PDF"; }
+          else if (format === "docx") { built = await buildDocx(title, messages); formatLabel = "Word"; }
+          else if (format === "xlsx") { built = buildXlsx(title, messages); formatLabel = "Excel"; }
+          else { built = buildCsv(title, messages); formatLabel = "CSV"; }
+
+          const base64 = await blobToBase64(built.blob);
+          const art = saveArtifact({
+            filename: built.filename,
+            mimeType: built.mimeType,
+            base64,
+            size: built.blob.size,
+            formatLabel,
+          });
+
+          // Post an assistant message with the artifact marker so the Bubble
+          // renders a preview + download card next to the content.
+          const previewSnippet = content.length > 600 ? `${content.slice(0, 600)}…` : content;
+          const messageBody = `${previewSnippet}\n\n${artifactMarker(art.id)}`;
+          setPendingAssistant(messageBody);
+          liveAssistantRef.current = messageBody;
+          await add({ data: { threadId, role: "assistant", content: messageBody } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingAssistant("");
           liveAssistantRef.current = "";
 
-          if (format === "pdf") exportToPdf(title, messages);
-          else if (format === "docx") await exportToDocx(title, messages);
-          else if (format === "xlsx") exportToXlsx(title, messages);
-          else exportToCsv(title, messages);
-          toast.success(`Downloading ${format.toUpperCase()}`);
-          return JSON.stringify({ ok: true, format, title });
+          toast.success(`${formatLabel} ready in the chat`);
+          return JSON.stringify({
+            ok: true,
+            format,
+            title,
+            filename: built.filename,
+            artifact_id: art.id,
+            note: "File is previewed in the chat with Download and Email buttons. Did NOT auto-download.",
+          });
         } catch (err) {
           console.warn("generate_document failed", err);
           return JSON.stringify({ error: err instanceof Error ? err.message : "generate failed" });
@@ -1425,7 +1486,15 @@ function Bubble({
   messageId?: string;
 }) {
   const isUser = role === "user";
-  const displayContent = isUser ? content : cleanAssistantText(content);
+  const cleanedRaw = isUser ? content : cleanAssistantText(content);
+  // Extract artifact markers so we can render preview cards.
+  const artifactIds: string[] = [];
+  const displayContent = cleanedRaw
+    .replace(ARTIFACT_MARKER_RE, (_m, id: string) => {
+      artifactIds.push(id);
+      return "";
+    })
+    .trim();
   if (isUser) {
     return (
       <div className="group flex flex-col items-end gap-1">
@@ -1487,6 +1556,13 @@ function Bubble({
             <span className="inline-block w-1.5 h-4 align-[-2px] ml-0.5 bg-foreground/70 animate-pulse rounded-sm" />
           )}
         </div>
+        {artifactIds.length > 0 && (
+          <div className="mt-3 flex flex-col gap-2">
+            {artifactIds.map((id) => (
+              <ArtifactCard key={id} artifactId={id} />
+            ))}
+          </div>
+        )}
         {!streaming && displayContent && (
           <div className="mt-2 flex items-center gap-1 opacity-60 md:opacity-0 md:group-hover:opacity-100 transition">
             <CopyButton text={displayContent} />
@@ -1494,6 +1570,83 @@ function Bubble({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function ArtifactCard({ artifactId }: { artifactId: string }) {
+  const art = getArtifact(artifactId);
+  const [sending, setSending] = useState(false);
+  if (!art) {
+    return (
+      <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+        Attachment expired (reload cleared it).
+      </div>
+    );
+  }
+  async function emailToMe() {
+    if (!art) return;
+    setSending(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const to = u.user?.email;
+      if (!to) return toast.error("Could not find your email on file.");
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) return toast.error("Sign in again");
+      const res = await fetch("/api/public/jarvis/tools/send_email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          to,
+          subject: art.filename,
+          body: `Attached: **${art.filename}** (${art.formatLabel}).`,
+          attachment: { filename: art.filename, mimeType: art.mimeType, contentBase64: art.base64 },
+        }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "send failed");
+        throw new Error(t.slice(0, 200));
+      }
+      toast.success(`Emailed to ${to}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Send failed");
+    } finally {
+      setSending(false);
+    }
+  }
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+        <FileText size={18} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium truncate">{art.filename}</div>
+        <div className="text-xs text-muted-foreground">
+          {art.formatLabel} · {formatBytes(art.size)}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => downloadArtifact(art)}
+        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+      >
+        <Download size={12} /> Download
+      </button>
+      <button
+        type="button"
+        onClick={emailToMe}
+        disabled={sending}
+        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
+      >
+        <Mail size={12} /> {sending ? "Sending…" : "Email to me"}
+      </button>
     </div>
   );
 }
