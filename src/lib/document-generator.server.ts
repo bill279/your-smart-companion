@@ -9,6 +9,9 @@ import {
   TableRow,
   TableCell,
   WidthType,
+  BorderStyle,
+  ShadingType,
+  PageOrientation,
 } from "docx";
 import * as XLSX from "xlsx";
 
