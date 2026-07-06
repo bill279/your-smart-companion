@@ -872,7 +872,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               description:
                 "Generate a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown and return a signed download URL. Use whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc.",
               inputSchema: z.object({
-                format: z.enum(["pdf", "docx", "xlsx", "csv", "txt"]),
+                format: z
+                  .enum(["pdf", "docx", "xlsx", "csv"])
+                  .describe(
+                    "File type. Default to 'pdf' unless the user explicitly asked for Word/Excel/CSV. NEVER pick a format the user didn't ask for.",
+                  ),
                 filename: z.string().min(1).max(120).describe("Base filename without extension"),
                 title: z.string().min(1).max(200),
                 markdown: z
