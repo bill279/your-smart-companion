@@ -40,59 +40,6 @@ function renderEmailHtml(markdown: string) {
   </style></head><body><div class="container">${inner}</div></body></html>`;
 }
 
-function buildRfc2822({ to, subject, body, cc, attachment }: z.infer<typeof Body>) {
-  const html = renderEmailHtml(body);
-  const lines = [`To: ${to}`];
-  if (cc) lines.push(`Cc: ${cc}`);
-  lines.push(`Subject: ${subject}`, "MIME-Version: 1.0");
-
-  const altBoundary = `bpa_alt_${Math.random().toString(36).slice(2)}`;
-  const altPart = [
-    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
-    "",
-    `--${altBoundary}`,
-    "Content-Type: text/plain; charset=UTF-8",
-    "",
-    body,
-    "",
-    `--${altBoundary}`,
-    "Content-Type: text/html; charset=UTF-8",
-    "",
-    html,
-    "",
-    `--${altBoundary}--`,
-  ].join("\r\n");
-
-  if (attachment) {
-    const mixedBoundary = `bpa_mix_${Math.random().toString(36).slice(2)}`;
-    // Base64 body must be line-wrapped to 76 chars for RFC compliance.
-    const wrapped = attachment.contentBase64.replace(/(.{76})/g, "$1\r\n");
-    lines.push(
-      `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
-      "",
-      `--${mixedBoundary}`,
-      altPart,
-      "",
-      `--${mixedBoundary}`,
-      `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`,
-      `Content-Disposition: attachment; filename="${attachment.filename}"`,
-      "Content-Transfer-Encoding: base64",
-      "",
-      wrapped,
-      "",
-      `--${mixedBoundary}--`,
-      "",
-    );
-  } else {
-    lines.push(altPart, "");
-  }
-  return Buffer.from(lines.join("\r\n"))
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
 export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
   server: {
     handlers: {
