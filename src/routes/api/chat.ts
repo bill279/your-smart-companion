@@ -375,7 +375,7 @@ export const Route = createFileRoute("/api/chat")({
           };
         });
         const result = streamText({
-          model: gateway("openai/gpt-5.1"),
+          model: gateway("openai/gpt-5.4"),
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(50),
