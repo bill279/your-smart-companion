@@ -80,7 +80,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "send_email",
     description:
-      "Send an email on the user's behalf. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling.",
+      "Send an email on the user's behalf. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling. Set attach_last_document=true to attach the most recent document you generated via generate_document.",
     parameters: {
       type: "object",
       properties: {
@@ -88,6 +88,10 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         subject: { type: "string" },
         body: { type: "string" },
         cc: { type: "string" },
+        attach_last_document: {
+          type: "boolean",
+          description: "If true, attach the most recently generated document (from generate_document) to this email.",
+        },
       },
       required: ["to", "subject", "body"],
     },
