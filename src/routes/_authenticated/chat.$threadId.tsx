@@ -1479,7 +1479,15 @@ function Bubble({
   messageId?: string;
 }) {
   const isUser = role === "user";
-  const displayContent = isUser ? content : cleanAssistantText(content);
+  const cleanedRaw = isUser ? content : cleanAssistantText(content);
+  // Extract artifact markers so we can render preview cards.
+  const artifactIds: string[] = [];
+  const displayContent = cleanedRaw
+    .replace(ARTIFACT_MARKER_RE, (_m, id: string) => {
+      artifactIds.push(id);
+      return "";
+    })
+    .trim();
   if (isUser) {
     return (
       <div className="group flex flex-col items-end gap-1">
@@ -1541,6 +1549,13 @@ function Bubble({
             <span className="inline-block w-1.5 h-4 align-[-2px] ml-0.5 bg-foreground/70 animate-pulse rounded-sm" />
           )}
         </div>
+        {artifactIds.length > 0 && (
+          <div className="mt-3 flex flex-col gap-2">
+            {artifactIds.map((id) => (
+              <ArtifactCard key={id} artifactId={id} />
+            ))}
+          </div>
+        )}
         {!streaming && displayContent && (
           <div className="mt-2 flex items-center gap-1 opacity-60 md:opacity-0 md:group-hover:opacity-100 transition">
             <CopyButton text={displayContent} />
