@@ -64,6 +64,33 @@ TOOL USE — non-negotiable:
 - If the user asks you to create, generate, export, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs. The tool shows the file as a preview card in the chat — it does NOT auto-download. After calling, say something like "I've put the document in the chat — you can preview it, download it, or ask me to email it." Do NOT say "downloading now." Choose a sensible short filename.
 - If the user asks you to email a document you just generated (e.g. "email me that Word doc"): call send_email with attach_last_document=true so the file is attached. Confirm the recipient address first.`;
 
+function stopMediaStream(stream: MediaStream | null) {
+  stream?.getTracks().forEach((track) => {
+    try { track.stop(); } catch (err) { console.warn(err); }
+  });
+}
+
+function voiceStartMessage(error: unknown) {
+  const name = error instanceof DOMException ? error.name : error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Microphone access is blocked. Allow it in your browser/site settings, then tap the mic.";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "No microphone was found. Connect or select a microphone, then tap the mic.";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "Your microphone is already in use by another app. Close it, then tap the mic.";
+  }
+  if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
+    return "This microphone could not start with the current browser settings. Try a different mic.";
+  }
+  if (/permission|notallowed|denied|blocked/i.test(`${name} ${message}`)) {
+    return "Microphone permission is still being rejected by the browser. Check the site mic setting, then tap the mic.";
+  }
+  return "Voice failed to connect. Tap the mic once to try again.";
+}
+
 // Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
 const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
   {
@@ -748,16 +775,22 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function startVoice() {
     if (voiceStateRef.current === "starting" || voiceStateRef.current === "connected") return;
     const attemptId = startAttemptRef.current + 1;
+    let microphoneStream: MediaStream | null = null;
     startAttemptRef.current = attemptId;
     hasConnectedVoiceRef.current = false;
     voiceUserHasSpokenRef.current = false;
     setVoiceState("starting");
     setVoiceError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Microphone recording is not available in this browser.");
+      }
+      microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const session = await createSession({});
-      if (startAttemptRef.current !== attemptId) return;
+      if (startAttemptRef.current !== attemptId) {
+        stopMediaStream(microphoneStream);
+        return;
+      }
       const instructions = `${VOICE_SESSION_PROMPT}\n\n${buildVoiceContext()}`;
       pendingContextRef.current = "";
       clearVoiceConnectTimeout();
@@ -772,18 +805,22 @@ function ThreadView({ threadId }: { threadId: string }) {
         clientSecret: session.clientSecret,
         model: session.model,
         instructions,
+        microphoneStream,
       });
+      microphoneStream = null;
     } catch (e) {
+      stopMediaStream(microphoneStream);
       clearVoiceConnectTimeout();
-      const raw = e instanceof Error ? e.message : "Could not start voice";
+      const raw = e instanceof Error ? `${e.name}: ${e.message}` : "Could not start voice";
+      console.warn("startVoice failed", e);
       setVoiceState("idle");
       pendingContextRef.current = "";
-      if (/permission|notallowed/i.test(raw)) {
-        setVoiceError("Microphone access is blocked. Allow it, then tap the mic.");
+      const message = voiceStartMessage(e);
+      setVoiceError(message);
+      if (/microphone access is blocked|permission is still being rejected/i.test(message)) {
         toast.error("Microphone blocked");
       } else {
-        console.warn("startVoice failed", raw);
-        setVoiceError("Voice failed to connect. Tap the mic once to try again.");
+        toast.error(raw.includes("Microphone") ? message : "Voice failed to connect");
       }
     }
   }
