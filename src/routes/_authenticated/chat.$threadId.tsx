@@ -647,18 +647,8 @@ function ThreadView({ threadId }: { threadId: string }) {
       pendingContextRef.current = "";
       if (wasStopping) return;
       const closeText = details?.message ?? "";
-      // If the session was previously connected and dropped, silently reconnect
-      // so the user stays in voice mode until they explicitly tap to stop.
-      if (hasConnectedVoiceRef.current && details?.reason !== "error") {
-        // Only auto-reconnect if the user actually spoke in the last 60s.
-        const recentlyActive = Date.now() - lastUserSpeechAtRef.current < 60_000;
-        if (recentlyActive) {
-          setTimeout(() => {
-            if (voiceStateRef.current === "idle") void startVoice();
-          }, 300);
-          return;
-        }
-      }
+      // Browsers only show microphone prompts reliably from a direct user tap.
+      // Do not silently restart voice after disconnects; ask the user to tap again.
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
         setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
