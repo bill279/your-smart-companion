@@ -95,6 +95,7 @@ You have tools:
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
 - search_knowledge_base — semantic search over the user's uploaded company documents/SOPs (PDFs, docs, notes). Use this FIRST whenever the user asks about internal/company-specific info, processes, products, pricing sheets, policies, or anything that sounds like it would live in their files. Cite the document name in the answer.
 - generate_document — create a downloadable PDF, Word (.docx), Excel (.xlsx), or CSV file from Markdown content and return a download link. Use this whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc. Default to PDF unless the user specified another format. Never say you cannot generate or attach a file — call this tool, then present the returned URL as a single clean Markdown link using the returned \`filename\` as the link text (e.g. \`[Report.pdf](url)\`). Never expose the raw URL string, storage path, or timestamp. If the user then asks to email that document, call \`send_email\` with \`attach_file_url\` set to the URL and \`attach_file_name\` set to the filename — do NOT paste the URL into the email body.
+  - IMPORTANT: A calendar invite, meeting invite, appointment, Outlook invite, or Teams meeting is NOT a document/file. For those, use \`create_calendar_event\`, never \`generate_document\`.
 - save_lesson — silently record a lesson the assistant should apply forever (e.g. user corrections, recurring preferences, "next time do X not Y"). Call this whenever the user corrects you, gives a thumbs-down explanation, or expresses a workflow preference. Do NOT announce it.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
@@ -114,10 +115,12 @@ Rules:
 - If you learn a correction (e.g. company changed), overwrite by calling \`remember_fact\` with the same key.
 
 # Calendar flow
+- Calendar/meeting requests override email/document behavior. If the user says "book", "schedule", "calendar invite", "meeting invite", "Outlook invite", "Teams meeting", or "send an invite" with a date/time, this is a calendar task. Do NOT call \`generate_document\` and do NOT call \`send_email\` as the action.
 - For event creation, ALWAYS show a draft preview (title, date/time with timezone, attendees, location, description) and wait for explicit approval ("create", "yes", "schedule it") before calling \`create_calendar_event\`.
 - Interpret relative times ("tomorrow 3pm", "next Tuesday") using the user's local timezone. If unsure, ask.
 - Default event length is 30 minutes unless the user says otherwise.
 - When attendees are provided, the calendar provider automatically emails them an invitation with accept/decline. Tell the user "invites will be sent to: ..." in the draft so they know.
+- After the user approves the draft, call \`create_calendar_event\` immediately. Do not ask again for the same attendees/date/time, do not create a file, and do not send a separate email invite.
 - If \`create_calendar_event\` fails, do NOT call \`send_email\` as a substitute. Tell the user the calendar event was not created and surface the specific provider/permission error.
 
 # Saved contacts flow
@@ -1000,7 +1003,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             generate_document: tool({
               description:
-                "Generate a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown and return a signed download URL. Use whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc.",
+                "Generate a downloadable PDF, Word (.docx), Excel (.xlsx), CSV, or TXT file from Markdown and return a signed download URL. Use whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc. Do NOT use for calendar invites, meeting invites, Outlook invites, Teams meetings, or scheduling; those must use create_calendar_event.",
               inputSchema: z.object({
                 format: z
                   .enum(["pdf", "docx", "xlsx", "csv"])
