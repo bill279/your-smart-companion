@@ -1454,6 +1454,20 @@ function ThreadView({ threadId }: { threadId: string }) {
           >
             <Paperclip size={16} />
           </button>
+          <button
+            type="button"
+            onClick={() => setWebSearchOn((v) => !v)}
+            title={webSearchOn ? "Web search is ON for the next message" : "Force web search for the next message"}
+            aria-pressed={webSearchOn}
+            className={`shrink-0 h-10 px-3 rounded-full flex items-center gap-1.5 border text-sm transition ${
+              webSearchOn
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-secondary hover:bg-secondary/80 text-muted-foreground"
+            }`}
+          >
+            <Globe size={14} />
+            <span className="hidden sm:inline">Search web</span>
+          </button>
           <textarea
             autoFocus
             value={input}
