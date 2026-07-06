@@ -62,7 +62,8 @@ TOOL USE — non-negotiable:
 - For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
 - For ANY factual question about real companies, people, prices, addresses, news, or anything time-sensitive: CALL web_search FIRST. Never invent facts, addresses, phone numbers, or pricing.
 - If the user asks you to create, generate, export, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs. The tool shows the file as a preview card in the chat — it does NOT auto-download. After calling, say something like "I've put the document in the chat — you can preview it, download it, or ask me to email it." Do NOT say "downloading now." Choose a sensible short filename.
-- If the user asks you to email a document you just generated (e.g. "email me that Word doc"): call send_email with attach_last_document=true so the file is attached. Confirm the recipient address first.`;
+- If the user asks you to email a document you just generated (e.g. "email me that Word doc"): call send_email with attach_last_document=true so the file is attached. Confirm the recipient address first.
+- CALENDAR MEETINGS: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Teams meeting, do NOT create a document and do NOT use send_email. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. When attendees are included, set online_meeting=true so Outlook sends real calendar invites with a Teams join link.`;
 
 function stopMediaStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => {
@@ -123,7 +124,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "send_email",
     description:
-      "Send an email on the user's behalf. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling. Set attach_last_document=true to attach the most recent document you generated via generate_document.",
+      "Send a normal email on the user's behalf. NEVER use this for calendar invites, meeting invites, Teams meetings, or scheduling; use create_calendar_event for those. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling. Set attach_last_document=true to attach the most recent document you generated via generate_document.",
     parameters: {
       type: "object",
       properties: {
@@ -137,6 +138,26 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         },
       },
       required: ["to", "subject", "body"],
+    },
+  },
+  {
+    type: "function",
+    name: "create_calendar_event",
+    description:
+      "Create a real Outlook calendar event. Use this for booking/scheduling meetings, calendar invites, meeting invites, appointments, and Teams meetings. ALWAYS show a meeting draft first and wait for explicit approval before calling. When attendees are present, set online_meeting=true so Outlook emails the calendar invite and includes a Microsoft Teams join link.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        start: { type: "string", description: "ISO 8601 start datetime, e.g. 2026-07-07T15:00:00-04:00" },
+        end: { type: "string", description: "ISO 8601 end datetime" },
+        description: { type: "string" },
+        location: { type: "string" },
+        attendees: { type: "array", items: { type: "string" } },
+        timezone: { type: "string", description: "IANA timezone, e.g. America/Toronto" },
+        online_meeting: { type: "boolean", description: "True for Teams meetings; default true when attendees are present." },
+      },
+      required: ["title", "start", "end"],
     },
   },
   {
@@ -556,6 +577,41 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
         return JSON.stringify(data);
       },
+      create_calendar_event: async (params) => {
+        const p = params as {
+          title?: string;
+          start?: string;
+          end?: string;
+          description?: string;
+          location?: string;
+          attendees?: string[];
+          timezone?: string;
+          online_meeting?: boolean;
+        };
+        if (!p.title || !p.start || !p.end) {
+          return JSON.stringify({ error: "title, start and end are required" });
+        }
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return JSON.stringify({ error: "not signed in" });
+        const res = await fetch("/api/public/jarvis/tools/create_calendar_event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            title: p.title,
+            start: p.start,
+            end: p.end,
+            description: p.description,
+            location: p.location,
+            attendees: p.attendees,
+            timezone: p.timezone,
+            online_meeting: p.online_meeting ?? ((p.attendees?.length ?? 0) > 0),
+          }),
+        });
+        const data = await res.json().catch(() => ({ error: "calendar create failed" }));
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "calendar create failed", detail: data?.detail });
+        return JSON.stringify(data);
+      },
       generate_document: async (params) => {
         const p = params as {
           format?: string;
@@ -748,6 +804,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- TABLES / LONG STRUCTURED CONTENT: call the show_in_chat tool with the full Markdown table. Do NOT read the table aloud. After the tool returns, say one short spoken sentence (e.g. \"Here's the table.\").",
       "- FACTS: for any real company, person, address, price, phone number, or current event, call web_search FIRST. Never invent details.",
       "- FILE EXPORTS: if the user asks to create, generate, export, download, save, or convert to PDF, Word, DOCX, Excel, XLSX, or CSV, CALL the generate_document tool. Never say you cannot make a file. Never tell them to copy into Word or Google Docs.",
+      "- CALENDAR MEETINGS: if the user asks to book, schedule, create, or send a calendar invite / meeting invite / Teams meeting, do NOT generate a document and do NOT use send_email. Show a concise draft, wait for explicit approval, then CALL create_calendar_event. With attendees, set online_meeting=true so Outlook sends real invites and a Teams link.",
       "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
       "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
       "- EMAIL APPROVAL: present a full draft (To, Subject, Body) and wait for explicit user approval (\"send it\", \"yes send\") before calling send_email.",
