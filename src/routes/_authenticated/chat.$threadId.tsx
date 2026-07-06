@@ -1566,3 +1566,80 @@ function Bubble({
     </div>
   );
 }
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function ArtifactCard({ artifactId }: { artifactId: string }) {
+  const art = getArtifact(artifactId);
+  const [sending, setSending] = useState(false);
+  if (!art) {
+    return (
+      <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+        Attachment expired (reload cleared it).
+      </div>
+    );
+  }
+  async function emailToMe() {
+    if (!art) return;
+    setSending(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const to = u.user?.email;
+      if (!to) return toast.error("Could not find your email on file.");
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) return toast.error("Sign in again");
+      const res = await fetch("/api/public/jarvis/tools/send_email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          to,
+          subject: art.filename,
+          body: `Attached: **${art.filename}** (${art.formatLabel}).`,
+          attachment: { filename: art.filename, mimeType: art.mimeType, contentBase64: art.base64 },
+        }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "send failed");
+        throw new Error(t.slice(0, 200));
+      }
+      toast.success(`Emailed to ${to}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Send failed");
+    } finally {
+      setSending(false);
+    }
+  }
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+        <FileText size={18} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium truncate">{art.filename}</div>
+        <div className="text-xs text-muted-foreground">
+          {art.formatLabel} · {formatBytes(art.size)}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => downloadArtifact(art)}
+        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+      >
+        <Download size={12} /> Download
+      </button>
+      <button
+        type="button"
+        onClick={emailToMe}
+        disabled={sending}
+        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
+      >
+        <Mail size={12} /> {sending ? "Sending…" : "Email to me"}
+      </button>
+    </div>
+  );
+}
