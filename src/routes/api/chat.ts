@@ -1046,11 +1046,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 } else if (part.type === "tool-call") {
                   const name = (part as { toolName: string }).toolName;
                   if (name === "web_search" || name === "web_scrape") {
+                    const rawInput = (part as { input?: Record<string, unknown> }).input ?? {};
                     const ev: ToolEvent = {
                       t: "call",
                       id: (part as { toolCallId: string }).toolCallId,
                       name,
-                      input: (part as { input?: Record<string, unknown> }).input as ToolEvent["input"],
+                      input: rawInput as { query?: string; url?: string; limit?: number },
                     };
                     collectedActivity.splice(
                       0,
