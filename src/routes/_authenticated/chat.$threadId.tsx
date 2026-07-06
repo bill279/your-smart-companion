@@ -649,11 +649,55 @@ function ThreadView({ threadId }: { threadId: string }) {
             location: p.location,
             attendees: p.attendees,
             timezone: p.timezone,
-            online_meeting: p.online_meeting ?? ((p.attendees?.length ?? 0) > 0),
+            online_meeting: p.online_meeting ?? true,
           }),
         });
         const data = await res.json().catch(() => ({ error: "calendar create failed" }));
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "calendar create failed", detail: data?.detail });
+        return JSON.stringify(data);
+      },
+      list_calendar_events: async (params) => {
+        const p = params as { days?: number; max_results?: number; start?: string; end?: string };
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return JSON.stringify({ error: "not signed in" });
+        const res = await fetch("/api/public/jarvis/tools/list_calendar_events", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ days: p.days, max_results: p.max_results, start: p.start, end: p.end }),
+        });
+        const data = await res.json().catch(() => ({ error: "calendar read failed" }));
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "calendar read failed", detail: data?.detail });
+        return JSON.stringify(data);
+      },
+      cancel_calendar_event: async (params) => {
+        const p = params as { event_id?: string; comment?: string };
+        if (!p.event_id) return JSON.stringify({ error: "event_id required" });
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return JSON.stringify({ error: "not signed in" });
+        const res = await fetch("/api/public/jarvis/tools/cancel_calendar_event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ event_id: p.event_id, comment: p.comment }),
+        });
+        const data = await res.json().catch(() => ({ error: "calendar cancel failed" }));
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "calendar cancel failed", detail: data?.detail });
+        return JSON.stringify(data);
+      },
+      respond_calendar_event: async (params) => {
+        const p = params as { event_id?: string; response?: "accept" | "tentative" | "decline"; comment?: string; send_response?: boolean };
+        if (!p.event_id || !p.response) return JSON.stringify({ error: "event_id and response required" });
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return JSON.stringify({ error: "not signed in" });
+        const res = await fetch("/api/public/jarvis/tools/respond_calendar_event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ event_id: p.event_id, response: p.response, comment: p.comment, send_response: p.send_response }),
+        });
+        const data = await res.json().catch(() => ({ error: "calendar response failed" }));
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "calendar response failed", detail: data?.detail });
         return JSON.stringify(data);
       },
       generate_document: async (params) => {
