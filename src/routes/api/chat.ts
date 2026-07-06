@@ -650,7 +650,7 @@ th{background:#0b2545;color:#fff;font-weight:600;} tr:nth-child(even) td{backgro
 hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
 </style></head><body><div class="container">${inner}</div></body></html>`;
                 };
-                 if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+                 {
                    const call = await msGraphFetch(userId, "/me/sendMail", {
                      method: "POST",
                      body: JSON.stringify({
@@ -686,7 +686,6 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                    await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attached: attachment?.filename ?? null });
                    return { ok: true, provider: "outlook", to, subject, attached: attachment?.filename ?? null };
                  }
-                  return { error: "Outlook is not connected." };
               },
             }),
             list_contacts: tool({
