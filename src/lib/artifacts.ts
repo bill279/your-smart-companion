@@ -20,12 +20,16 @@ export type Artifact = {
 const memory = new Map<string, Artifact>();
 const STORAGE_KEY = "bpa.artifacts.v1";
 const MAX_KEEP = 12;
+// localStorage survives reloads and new tabs (unlike sessionStorage), so
+// artifact preview cards keep working after a refresh.
 
 function loadFromStorage(): Map<string, Artifact> {
   if (typeof window === "undefined") return memory;
   if (memory.size > 0) return memory;
   try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(STORAGE_KEY) ??
+      window.sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return memory;
     const arr = JSON.parse(raw) as Artifact[];
     for (const a of arr) memory.set(a.id, a);
@@ -43,7 +47,7 @@ function persist() {
       .slice(0, MAX_KEEP);
     memory.clear();
     for (const a of arr) memory.set(a.id, a);
-    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
   } catch {
     // storage may be full; drop silently
   }
