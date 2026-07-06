@@ -24,11 +24,7 @@ import { Route as ApiPublicWebSearchRouteImport } from './routes/api/public/web-
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
-import { Route as ApiPublicJarvisToolsSend_outlookRouteImport } from './routes/api/public/jarvis/tools/send_outlook'
-import { Route as ApiPublicJarvisToolsSend_gmailRouteImport } from './routes/api/public/jarvis/tools/send_gmail'
 import { Route as ApiPublicJarvisToolsSend_emailRouteImport } from './routes/api/public/jarvis/tools/send_email'
-import { Route as ApiPublicJarvisToolsSearch_webRouteImport } from './routes/api/public/jarvis/tools/search_web'
-import { Route as ApiPublicJarvisToolsRead_calendarRouteImport } from './routes/api/public/jarvis/tools/read_calendar'
 
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
@@ -108,34 +104,10 @@ const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
   path: '/.lovable/oauth/consent',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicJarvisToolsSend_outlookRoute =
-  ApiPublicJarvisToolsSend_outlookRouteImport.update({
-    id: '/api/public/jarvis/tools/send_outlook',
-    path: '/api/public/jarvis/tools/send_outlook',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicJarvisToolsSend_gmailRoute =
-  ApiPublicJarvisToolsSend_gmailRouteImport.update({
-    id: '/api/public/jarvis/tools/send_gmail',
-    path: '/api/public/jarvis/tools/send_gmail',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const ApiPublicJarvisToolsSend_emailRoute =
   ApiPublicJarvisToolsSend_emailRouteImport.update({
     id: '/api/public/jarvis/tools/send_email',
     path: '/api/public/jarvis/tools/send_email',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicJarvisToolsSearch_webRoute =
-  ApiPublicJarvisToolsSearch_webRouteImport.update({
-    id: '/api/public/jarvis/tools/search_web',
-    path: '/api/public/jarvis/tools/search_web',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicJarvisToolsRead_calendarRoute =
-  ApiPublicJarvisToolsRead_calendarRouteImport.update({
-    id: '/api/public/jarvis/tools/read_calendar',
-    path: '/api/public/jarvis/tools/read_calendar',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -154,11 +126,7 @@ export interface FileRoutesByFullPath {
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/chat/': typeof AuthenticatedChatIndexRoute
-  '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
-  '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
-  '/api/public/jarvis/tools/send_gmail': typeof ApiPublicJarvisToolsSend_gmailRoute
-  '/api/public/jarvis/tools/send_outlook': typeof ApiPublicJarvisToolsSend_outlookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -175,11 +143,7 @@ export interface FileRoutesByTo {
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/chat': typeof AuthenticatedChatIndexRoute
-  '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
-  '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
-  '/api/public/jarvis/tools/send_gmail': typeof ApiPublicJarvisToolsSend_gmailRoute
-  '/api/public/jarvis/tools/send_outlook': typeof ApiPublicJarvisToolsSend_outlookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -198,11 +162,7 @@ export interface FileRoutesById {
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/_authenticated/chat/': typeof AuthenticatedChatIndexRoute
-  '/api/public/jarvis/tools/read_calendar': typeof ApiPublicJarvisToolsRead_calendarRoute
-  '/api/public/jarvis/tools/search_web': typeof ApiPublicJarvisToolsSearch_webRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
-  '/api/public/jarvis/tools/send_gmail': typeof ApiPublicJarvisToolsSend_gmailRoute
-  '/api/public/jarvis/tools/send_outlook': typeof ApiPublicJarvisToolsSend_outlookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -221,11 +181,7 @@ export interface FileRouteTypes {
     | '/chat/$threadId'
     | '/api/public/web-search'
     | '/chat/'
-    | '/api/public/jarvis/tools/read_calendar'
-    | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
-    | '/api/public/jarvis/tools/send_gmail'
-    | '/api/public/jarvis/tools/send_outlook'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -242,11 +198,7 @@ export interface FileRouteTypes {
     | '/chat/$threadId'
     | '/api/public/web-search'
     | '/chat'
-    | '/api/public/jarvis/tools/read_calendar'
-    | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
-    | '/api/public/jarvis/tools/send_gmail'
-    | '/api/public/jarvis/tools/send_outlook'
   id:
     | '__root__'
     | '/'
@@ -264,11 +216,7 @@ export interface FileRouteTypes {
     | '/_authenticated/chat/$threadId'
     | '/api/public/web-search'
     | '/_authenticated/chat/'
-    | '/api/public/jarvis/tools/read_calendar'
-    | '/api/public/jarvis/tools/search_web'
     | '/api/public/jarvis/tools/send_email'
-    | '/api/public/jarvis/tools/send_gmail'
-    | '/api/public/jarvis/tools/send_outlook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -282,11 +230,7 @@ export interface RootRouteChildren {
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
   ApiPublicWebSearchRoute: typeof ApiPublicWebSearchRoute
-  ApiPublicJarvisToolsRead_calendarRoute: typeof ApiPublicJarvisToolsRead_calendarRoute
-  ApiPublicJarvisToolsSearch_webRoute: typeof ApiPublicJarvisToolsSearch_webRoute
   ApiPublicJarvisToolsSend_emailRoute: typeof ApiPublicJarvisToolsSend_emailRoute
-  ApiPublicJarvisToolsSend_gmailRoute: typeof ApiPublicJarvisToolsSend_gmailRoute
-  ApiPublicJarvisToolsSend_outlookRoute: typeof ApiPublicJarvisToolsSend_outlookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -396,39 +340,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DotlovableOauthConsentRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/jarvis/tools/send_outlook': {
-      id: '/api/public/jarvis/tools/send_outlook'
-      path: '/api/public/jarvis/tools/send_outlook'
-      fullPath: '/api/public/jarvis/tools/send_outlook'
-      preLoaderRoute: typeof ApiPublicJarvisToolsSend_outlookRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/jarvis/tools/send_gmail': {
-      id: '/api/public/jarvis/tools/send_gmail'
-      path: '/api/public/jarvis/tools/send_gmail'
-      fullPath: '/api/public/jarvis/tools/send_gmail'
-      preLoaderRoute: typeof ApiPublicJarvisToolsSend_gmailRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/public/jarvis/tools/send_email': {
       id: '/api/public/jarvis/tools/send_email'
       path: '/api/public/jarvis/tools/send_email'
       fullPath: '/api/public/jarvis/tools/send_email'
       preLoaderRoute: typeof ApiPublicJarvisToolsSend_emailRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/jarvis/tools/search_web': {
-      id: '/api/public/jarvis/tools/search_web'
-      path: '/api/public/jarvis/tools/search_web'
-      fullPath: '/api/public/jarvis/tools/search_web'
-      preLoaderRoute: typeof ApiPublicJarvisToolsSearch_webRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/jarvis/tools/read_calendar': {
-      id: '/api/public/jarvis/tools/read_calendar'
-      path: '/api/public/jarvis/tools/read_calendar'
-      fullPath: '/api/public/jarvis/tools/read_calendar'
-      preLoaderRoute: typeof ApiPublicJarvisToolsRead_calendarRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -465,12 +381,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
   ApiPublicWebSearchRoute: ApiPublicWebSearchRoute,
-  ApiPublicJarvisToolsRead_calendarRoute:
-    ApiPublicJarvisToolsRead_calendarRoute,
-  ApiPublicJarvisToolsSearch_webRoute: ApiPublicJarvisToolsSearch_webRoute,
   ApiPublicJarvisToolsSend_emailRoute: ApiPublicJarvisToolsSend_emailRoute,
-  ApiPublicJarvisToolsSend_gmailRoute: ApiPublicJarvisToolsSend_gmailRoute,
-  ApiPublicJarvisToolsSend_outlookRoute: ApiPublicJarvisToolsSend_outlookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
