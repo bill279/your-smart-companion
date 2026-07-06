@@ -115,6 +115,7 @@ Rules:
 - If you learn a correction (e.g. company changed), overwrite by calling \`remember_fact\` with the same key.
 
 # Calendar flow
+- Absolute rule: never create a document that contains placeholder invite text like "[Insert Teams Link Here]". If a Teams/calendar link is needed, the only valid source is the result of \`create_calendar_event\`.
 - Calendar/meeting requests override email/document behavior. If the user says "book", "schedule", "calendar invite", "meeting invite", "Outlook invite", "Teams meeting", or "send an invite" with a date/time, this is a calendar task. Do NOT call \`generate_document\` and do NOT call \`send_email\` as the action.
 - For event creation, ALWAYS show a draft preview (title, date/time with timezone, attendees, location, description) and wait for explicit approval ("create", "yes", "schedule it") before calling \`create_calendar_event\`.
 - Interpret relative times ("tomorrow 3pm", "next Tuesday") using the user's local timezone. If unsure, ask.
@@ -861,7 +862,23 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     webLink?: string;
                     onlineMeeting?: { joinUrl?: string };
                   };
-                  const joinUrl = j.onlineMeeting?.joinUrl;
+                  let joinUrl = j.onlineMeeting?.joinUrl;
+                  if (wantsTeams && j.id && !joinUrl && call.via === "user") {
+                    const access = await getMicrosoftAccessToken(userId);
+                    if (access) {
+                      for (let attempt = 0; attempt < 3 && !joinUrl; attempt += 1) {
+                        await new Promise((resolve) => setTimeout(resolve, 700));
+                        const followUp = await fetch(
+                          `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(j.id)}?$select=id,webLink,onlineMeeting`,
+                          { headers: { Authorization: `Bearer ${access.accessToken}` } },
+                        );
+                        if (followUp.ok) {
+                          const fresh = (await followUp.json()) as { onlineMeeting?: { joinUrl?: string } };
+                          joinUrl = fresh.onlineMeeting?.joinUrl;
+                        }
+                      }
+                    }
+                  }
                   await logAction(
                     "create_calendar_event",
                     `Created event "${title}" on Outlook${joinUrl ? " with Teams meeting" : ""}`,
@@ -873,6 +890,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     id: j.id,
                     link: j.webLink,
                     ...(joinUrl ? { teams_join_url: joinUrl } : {}),
+                    ...(wantsTeams && !joinUrl
+                      ? {
+                          warning:
+                            "Outlook created the meeting, but Microsoft did not return the Teams join link yet. Open the Outlook event to view the link.",
+                        }
+                      : {}),
                   };
                 }
               },
@@ -1020,6 +1043,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               }),
               execute: async ({ format, filename, title, markdown }) => {
                 try {
+                  if (/(calendar\s+invite|meeting\s+invite|teams\s+meeting|outlook\s+invite|please\s+accept\s+or\s+decline|\[insert\s+teams\s+link\s+here\])/i.test(`${title}\n${markdown}`)) {
+                    return {
+                      error:
+                        "This is a calendar/Teams invite, not a document. Call create_calendar_event with online_meeting=true so Outlook sends the real invite and Teams link.",
+                    };
+                  }
                   const { generateDocument } = await import("@/lib/document-generator.server");
                   const { bytes, mimeType, extension } = await generateDocument({
                     format,

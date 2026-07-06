@@ -107,7 +107,20 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
           webLink?: string;
           onlineMeeting?: { joinUrl?: string };
         };
-        const joinUrl = event.onlineMeeting?.joinUrl;
+        let joinUrl = event.onlineMeeting?.joinUrl;
+        if (wantsTeams && event.id && !joinUrl) {
+          for (let attempt = 0; attempt < 3 && !joinUrl; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 700));
+            const followUp = await fetch(
+              `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(event.id)}?$select=id,webLink,onlineMeeting`,
+              { headers: { Authorization: `Bearer ${ms.accessToken}` } },
+            );
+            if (followUp.ok) {
+              const fresh = (await followUp.json()) as { onlineMeeting?: { joinUrl?: string } };
+              joinUrl = fresh.onlineMeeting?.joinUrl;
+            }
+          }
+        }
         await supabase.from("agent_actions").insert({
           user_id: userId,
           action: "create_calendar_event",
@@ -129,6 +142,7 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
           id: event.id,
           link: event.webLink,
           ...(joinUrl ? { teams_join_url: joinUrl } : {}),
+          ...(wantsTeams && !joinUrl ? { warning: "Outlook created the meeting, but Microsoft did not return the Teams join link yet. Open the Outlook event to view the link." } : {}),
         });
       },
     },
