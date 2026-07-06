@@ -738,61 +738,21 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             list_calendar_events: tool({
               description:
-                "List upcoming events from the user's connected Outlook calendar within a date range.",
+                "List upcoming Outlook calendar events/meetings. Use before answering calendar questions, checking availability, canceling, or responding when the exact event is ambiguous.",
               inputSchema: z.object({
                 days: z.number().int().min(1).max(60).optional().describe("How many days ahead to look. Default 7."),
                 max_results: z.number().int().min(1).max(50).optional(),
+                start: z.string().optional().describe("Optional ISO start datetime for a custom range."),
+                end: z.string().optional().describe("Optional ISO end datetime for a custom range."),
               }),
-              execute: async ({ days, max_results }) => {
-                const now = new Date();
-                const end = new Date(now.getTime() + (days ?? 7) * 86400000);
-                const top = String(max_results ?? 10);
-                {
-                  const params = new URLSearchParams({
-                    startDateTime: now.toISOString(),
-                    endDateTime: end.toISOString(),
-                    $orderby: "start/dateTime",
-                    $top: top,
-                  });
-                  const call = await msGraphFetch(userId, `/me/calendarView?${params}`, { method: "GET" });
-                  if (!call) return { error: "Microsoft is not connected. Connect it from the Activity page." };
-                  const r = call.response;
-                  if (!r.ok) {
-                    const t = await r.text();
-                    return { error: `Outlook calendar read failed (${r.status})`, detail: t.slice(0, 200) };
-                  }
-                  const j = (await r.json()) as {
-                    value?: Array<{
-                      id: string;
-                      subject?: string;
-                      start?: { dateTime?: string; timeZone?: string };
-                      end?: { dateTime?: string; timeZone?: string };
-                      location?: { displayName?: string };
-                      webLink?: string;
-                      attendees?: Array<{ emailAddress?: { address?: string } }>;
-                    }>;
-                  };
-                  return {
-                    provider: "outlook",
-                    events: (j.value ?? []).map((e) => ({
-                      id: e.id,
-                      title: e.subject ?? "(no title)",
-                      start: e.start?.dateTime,
-                      end: e.end?.dateTime,
-                      timezone: e.start?.timeZone,
-                      location: e.location?.displayName,
-                      link: e.webLink,
-                      attendees: (e.attendees ?? [])
-                        .map((a) => a.emailAddress?.address)
-                        .filter(Boolean),
-                    })),
-                  };
-                }
+              execute: async ({ days, max_results, start, end }) => {
+                const { listMicrosoftCalendarEvents } = await import("@/lib/ms-calendar.server");
+                return listMicrosoftCalendarEvents(userId, { days, max_results, start, end });
               },
             }),
             create_calendar_event: tool({
               description:
-                "Create a new event on the user's connected Outlook calendar. Set online_meeting=true to attach a Microsoft Teams meeting with a join link. Only call after the user has approved the draft. If this fails, report the error; do not send an email as a substitute calendar invite.",
+                "Create a real Outlook calendar event/invite. Microsoft Teams is the default and only online meeting provider; pass online_meeting=true unless the user explicitly says no online meeting. Only call after the user has approved the draft. If this fails, report the error; do not send an email as a substitute calendar invite.",
               inputSchema: z.object({
                 title: z.string().min(1).max(200),
                 start: z.string().describe("ISO 8601 start datetime, e.g. 2026-07-01T15:00:00-04:00"),
@@ -804,104 +764,69 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 online_meeting: z
                   .boolean()
                   .optional()
-                  .describe("Attach a Microsoft Teams meeting with a join link. Default true when attendees are present."),
+                  .describe("Attach a Microsoft Teams meeting with a join link. Default true for all meetings unless user explicitly says no online meeting."),
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone, online_meeting }) => {
-                {
-                  const wantsTeams = online_meeting ?? (attendees?.length ?? 0) > 0;
-                  const call = await msGraphFetch(userId, "/me/events", {
-                    method: "POST",
-                    body: JSON.stringify({
-                        subject: title,
-                        body: description
-                          ? { contentType: "HTML", content: description }
-                          : undefined,
-                        start: { dateTime: start, timeZone: timezone ?? "UTC" },
-                        end: { dateTime: end, timeZone: timezone ?? "UTC" },
-                        ...(location ? { location: { displayName: location } } : {}),
-                        ...(attendees && attendees.length
-                          ? {
-                              attendees: attendees.map((email) => ({
-                                emailAddress: { address: email },
-                                type: "required",
-                              })),
-                            }
-                          : {}),
-                        ...(wantsTeams
-                          ? {
-                              isOnlineMeeting: true,
-                              onlineMeetingProvider: "teamsForBusiness",
-                            }
-                          : {}),
-                      }),
-                  });
-                  if (!call) {
-                    return {
-                      error:
-                        "Microsoft is not connected. Open the Activity page and click 'Connect Microsoft' to sign in with your Outlook account.",
-                    };
-                  }
-                  const r = call.response;
-                  if (!r.ok) {
-                    const t = await r.text();
-                     await logAction(
-                       "create_calendar_event",
-                       `Failed to create Outlook calendar event "${title}"`,
-                       { title, start, end, attendees, location, provider: "outlook", via: call.via, status: r.status, detail: t.slice(0, 500) },
-                       "error",
-                     );
-                     if (r.status === 403) {
-                       return {
-                         error:
-                           call.via === "gateway"
-                             ? "Outlook calendar create failed (403). Reconnect Microsoft in the Activity page to grant calendar + Teams access."
-                             : "Outlook calendar create failed (403). Your Microsoft account is missing calendar write permission — reconnect and grant all requested permissions.",
-                         detail: t.slice(0, 500),
-                       };
-                     }
-                    return { error: `Outlook calendar create failed (${r.status})`, detail: t.slice(0, 200) };
-                  }
-                  const j = (await r.json()) as {
-                    id?: string;
-                    webLink?: string;
-                    onlineMeeting?: { joinUrl?: string };
-                  };
-                  let joinUrl = j.onlineMeeting?.joinUrl;
-                  if (wantsTeams && j.id && !joinUrl && call.via === "user") {
-                    const access = await getMicrosoftAccessToken(userId);
-                    if (access) {
-                      for (let attempt = 0; attempt < 3 && !joinUrl; attempt += 1) {
-                        await new Promise((resolve) => setTimeout(resolve, 700));
-                        const followUp = await fetch(
-                          `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(j.id)}?$select=id,webLink,onlineMeeting`,
-                          { headers: { Authorization: `Bearer ${access.accessToken}` } },
-                        );
-                        if (followUp.ok) {
-                          const fresh = (await followUp.json()) as { onlineMeeting?: { joinUrl?: string } };
-                          joinUrl = fresh.onlineMeeting?.joinUrl;
-                        }
-                      }
-                    }
-                  }
-                  await logAction(
-                    "create_calendar_event",
-                    `Created event "${title}" on Outlook${joinUrl ? " with Teams meeting" : ""}`,
-                    { title, start, end, attendees, location, provider: "outlook", teams: !!joinUrl },
-                  );
-                  return {
-                    ok: true,
-                    provider: "outlook",
-                    id: j.id,
-                    link: j.webLink,
-                    ...(joinUrl ? { teams_join_url: joinUrl } : {}),
-                    ...(wantsTeams && !joinUrl
-                      ? {
-                          warning:
-                            "Outlook created the meeting, but Microsoft did not return the Teams join link yet. Open the Outlook event to view the link.",
-                        }
-                      : {}),
-                  };
-                }
+                const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
+                const result = await createMicrosoftCalendarEvent(userId, {
+                  title,
+                  start,
+                  end,
+                  description,
+                  location,
+                  attendees,
+                  timezone,
+                  online_meeting: online_meeting ?? true,
+                });
+                await logAction(
+                  "create_calendar_event",
+                  "error" in result
+                    ? `Failed to create Outlook calendar event "${title}"`
+                    : `Created event "${title}" on Outlook${result.teams_join_url ? " with Teams meeting" : ""}`,
+                  { title, start, end, attendees, location, provider: "outlook", result },
+                  "error" in result ? "error" : "ok",
+                );
+                return result;
+              },
+            }),
+            cancel_calendar_event: tool({
+              description:
+                "Cancel/delete an Outlook calendar event and notify attendees when possible. If the user did not provide a precise event id, call list_calendar_events first and ask them to confirm which event before using this tool.",
+              inputSchema: z.object({
+                event_id: z.string().min(1).describe("The Outlook event id from list_calendar_events."),
+                comment: z.string().max(1000).optional().describe("Optional cancellation message to send to attendees."),
+              }),
+              execute: async ({ event_id, comment }) => {
+                const { cancelMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
+                const result = await cancelMicrosoftCalendarEvent(userId, { event_id, comment });
+                await logAction(
+                  "cancel_calendar_event",
+                  "error" in result ? `Failed to cancel Outlook event ${event_id}` : `Canceled Outlook event ${event_id}`,
+                  { event_id, comment, provider: "outlook", result },
+                  "error" in result ? "error" : "ok",
+                );
+                return result;
+              },
+            }),
+            respond_calendar_event: tool({
+              description:
+                "Accept, tentatively accept, or decline an Outlook meeting invitation. If the user did not provide a precise event id, call list_calendar_events first and ask them to confirm which meeting before using this tool.",
+              inputSchema: z.object({
+                event_id: z.string().min(1).describe("The Outlook event id from list_calendar_events."),
+                response: z.enum(["accept", "tentative", "decline"]),
+                comment: z.string().max(1000).optional(),
+                send_response: z.boolean().optional().describe("Whether to send the organizer a response. Default true."),
+              }),
+              execute: async ({ event_id, response, comment, send_response }) => {
+                const { respondToMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
+                const result = await respondToMicrosoftCalendarEvent(userId, { event_id, response, comment, send_response });
+                await logAction(
+                  "respond_calendar_event",
+                  "error" in result ? `Failed to ${response} Outlook event ${event_id}` : `${response}ed Outlook event ${event_id}`,
+                  { event_id, response, comment, send_response, provider: "outlook", result },
+                  "error" in result ? "error" : "ok",
+                );
+                return result;
               },
             }),
             recall_facts: tool({
