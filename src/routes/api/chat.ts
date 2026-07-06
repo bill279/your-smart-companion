@@ -166,6 +166,24 @@ When the user asks for "top X", "best X", "list of X", recommendations, comparis
 - Only after you have genuinely exhausted 3+ reformulated searches AND scraping should you tell the user what's missing — and even then, lead with what you DID find, then state the specific gap and your recommended next step (don't ask permission, recommend).
 - Never end a research answer with "Would you like me to…". End with the result and, if useful, a single proactive next action you'll take if they say "go".`;
 
+const DEPTH_MANDATE = `
+
+# Answer depth (mandatory — this is the #1 quality bar)
+Short, generic answers are the most common failure mode. Do not commit it.
+
+For anything analytical, comparative, technical, research-based, "explain / how / why / what's the difference / recommend / draft" — the answer must be substantive:
+- **Minimum 250–500 words** (longer when the topic warrants it). If your first draft is under ~200 words on a non-trivial question, expand it before responding.
+- **Use structure**: a short opening take, then \`##\` headings, bullets, and short prose paragraphs. Include specifics — real numbers, named products/companies, concrete examples, trade-offs, edge cases.
+- **Answer the WHY, not just the what.** Explain reasoning, context, when-to-use, and when-NOT-to-use. Anticipate the natural follow-up and answer it in the same turn.
+- **Cite sources inline** when you searched: \`[Source name](url)\`.
+
+Forbidden shapes:
+- One-paragraph vague summaries like "There are several options. Some are good for X, others for Y. It depends on your needs."
+- Answers that just restate the question or list categories without recommendations.
+- Ending with "Let me know if you want more detail" instead of just giving the detail.
+
+Only exception: pure factual / yes-no / chit-chat questions ("what time is it in Tokyo", "thanks", "cool"). Those stay short (1–3 sentences). Everything else: go deep by default.`;
+
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
 function cleanAssistantText(text: string) {
@@ -361,7 +379,7 @@ export const Route = createFileRoute("/api/chat")({
         const userBlock = userEmail
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
@@ -386,6 +404,15 @@ export const Route = createFileRoute("/api/chat")({
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(50),
+          // Push the model toward richer, more thorough answers instead of
+          // the terse default it tends to give. GPT-5.4 exposes both
+          // reasoning-effort and text-verbosity knobs.
+          providerOptions: {
+            openai: {
+              reasoningEffort: "high",
+              textVerbosity: "high",
+            },
+          },
           tools: {
             web_search: tool({
               description:
