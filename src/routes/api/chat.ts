@@ -736,13 +736,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 max_results: z.number().int().min(1).max(50).optional(),
               }),
               execute: async ({ days, max_results }) => {
-                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const now = new Date();
                 const end = new Date(now.getTime() + (days ?? 7) * 86400000);
                 const top = String(max_results ?? 10);
-                if (!process.env.MICROSOFT_OUTLOOK_API_KEY) {
-                  return { error: "Outlook is not connected." };
-                }
                 {
                   const params = new URLSearchParams({
                     startDateTime: now.toISOString(),
@@ -750,10 +746,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     $orderby: "start/dateTime",
                     $top: top,
                   });
-                  const r = await fetch(
-                    `https://connector-gateway.lovable.dev/microsoft_outlook/me/calendarView?${params}`,
-                    { headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY") },
-                  );
+                  const call = await msGraphFetch(userId, `/me/calendarView?${params}`, { method: "GET" });
+                  if (!call) return { error: "Microsoft is not connected. Connect it from the Activity page." };
+                  const r = call.response;
                   if (!r.ok) {
                     const t = await r.text();
                     return { error: `Outlook calendar read failed (${r.status})`, detail: t.slice(0, 200) };
