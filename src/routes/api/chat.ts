@@ -45,13 +45,13 @@ You have tools:
 - web_search — search the live web. Use it for anything time-sensitive: companies, people, news, prices, products, current facts.
 - web_scrape — fetch the readable markdown of a specific URL.
 - product_search — search for REAL products the user could buy (gadgets, gear, tools, clothing, appliances, software, courses). Returns product cards (title, image, price, merchant, url) that the UI renders as a visual carousel. Use this INSTEAD of web_search whenever the user asks to find, compare, recommend, or shop for a specific product. After it returns, write a brief recommendation — do NOT re-list every product in prose; the cards are already shown.
-- send_email — send an email from the user's connected Outlook account. Use when the user asks to email someone (including themselves).
+- send_email — send an email from the user's connected Outlook account. Use when the user asks to email someone (including themselves). Do NOT use this as a fallback for failed meeting/calendar creation; if calendar creation fails, report the calendar error instead of sending a fake invite email.
   - To ATTACH a file you generated with \`generate_document\`, call \`send_email\` with \`attach_file_url\` = the URL returned by \`generate_document\` and \`attach_file_name\` = the returned \`filename\`. NEVER paste that URL into the email body — the recipient sees an attached file, not a link.
   - Email bodies must be a short human message (greeting, 1–3 sentences about what's attached, sign-off). Do NOT include "You can also download the document directly here: …" or any raw storage URL.
 - list_contacts — load the user's saved address book (name, email, notes). Call this BEFORE asking the user for an email address whenever they refer to a recipient by name (e.g. "email Mike", "send this to Sarah at BP"). Match by name (case-insensitive, partial OK).
 - save_contact — add or update a contact in the user's address book. Use when the user says things like "save this as a contact", "remember john@x.com as John", or after they confirm a brand-new recipient you should remember.
 - list_calendar_events — list upcoming events from the user's connected Outlook calendar. Use for "what's on my calendar", "am I free Thursday", "next meeting".
-- create_calendar_event — create a new event on the user's connected Outlook calendar. Set online_meeting=true to attach a Microsoft Teams meeting with a join link (default true when attendees are present). Confirm title, start, end, and attendees with the user before calling.
+- create_calendar_event — create a new event on the user's connected Outlook calendar. Set online_meeting=true to attach a Microsoft Teams meeting with a join link (default true when attendees are present). Confirm title, start, end, and attendees with the user before calling. Microsoft Teams connection alone is not enough; the Outlook account must have calendar write permission.
 - recall_facts — load durable facts the user has asked you to remember (boss, company, preferences, tools). Call this at the start of any conversation where personal context might help.
 - remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
@@ -80,6 +80,7 @@ Rules:
 - Interpret relative times ("tomorrow 3pm", "next Tuesday") using the user's local timezone. If unsure, ask.
 - Default event length is 30 minutes unless the user says otherwise.
 - When attendees are provided, the calendar provider automatically emails them an invitation with accept/decline. Tell the user "invites will be sent to: ..." in the draft so they know.
+- If \`create_calendar_event\` fails, do NOT call \`send_email\` as a substitute. Tell the user the calendar event was not created and surface the specific provider/permission error.
 
 # Saved contacts flow
 - When the user names a person (not an email), call \`list_contacts\` first. If exactly one match, confirm "Send to Mike Johnson at mike@example.com?" before drafting. If multiple matches, list them and ask which. If no match, ask for the address and offer to save it.
@@ -753,7 +754,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             create_calendar_event: tool({
               description:
-                "Create a new event on the user's connected Outlook calendar. Set online_meeting=true to attach a Microsoft Teams meeting with a join link. Only call after the user has approved the draft.",
+                "Create a new event on the user's connected Outlook calendar. Set online_meeting=true to attach a Microsoft Teams meeting with a join link. Only call after the user has approved the draft. If this fails, report the error; do not send an email as a substitute calendar invite.",
               inputSchema: z.object({
                 title: z.string().min(1).max(200),
                 start: z.string().describe("ISO 8601 start datetime, e.g. 2026-07-01T15:00:00-04:00"),
@@ -806,6 +807,19 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   );
                   if (!r.ok) {
                     const t = await r.text();
+                     await logAction(
+                       "create_calendar_event",
+                       `Failed to create Outlook calendar event "${title}"`,
+                       { title, start, end, attendees, location, provider: "outlook", status: r.status, detail: t.slice(0, 500) },
+                       "error",
+                     );
+                     if (r.status === 403) {
+                       return {
+                         error:
+                           "Outlook calendar create failed (403). The connected Outlook account does not currently allow calendar event creation. A Microsoft Teams connection alone does not grant calendar write access.",
+                         detail: t.slice(0, 500),
+                       };
+                     }
                     return { error: `Outlook calendar create failed (${r.status})`, detail: t.slice(0, 200) };
                   }
                   const j = (await r.json()) as {
