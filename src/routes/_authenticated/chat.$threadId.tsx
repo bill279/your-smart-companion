@@ -449,9 +449,15 @@ function ThreadView({ threadId }: { threadId: string }) {
         const query = p.query?.trim();
         if (!query) return JSON.stringify({ error: "query required" });
 
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return JSON.stringify({ error: "not signed in" });
         const res = await fetch("/api/public/web-search", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ query, limit: p.limit ?? 5 }),
         });
         const data = await res.json().catch(() => ({ error: "search failed" }));

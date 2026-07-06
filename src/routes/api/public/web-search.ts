@@ -1,9 +1,33 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { createClient } from "@supabase/supabase-js";
 
 export const Route = createFileRoute("/api/public/web-search")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        // Require a signed-in user (bearer token). This route is public-prefixed
+        // so it bypasses platform auth, so we verify the token here to prevent
+        // anyone on the internet from burning our Firecrawl quota.
+        const authHeader = request.headers.get("authorization") ?? "";
+        const token = authHeader.toLowerCase().startsWith("bearer ")
+          ? authHeader.slice(7).trim()
+          : "";
+        if (!token) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+        const url = process.env.SUPABASE_URL;
+        const publishable = process.env.SUPABASE_PUBLISHABLE_KEY;
+        if (!url || !publishable) {
+          return Response.json({ error: "Auth not configured" }, { status: 500 });
+        }
+        const supabase = createClient(url, publishable, {
+          auth: { persistSession: false, autoRefreshToken: false },
+          global: { headers: { Authorization: `Bearer ${token}` } },
+        });
+        const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
+        if (userErr || !userRes?.user) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
         const key = process.env.FIRECRAWL_API_KEY;
         if (!key) return Response.json({ error: "Not configured" }, { status: 500 });
         const body = (await request.json().catch(() => ({}))) as { query?: string; limit?: number };
