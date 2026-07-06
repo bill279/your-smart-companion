@@ -651,12 +651,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
 </style></head><body><div class="container">${inner}</div></body></html>`;
                 };
                  if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
-                   const r = await fetch(
-                     "https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail",
-                     {
-                       method: "POST",
-                       headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
-                       body: JSON.stringify({
+                   const call = await msGraphFetch(userId, "/me/sendMail", {
+                     method: "POST",
+                     body: JSON.stringify({
                          message: {
                            subject,
                            body: { contentType: "HTML", content: renderHtml(emailBody) },
@@ -678,8 +675,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                               : {}),
                          },
                        }),
-                     },
-                   );
+                   });
+                   if (!call) return { error: "Outlook is not connected." };
+                   const r = call.response;
                    if (!r.ok) {
                      const t = await r.text();
                      await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
