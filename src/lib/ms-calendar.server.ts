@@ -56,6 +56,31 @@ function htmlWithTeamsLink(description: string | undefined, joinUrl: string) {
   return `${intro}<div><strong>Microsoft Teams meeting</strong><br><a href="${joinUrl}">Join the meeting</a></div>`;
 }
 
+async function createStandaloneTeamsMeeting(userId: string, input: EventCreateInput, attendees: string[]) {
+  const startDateTime = new Date(input.start);
+  const endDateTime = new Date(input.end);
+  if (Number.isNaN(startDateTime.getTime()) || Number.isNaN(endDateTime.getTime())) return undefined;
+
+  const response = await graphFetch(userId, "/me/onlineMeetings", {
+    method: "POST",
+    body: JSON.stringify({
+      subject: input.title,
+      startDateTime: startDateTime.toISOString(),
+      endDateTime: endDateTime.toISOString(),
+      ...(attendees.length
+        ? {
+            participants: {
+              attendees: attendees.map((email) => ({ upn: email, role: "attendee" })),
+            },
+          }
+        : {}),
+    }),
+  });
+  if (!response?.ok) return undefined;
+  const meeting = (await response.json().catch(() => ({}))) as { joinWebUrl?: string };
+  return meeting.joinWebUrl;
+}
+
 async function wait(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -168,6 +193,7 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
 
   let event = (await response.json()) as GraphEvent;
   let joinUrl = teamsJoinUrl(event);
+  let joinUrlSource: "event" | "onlineMeeting" | undefined = joinUrl ? "event" : undefined;
 
   const createdEventId = event.id;
   if (wantsTeams && createdEventId && !joinUrl) {
@@ -187,7 +213,16 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
       if (fresh?.ok) {
         event = (await fresh.json()) as GraphEvent;
         joinUrl = teamsJoinUrl(event);
+        if (joinUrl) joinUrlSource = "event";
       }
+    }
+  }
+
+  if (wantsTeams && !joinUrl) {
+    const standaloneJoinUrl = await createStandaloneTeamsMeeting(userId, input, attendees).catch(() => undefined);
+    if (standaloneJoinUrl) {
+      joinUrl = standaloneJoinUrl;
+      joinUrlSource = "onlineMeeting";
     }
   }
 
@@ -195,7 +230,10 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
   if (eventId && joinUrl) {
     await graphFetch(userId, `/me/events/${encodeURIComponent(eventId)}`, {
       method: "PATCH",
-      body: JSON.stringify({ body: { contentType: "HTML", content: htmlWithTeamsLink(input.description, joinUrl) } }),
+      body: JSON.stringify({
+        body: { contentType: "HTML", content: htmlWithTeamsLink(input.description, joinUrl) },
+        location: { displayName: "Microsoft Teams Meeting" },
+      }),
     }).catch(() => undefined);
   }
 
@@ -207,6 +245,7 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
     invite_sent: attendees.length > 0,
     attendees,
     ...(joinUrl ? { teams_join_url: joinUrl } : {}),
+    ...(joinUrlSource ? { teams_join_url_source: joinUrlSource } : {}),
     ...(wantsTeams && !joinUrl
       ? {
           warning:

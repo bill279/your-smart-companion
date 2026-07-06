@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { gatewayHeaders, json } from "@/lib/jarvis-tools.server";
 import { marked } from "marked";
+import { looksLikeCalendarInviteText } from "@/lib/calendar-guards";
 
 const Body = z.object({
   to: z.string().email(),
@@ -59,6 +60,15 @@ export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
         const parsed = Body.safeParse(await request.json().catch(() => ({})));
         if (!parsed.success) return json({ error: parsed.error.message }, 400);
         const data = parsed.data;
+        if (looksLikeCalendarInviteText(`${data.subject}\n${data.body}\n${data.attachment?.filename ?? ""}`)) {
+          return json(
+            {
+              error:
+                "This looks like a calendar/Teams invite. Create a real Outlook calendar event with create_calendar_event instead of emailing a fake invite file.",
+            },
+            400,
+          );
+        }
 
         // Send via Outlook.
         if (process.env.MICROSOFT_OUTLOOK_API_KEY) {

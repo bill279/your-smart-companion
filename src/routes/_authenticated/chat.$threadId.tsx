@@ -48,6 +48,7 @@ import {
 } from "@/lib/jarvis.functions";
 import { createChatUploadUrl } from "@/lib/uploads.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { looksLikeCalendarInviteText } from "@/lib/calendar-guards";
 
 const VOICE_SESSION_PROMPT = `You are BPA Bot, BP Automation's assistant. Continue the active conversation; do not introduce yourself, do not greet again, and do not say your name unless asked.
 
@@ -61,6 +62,7 @@ Never say you are unable to display a visual table directly in this chat interfa
 TOOL USE — non-negotiable:
 - CALENDAR MEETINGS COME FIRST: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting.
 - CALENDAR MANAGEMENT: For "what meetings do I have", availability, canceling, accepting, tentatively accepting, or declining meetings, use the calendar tools. If cancel/respond is ambiguous, list events first and confirm which one.
+- CONTACT NAMES FOR MEETINGS: If the user says a saved contact name like "Bill", pass that name in attendees or call list_contacts; do not ask again if the contact exists in the chat/contact list. The server resolves saved names to email addresses.
 - For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
 - For ANY factual question about real companies, people, prices, addresses, news, or anything time-sensitive: CALL web_search FIRST. Never invent facts, addresses, phone numbers, or pricing.
 - If the user asks you to create, generate, export, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. This does NOT apply to calendar/meeting invites. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs. The tool shows the file as a preview card in the chat — it does NOT auto-download. After calling, say something like "I've put the document in the chat — you can preview it, download it, or ask me to email it." Do NOT say "downloading now." Choose a sensible short filename.
@@ -155,7 +157,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         end: { type: "string", description: "ISO 8601 end datetime" },
         description: { type: "string" },
         location: { type: "string" },
-        attendees: { type: "array", items: { type: "string" } },
+        attendees: { type: "array", items: { type: "string" }, description: "Attendee email addresses or saved contact names, e.g. bill@company.com or Bill." },
         timezone: { type: "string", description: "IANA timezone, e.g. America/Toronto" },
         online_meeting: { type: "boolean", description: "True for Teams meetings; default true for all meetings unless user explicitly says no online meeting." },
       },
@@ -595,6 +597,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (!p.to || !p.subject || !p.body) {
           return JSON.stringify({ error: "to, subject and body are required" });
         }
+        if (looksLikeCalendarInviteText(`${p.subject}\n${p.body}`) || (p.attach_last_document && looksLikeCalendarInviteText(p.subject))) {
+          return JSON.stringify({
+            error:
+              "This looks like a calendar/Teams invite. Use create_calendar_event so Outlook sends a real invite with accept/decline and a Teams link.",
+          });
+        }
         const { data: sess } = await supabase.auth.getSession();
         const token = sess.session?.access_token;
         if (!token) return JSON.stringify({ error: "not signed in" });
@@ -709,9 +717,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         const format = (p.format ?? "pdf").toLowerCase();
         const title = (p.title ?? "BPA Bot document").slice(0, 80);
         const content = String(p.content ?? "").trim();
-        const inviteLike = /(calendar\s+invite|meeting\s+invite|teams\s+meeting|outlook\s+invite|please\s+accept\s+or\s+decline|\[insert\s+teams\s+link\s+here\])/i.test(
-          `${title}\n${content}`,
-        );
+        const inviteLike = looksLikeCalendarInviteText(`${title}\n${content}`);
         if (inviteLike) {
           return JSON.stringify({
             error:
@@ -902,6 +908,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- FACTS: for any real company, person, address, price, phone number, or current event, call web_search FIRST. Never invent details.",
       "- CALENDAR MEETINGS COME FIRST: if the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise draft, wait for explicit approval, then CALL create_calendar_event. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting.",
       "- CALENDAR MANAGEMENT: for what meetings do I have, availability, canceling, accepting, tentatively accepting, or declining meetings, use the calendar tools. If cancel/respond is ambiguous, list events first and confirm which one.",
+      "- CONTACT NAMES FOR MEETINGS: saved contact names like Bill are valid attendees. Pass the contact name to create_calendar_event; the server resolves it to an email address.",
       "- FILE EXPORTS: if the user asks to create, generate, export, download, save, or convert to PDF, Word, DOCX, Excel, XLSX, or CSV, CALL the generate_document tool. This does NOT apply to calendar/meeting invites. Never say you cannot make a file. Never tell them to copy into Word or Google Docs.",
       "- CALENDAR MEETINGS: if the user asks to book, schedule, create, or send a calendar invite / meeting invite / Teams meeting, do NOT generate a document and do NOT use send_email. Show a concise draft, wait for explicit approval, then CALL create_calendar_event. Default to Teams for every meeting so Outlook sends real invites and a Teams link.",
       "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
