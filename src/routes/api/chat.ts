@@ -1021,6 +1021,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               }),
               execute: async ({ format, filename, title, markdown }) => {
                 try {
+                  if (/(calendar\s+invite|meeting\s+invite|teams\s+meeting|outlook\s+invite|please\s+accept\s+or\s+decline|\[insert\s+teams\s+link\s+here\])/i.test(`${title}\n${markdown}`)) {
+                    return {
+                      error:
+                        "This is a calendar/Teams invite, not a document. Call create_calendar_event with online_meeting=true so Outlook sends the real invite and Teams link.",
+                    };
+                  }
                   const { generateDocument } = await import("@/lib/document-generator.server");
                   const { bytes, mimeType, extension } = await generateDocument({
                     format,
@@ -1028,12 +1034,6 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     markdown,
                   });
                   const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
-                  if (/\b(calendar\s+invite|meeting\s+invite|teams\s+meeting|outlook\s+invite|please\s+accept\s+or\s+decline|\[insert\s+teams\s+link\s+here\])\b/i.test(`${title}\n${markdown}`)) {
-                    return {
-                      error:
-                        "This is a calendar/Teams invite, not a document. Call create_calendar_event with online_meeting=true so Outlook sends the real invite and Teams link.",
-                    };
-                  }
                   // Put the timestamp in a folder segment so the visible
                   // filename in the URL stays clean (e.g. no "1783...-name").
                   const path = `generated/${userId}/${Date.now().toString(36)}/${safeName}.${extension}`;

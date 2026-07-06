@@ -622,7 +622,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         const format = (p.format ?? "pdf").toLowerCase();
         const title = (p.title ?? "BPA Bot document").slice(0, 80);
         const content = String(p.content ?? "").trim();
-        const inviteLike = /\b(calendar\s+invite|meeting\s+invite|teams\s+meeting|outlook\s+invite|please\s+accept\s+or\s+decline|\[insert\s+teams\s+link\s+here\])\b/i.test(
+        const inviteLike = /(calendar\s+invite|meeting\s+invite|teams\s+meeting|outlook\s+invite|please\s+accept\s+or\s+decline|\[insert\s+teams\s+link\s+here\])/i.test(
           `${title}\n${content}`,
         );
         if (inviteLike) {
