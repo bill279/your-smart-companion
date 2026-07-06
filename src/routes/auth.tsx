@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 
@@ -57,19 +56,6 @@ function AuthPage() {
     }
   }
 
-  async function handleGoogle() {
-    setLoading(true);
-    const res = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: `${window.location.origin}${returnTo}`,
-    });
-    if (res.error) {
-      toast.error(res.error.message);
-      setLoading(false);
-    } else if (!res.redirected) {
-      window.location.href = returnTo;
-    }
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="hud-panel hud-corner w-full max-w-md p-8 rounded-lg">
@@ -83,20 +69,6 @@ function AuthPage() {
           <div className="text-xs text-muted-foreground mt-2 tracking-widest">
             JUST A RATHER VERY INTELLIGENT SYSTEM
           </div>
-        </div>
-
-        <button
-          onClick={handleGoogle}
-          disabled={loading}
-          className="w-full mb-4 py-2.5 px-4 rounded border border-primary/40 hover:border-primary hover:bg-primary/10 transition text-sm tracking-wide disabled:opacity-50"
-        >
-          Continue with Google
-        </button>
-
-        <div className="flex items-center gap-3 my-4 text-xs text-muted-foreground">
-          <div className="flex-1 h-px bg-primary/20" />
-          <span>OR</span>
-          <div className="flex-1 h-px bg-primary/20" />
         </div>
 
         <form onSubmit={handleEmail} className="space-y-3">
