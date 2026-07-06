@@ -367,7 +367,7 @@ export const Route = createFileRoute("/api/chat")({
           };
         });
         const result = streamText({
-          model: gateway("google/gemini-3.5-flash"),
+          model: gateway("openai/gpt-5.1"),
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(50),
