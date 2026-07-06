@@ -59,9 +59,10 @@ Format answers for this chat UI. If the user asks for a table, visual table, com
 Never say you are unable to display a visual table directly in this chat interface. The interface renders Markdown tables. Be concise and contribute directly to the conversation.
 
 TOOL USE — non-negotiable:
+- CALENDAR MEETINGS COME FIRST: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. With attendees, set online_meeting=true.
 - For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
 - For ANY factual question about real companies, people, prices, addresses, news, or anything time-sensitive: CALL web_search FIRST. Never invent facts, addresses, phone numbers, or pricing.
-- If the user asks you to create, generate, export, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs. The tool shows the file as a preview card in the chat — it does NOT auto-download. After calling, say something like "I've put the document in the chat — you can preview it, download it, or ask me to email it." Do NOT say "downloading now." Choose a sensible short filename.
+- If the user asks you to create, generate, export, save, or convert something to a PDF, Word document, DOCX, Excel, XLSX, or CSV: CALL the generate_document tool. This does NOT apply to calendar/meeting invites. NEVER say you cannot generate a file, and NEVER tell the user to copy the content into Word or Google Docs. The tool shows the file as a preview card in the chat — it does NOT auto-download. After calling, say something like "I've put the document in the chat — you can preview it, download it, or ask me to email it." Do NOT say "downloading now." Choose a sensible short filename.
 - If the user asks you to email a document you just generated (e.g. "email me that Word doc"): call send_email with attach_last_document=true so the file is attached. Confirm the recipient address first.
 - CALENDAR MEETINGS: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Teams meeting, do NOT create a document and do NOT use send_email. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. When attendees are included, set online_meeting=true so Outlook sends real calendar invites with a Teams join link.`;
 
@@ -164,7 +165,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "generate_document",
     description:
-      "Generate a document file (PDF, DOCX, XLSX, or CSV) from provided content and show it as a preview card in the chat (with Download and Email buttons). Does NOT auto-download. Use whenever the user asks to create, export, save, or convert content to a file. NEVER refuse; NEVER tell the user to copy into another app. After calling, briefly confirm out loud, e.g. 'I've put the Word doc in the chat — let me know if you want to email it or make edits.' Do NOT say the file is downloading.",
+      "Generate a document file (PDF, DOCX, XLSX, or CSV) from provided content and show it as a preview card in the chat (with Download and Email buttons). Does NOT auto-download. Use whenever the user asks to create, export, save, or convert content to a file. NEVER use this for calendar invites, meeting invites, Outlook invites, Teams meetings, or scheduling; use create_calendar_event instead. NEVER refuse; NEVER tell the user to copy into another app. After calling, briefly confirm out loud, e.g. 'I've put the Word doc in the chat — let me know if you want to email it or make edits.' Do NOT say the file is downloading.",
     parameters: {
       type: "object",
       properties: {
@@ -621,6 +622,15 @@ function ThreadView({ threadId }: { threadId: string }) {
         const format = (p.format ?? "pdf").toLowerCase();
         const title = (p.title ?? "BPA Bot document").slice(0, 80);
         const content = String(p.content ?? "").trim();
+        const inviteLike = /\b(calendar\s+invite|meeting\s+invite|teams\s+meeting|outlook\s+invite|please\s+accept\s+or\s+decline|\[insert\s+teams\s+link\s+here\])\b/i.test(
+          `${title}\n${content}`,
+        );
+        if (inviteLike) {
+          return JSON.stringify({
+            error:
+              "This is a calendar/Teams invite, not a document. Do not generate a placeholder file. Show the meeting draft if needed, then call create_calendar_event with online_meeting=true so Outlook sends the real invite and Teams link.",
+          });
+        }
         if (!content) return JSON.stringify({ error: "content required" });
         if (!["pdf", "docx", "xlsx", "csv"].includes(format)) {
           return JSON.stringify({ error: "format must be pdf, docx, xlsx or csv" });
@@ -803,7 +813,8 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- Do not greet or introduce yourself again.",
       "- TABLES / LONG STRUCTURED CONTENT: call the show_in_chat tool with the full Markdown table. Do NOT read the table aloud. After the tool returns, say one short spoken sentence (e.g. \"Here's the table.\").",
       "- FACTS: for any real company, person, address, price, phone number, or current event, call web_search FIRST. Never invent details.",
-      "- FILE EXPORTS: if the user asks to create, generate, export, download, save, or convert to PDF, Word, DOCX, Excel, XLSX, or CSV, CALL the generate_document tool. Never say you cannot make a file. Never tell them to copy into Word or Google Docs.",
+      "- CALENDAR MEETINGS COME FIRST: if the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise draft, wait for explicit approval, then CALL create_calendar_event. With attendees, set online_meeting=true so Outlook sends real invites and a Teams link.",
+      "- FILE EXPORTS: if the user asks to create, generate, export, download, save, or convert to PDF, Word, DOCX, Excel, XLSX, or CSV, CALL the generate_document tool. This does NOT apply to calendar/meeting invites. Never say you cannot make a file. Never tell them to copy into Word or Google Docs.",
       "- CALENDAR MEETINGS: if the user asks to book, schedule, create, or send a calendar invite / meeting invite / Teams meeting, do NOT generate a document and do NOT use send_email. Show a concise draft, wait for explicit approval, then CALL create_calendar_event. With attendees, set online_meeting=true so Outlook sends real invites and a Teams link.",
       "- EMAIL: before drafting any email, ALWAYS confirm the recipient's email address out loud (e.g. \"Just to confirm, send this to john@example.com?\") and wait for the user to confirm. Never guess or invent addresses.",
       "- EMAIL FORMATTING: always write emails in clean, professional Markdown — a proper greeting, short well-structured paragraphs, bullet lists or tables where helpful, and a sign-off. Never send a plain unformatted dump.",
