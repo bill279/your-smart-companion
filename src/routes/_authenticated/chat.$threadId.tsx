@@ -12,11 +12,8 @@ import {
   exportToDocx,
   exportToXlsx,
   exportToCsv,
-  buildPdf,
-  buildDocx,
-  buildXlsx,
-  buildCsv,
 } from "@/lib/chat-export";
+import { generateAndStoreDocument } from "@/lib/document.functions";
 import {
   saveArtifact,
   getArtifact,
