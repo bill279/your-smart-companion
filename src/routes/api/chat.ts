@@ -44,6 +44,7 @@ This assistant may also be spoken aloud via voice mode. Voice mode has its OWN s
 You have tools:
 - web_search — search the live web. Use it for anything time-sensitive: companies, people, news, prices, products, current facts.
 - web_scrape — fetch the readable markdown of a specific URL.
+- product_search — search for REAL products the user could buy (gadgets, gear, tools, clothing, appliances, software, courses). Returns product cards (title, image, price, merchant, url) that the UI renders as a visual carousel. Use this INSTEAD of web_search whenever the user asks to find, compare, recommend, or shop for a specific product. After it returns, write a brief recommendation — do NOT re-list every product in prose; the cards are already shown.
 - send_email — send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone (including themselves).
   - To ATTACH a file you generated with \`generate_document\`, call \`send_email\` with \`attach_file_url\` = the URL returned by \`generate_document\` and \`attach_file_name\` = the returned \`filename\`. NEVER paste that URL into the email body — the recipient sees an attached file, not a link.
   - Email bodies must be a short human message (greeting, 1–3 sentences about what's attached, sign-off). Do NOT include "You can also download the document directly here: …" or any raw storage URL.
@@ -254,6 +255,7 @@ export const Route = createFileRoute("/api/chat")({
           content?: string;
           attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
           regenerate?: boolean;
+          forceWebSearch?: boolean;
         };
         const attachments = body.attachments ?? [];
         if (!body.threadId || (!body.regenerate && !body.content?.trim() && attachments.length === 0)) {
@@ -379,7 +381,10 @@ export const Route = createFileRoute("/api/chat")({
         const userBlock = userEmail
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}`;
+        const forceSearchBlock = body.forceWebSearch
+          ? `\n\n# 🌐 Web-search mode is ON for this turn (user toggled it)\nYou MUST call the \`web_search\` tool at least once before answering. If the user is asking about specific products, gear, or things they might buy (phones, cameras, tools, gadgets, clothes, appliances, software, courses, etc.), call the \`product_search\` tool instead of \`web_search\`. After the tool returns, write a real answer that cites sources. Do NOT answer from memory when this mode is on.`
+          : "";
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
@@ -473,6 +478,77 @@ export const Route = createFileRoute("/api/chat")({
                   title: j.data?.metadata?.title,
                   markdown: md.length > 8000 ? md.slice(0, 8000) + "\n\n…[truncated]" : md,
                 };
+              },
+            }),
+            product_search: tool({
+              description:
+                "Search the web for real products the user could buy (gadgets, gear, tools, clothing, appliances, software, courses, etc.) and return a compact list of product cards (title, image, price, merchant, url). Use this INSTEAD of web_search whenever the user asks to find, compare, recommend, or shop for a real product. After calling, write a short recommendation paragraph — do NOT re-list every product in prose; the UI renders cards.",
+              inputSchema: z.object({
+                query: z.string().describe("Shopping-style query, e.g. 'best noise cancelling headphones under $300'"),
+                limit: z.number().int().min(1).max(6).optional(),
+              }),
+              execute: async ({ query, limit }) => {
+                const key = process.env.FIRECRAWL_API_KEY;
+                if (!key) return { error: "Product search not configured" };
+                const n = Math.min(limit ?? 5, 6);
+                const r = await fetch("https://api.firecrawl.dev/v2/search", {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${key}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    query,
+                    limit: n,
+                    scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
+                  }),
+                });
+                if (!r.ok) return { error: `Product search failed (${r.status})` };
+                const j = (await r.json()) as {
+                  data?:
+                    | Array<{
+                        title?: string;
+                        url?: string;
+                        description?: string;
+                        markdown?: string;
+                        metadata?: {
+                          title?: string;
+                          description?: string;
+                          ogImage?: string;
+                          "og:image"?: string;
+                          image?: string;
+                          ogSiteName?: string;
+                        };
+                      }>
+                    | { web?: Array<{ title?: string; url?: string; description?: string }> };
+                };
+                const arr = Array.isArray(j.data) ? j.data : j.data?.web ?? [];
+                const hostname = (u?: string) => {
+                  if (!u) return undefined;
+                  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return undefined; }
+                };
+                const extractPrice = (text?: string) => {
+                  if (!text) return undefined;
+                  const m = text.match(/(?:USD|CAD|AUD|GBP|EUR)?\s?[$£€¥]\s?\d{1,3}(?:[,\s]?\d{3})*(?:\.\d{1,2})?/);
+                  return m?.[0]?.trim();
+                };
+                const products = arr.slice(0, n).map((x) => {
+                  const meta = (x as { metadata?: Record<string, unknown> }).metadata ?? {};
+                  const image =
+                    (meta.ogImage as string | undefined) ??
+                    (meta["og:image"] as string | undefined) ??
+                    (meta.image as string | undefined);
+                  const md = (x as { markdown?: string }).markdown ?? "";
+                  return {
+                    title: x.title ?? (meta.title as string | undefined),
+                    url: x.url,
+                    image,
+                    price: extractPrice(md) ?? extractPrice(x.description),
+                    merchant: (meta.ogSiteName as string | undefined) ?? hostname(x.url),
+                    snippet: x.description ?? (meta.description as string | undefined),
+                  };
+                });
+                return { products };
               },
             }),
             send_email: tool({
@@ -1072,12 +1148,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   if (delta) controller.enqueue(encoder.encode(delta));
                 } else if (part.type === "tool-call") {
                   const name = (part as { toolName: string }).toolName;
-                  if (name === "web_search" || name === "web_scrape") {
+                  if (name === "web_search" || name === "web_scrape" || name === "product_search") {
                     const rawInput = (part as { input?: Record<string, unknown> }).input ?? {};
                     const ev: ToolEvent = {
                       t: "call",
                       id: (part as { toolCallId: string }).toolCallId,
-                      name,
+                      name: name as ToolEvent["name"],
                       input: rawInput as { query?: string; url?: string; limit?: number },
                     };
                     collectedActivity.splice(
@@ -1091,13 +1167,13 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   }
                 } else if (part.type === "tool-result") {
                   const name = (part as { toolName: string }).toolName;
-                  if (name === "web_search" || name === "web_scrape") {
+                  if (name === "web_search" || name === "web_scrape" || name === "product_search") {
                     const output = (part as { output?: unknown; result?: unknown }).output
                       ?? (part as { result?: unknown }).result;
                     const ev: ToolEvent = {
                       t: "result",
                       id: (part as { toolCallId: string }).toolCallId,
-                      name,
+                      name: name as ToolEvent["name"],
                       output,
                     };
                     collectedActivity.splice(

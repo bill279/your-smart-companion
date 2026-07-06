@@ -6,7 +6,7 @@ import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
 import { createRealtimeSession } from "@/lib/realtime-voice.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Mic, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Globe, ShoppingBag, ExternalLink } from "lucide-react";
 import {
   exportToPdf,
   exportToDocx,
@@ -379,6 +379,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   });
 
   const [input, setInput] = useState("");
+  const [webSearchOn, setWebSearchOn] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
   const [pendingActivity, setPendingActivity] = useState<ToolActivity[]>([]);
@@ -833,7 +834,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const addMut = useMutation({
-    mutationFn: async ({ content, files, regenerate }: { content: string; files: Attachment[]; regenerate?: boolean }) => {
+    mutationFn: async ({ content, files, regenerate, forceWebSearch }: { content: string; files: Attachment[]; regenerate?: boolean; forceWebSearch?: boolean }) => {
       if (!regenerate) setPendingUser(content);
       setPendingAssistant("");
 
@@ -866,7 +867,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ threadId, content, attachments: files, regenerate }),
+        body: JSON.stringify({ threadId, content, attachments: files, regenerate, forceWebSearch }),
         signal: controller.signal,
       });
       } catch (err) {
@@ -1050,7 +1051,12 @@ function ThreadView({ threadId }: { threadId: string }) {
     const files = attachments;
     setInput("");
     setAttachments([]);
-    addMut.mutate({ content: v || (files.length === 1 ? `Sent: ${files[0].name}` : `Sent ${files.length} files`), files });
+    addMut.mutate({
+      content: v || (files.length === 1 ? `Sent: ${files[0].name}` : `Sent ${files.length} files`),
+      files,
+      forceWebSearch: webSearchOn,
+    });
+    if (webSearchOn) setWebSearchOn(false);
   }
 
   async function handleFilesSelected(fileList: FileList | null) {
@@ -1449,6 +1455,20 @@ function ThreadView({ threadId }: { threadId: string }) {
           >
             <Paperclip size={16} />
           </button>
+          <button
+            type="button"
+            onClick={() => setWebSearchOn((v) => !v)}
+            title={webSearchOn ? "Web search is ON for the next message" : "Force web search for the next message"}
+            aria-pressed={webSearchOn}
+            className={`shrink-0 h-10 px-3 rounded-full flex items-center gap-1.5 border text-sm transition ${
+              webSearchOn
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-secondary hover:bg-secondary/80 text-muted-foreground"
+            }`}
+          >
+            <Globe size={14} />
+            <span className="hidden sm:inline">Search web</span>
+          </button>
           <textarea
             autoFocus
             value={input}
@@ -1676,18 +1696,24 @@ function ToolActivityList({
     <div className="mb-3 flex flex-col gap-1.5">
       {items.map((a, idx) => {
         const isLast = idx === items.length - 1;
-        const pending = streaming && isLast && !a.results && !a.scraped && !a.error;
+        const pending =
+          streaming && isLast && !a.results && !a.scraped && !a.products && !a.error;
         const isOpen = expandedId === a.id;
         const label =
           a.name === "web_search"
             ? pending
               ? `Searching the web…`
               : `Searched the web`
-            : pending
-              ? `Opening ${hostOf(a.url) || "page"}…`
-              : `Read ${hostOf(a.url) || "page"}`;
+            : a.name === "product_search"
+              ? pending
+                ? `Finding products…`
+                : `Found products`
+              : pending
+                ? `Opening ${hostOf(a.url) || "page"}…`
+                : `Read ${hostOf(a.url) || "page"}`;
         const canExpand =
           a.name === "web_search" && (a.results?.length ?? 0) > 0;
+        const hasProducts = a.name === "product_search" && (a.products?.length ?? 0) > 0;
         return (
           <div
             key={a.id}
@@ -1698,7 +1724,11 @@ function ToolActivityList({
               onClick={() => canExpand && setExpandedId(isOpen ? null : a.id)}
               className={`w-full flex items-center gap-2 px-3 py-2 text-left ${canExpand ? "hover:bg-secondary/70 cursor-pointer" : "cursor-default"}`}
             >
-              <Search size={13} className="text-muted-foreground shrink-0" />
+              {a.name === "product_search" ? (
+                <ShoppingBag size={13} className="text-muted-foreground shrink-0" />
+              ) : (
+                <Search size={13} className="text-muted-foreground shrink-0" />
+              )}
               <span className="text-muted-foreground shrink-0">{label}</span>
               {a.query && (
                 <span className="text-foreground font-medium truncate">
@@ -1720,6 +1750,11 @@ function ToolActivityList({
               {!pending && canExpand && (
                 <span className="ml-auto text-xs text-muted-foreground">
                   {a.results?.length} result{(a.results?.length ?? 0) === 1 ? "" : "s"}
+                </span>
+              )}
+              {!pending && hasProducts && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {a.products?.length} product{(a.products?.length ?? 0) === 1 ? "" : "s"}
                 </span>
               )}
             </button>
@@ -1756,6 +1791,59 @@ function ToolActivityList({
                     </a>
                   );
                 })}
+              </div>
+            )}
+            {hasProducts && (
+              <div className="border-t border-border bg-background/40 p-2 overflow-x-auto">
+                <div className="flex gap-2 min-w-max">
+                  {a.products!.map((p, i) => {
+                    const fav = faviconFor(p.url);
+                    return (
+                      <a
+                        key={`${a.id}-p-${i}`}
+                        href={p.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-44 shrink-0 rounded-md border border-border bg-card hover:bg-secondary/60 transition overflow-hidden flex flex-col"
+                      >
+                        <div className="w-full h-28 bg-muted overflow-hidden flex items-center justify-center">
+                          {p.image ? (
+                            <img
+                              src={p.image}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <ShoppingBag size={22} className="text-muted-foreground/60" />
+                          )}
+                        </div>
+                        <div className="p-2 flex flex-col gap-1 min-w-0">
+                          <div className="text-[12.5px] font-medium text-foreground line-clamp-2 leading-tight min-h-[2.4em]">
+                            {p.title || hostOf(p.url)}
+                          </div>
+                          <div className="flex items-center justify-between gap-1">
+                            {p.price ? (
+                              <span className="text-[12px] font-semibold text-primary">{p.price}</span>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">View</span>
+                            )}
+                            <span className="flex items-center gap-1 text-[10.5px] text-muted-foreground truncate">
+                              {fav && (
+                                <img src={fav} alt="" className="w-3 h-3 rounded-sm" loading="lazy" />
+                              )}
+                              <span className="truncate max-w-[80px]">{p.merchant || hostOf(p.url)}</span>
+                              <ExternalLink size={9} className="shrink-0" />
+                            </span>
+                          </div>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
