@@ -1587,6 +1587,12 @@ function formatBytes(n: number) {
 function ArtifactCard({ artifactId }: { artifactId: string }) {
   const art = getArtifact(artifactId);
   const [sending, setSending] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   if (!art) {
     return (
       <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
@@ -1594,6 +1600,39 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
       </div>
     );
   }
+  const ext = art.filename.toLowerCase().split(".").pop() ?? "";
+  const canPreview = ["pdf", "docx", "csv", "txt", "md"].includes(ext);
+
+  async function openPreview() {
+    if (!art) return;
+    setPreviewOpen(true);
+    if (previewHtml || previewText || previewUrl) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const blob = base64ToBlob(art.base64, art.mimeType);
+      if (ext === "pdf") {
+        setPreviewUrl(URL.createObjectURL(blob));
+      } else if (ext === "docx") {
+        const buf = await blob.arrayBuffer();
+        const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });
+        setPreviewHtml(value || "<p><em>Document is empty.</em></p>");
+      } else if (ext === "csv" || ext === "txt" || ext === "md") {
+        setPreviewText(await blob.text());
+      }
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : "Could not preview file");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
   async function emailToMe() {
     if (!art) return;
     setSending(true);
@@ -1630,12 +1669,25 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
       <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
         <FileText size={18} />
       </div>
-      <div className="min-w-0 flex-1">
+      <button
+        type="button"
+        onClick={canPreview ? openPreview : () => downloadArtifact(art)}
+        className="min-w-0 flex-1 text-left hover:opacity-80 transition"
+      >
         <div className="text-sm font-medium truncate">{art.filename}</div>
         <div className="text-xs text-muted-foreground">
           {art.formatLabel} · {formatBytes(art.size)}
         </div>
-      </div>
+      </button>
+      {canPreview && (
+        <button
+          type="button"
+          onClick={openPreview}
+          className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+        >
+          <Eye size={12} /> Preview
+        </button>
+      )}
       <button
         type="button"
         onClick={() => downloadArtifact(art)}
@@ -1651,6 +1703,48 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
       >
         <Mail size={12} /> {sending ? "Sending…" : "Email to me"}
       </button>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="p-4 border-b border-border">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <FileText size={16} /> {art.filename}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto bg-secondary/30">
+            {previewLoading && (
+              <div className="p-8 text-sm text-muted-foreground">Loading preview…</div>
+            )}
+            {previewError && (
+              <div className="p-8 text-sm text-destructive">{previewError}</div>
+            )}
+            {!previewLoading && !previewError && previewUrl && ext === "pdf" && (
+              <iframe src={previewUrl} title={art.filename} className="w-full h-full bg-white" />
+            )}
+            {!previewLoading && !previewError && previewHtml && (
+              <div className="mx-auto max-w-3xl bg-white text-neutral-900 shadow-sm my-6 p-10 rounded-md">
+                <div
+                  className="prose prose-sm max-w-none prose-headings:font-semibold"
+                  dangerouslySetInnerHTML={{ __html: previewHtml }}
+                />
+              </div>
+            )}
+            {!previewLoading && !previewError && previewText && (
+              <pre className="p-6 text-xs whitespace-pre-wrap font-mono text-foreground">
+                {previewText}
+              </pre>
+            )}
+          </div>
+          <div className="p-3 border-t border-border flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => downloadArtifact(art)}
+              className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+            >
+              <Download size={12} /> Download
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
