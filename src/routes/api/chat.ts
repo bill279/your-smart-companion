@@ -894,7 +894,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     markdown,
                   });
                   const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
-                  const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
+                  // Put the timestamp in a folder segment so the visible
+                  // filename in the URL stays clean (e.g. no "1783...-name").
+                  const path = `generated/${userId}/${Date.now().toString(36)}/${safeName}.${extension}`;
                   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
                   const up = await supabaseAdmin.storage
                     .from("chat-uploads")
