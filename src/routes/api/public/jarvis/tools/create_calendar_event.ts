@@ -38,49 +38,9 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
         if (!parsed.success) return json({ error: parsed.error.message }, 400);
         const data = parsed.data;
 
-        const { getMicrosoftAccessToken } = await import("@/lib/ms-graph.server");
-        const ms = await getMicrosoftAccessToken(userId);
-        if (!ms) {
-          return json(
-            {
-              error:
-                "Microsoft is not connected. Open Activity & memory and click Connect Microsoft.",
-            },
-            409,
-          );
-        }
-
-        const wantsTeams = data.online_meeting ?? (data.attendees?.length ?? 0) > 0;
-        const res = await fetch("https://graph.microsoft.com/v1.0/me/events", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${ms.accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            subject: data.title,
-            ...(data.description
-              ? { body: { contentType: "HTML", content: data.description } }
-              : {}),
-            start: { dateTime: data.start, timeZone: data.timezone ?? "UTC" },
-            end: { dateTime: data.end, timeZone: data.timezone ?? "UTC" },
-            ...(data.location ? { location: { displayName: data.location } } : {}),
-            ...(data.attendees?.length
-              ? {
-                  attendees: data.attendees.map((email) => ({
-                    emailAddress: { address: email },
-                    type: "required",
-                  })),
-                }
-              : {}),
-            ...(wantsTeams
-              ? { isOnlineMeeting: true, onlineMeetingProvider: "teamsForBusiness" }
-              : {}),
-          }),
-        });
-
-        if (!res.ok) {
-          const detail = await res.text();
+        const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
+        const result = await createMicrosoftCalendarEvent(userId, { ...data, online_meeting: data.online_meeting ?? true });
+        if ("error" in result) {
           await supabase.from("agent_actions").insert({
             user_id: userId,
             action: "create_calendar_event",
@@ -91,59 +51,28 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
               end: data.end,
               attendees: data.attendees ?? [],
               provider: "outlook",
-              status: res.status,
-              detail: detail.slice(0, 500),
+              status: result.status,
+              detail: result.detail?.slice(0, 500),
             },
             status: "error",
           });
-          return json(
-            { error: `Outlook calendar create failed (${res.status})`, detail: detail.slice(0, 500) },
-            502,
-          );
-        }
-
-        const event = (await res.json()) as {
-          id?: string;
-          webLink?: string;
-          onlineMeeting?: { joinUrl?: string };
-        };
-        let joinUrl = event.onlineMeeting?.joinUrl;
-        if (wantsTeams && event.id && !joinUrl) {
-          for (let attempt = 0; attempt < 3 && !joinUrl; attempt += 1) {
-            await new Promise((resolve) => setTimeout(resolve, 700));
-            const followUp = await fetch(
-              `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(event.id)}?$select=id,webLink,onlineMeeting`,
-              { headers: { Authorization: `Bearer ${ms.accessToken}` } },
-            );
-            if (followUp.ok) {
-              const fresh = (await followUp.json()) as { onlineMeeting?: { joinUrl?: string } };
-              joinUrl = fresh.onlineMeeting?.joinUrl;
-            }
-          }
+          return json(result, result.error.includes("not connected") ? 409 : 502);
         }
         await supabase.from("agent_actions").insert({
           user_id: userId,
           action: "create_calendar_event",
-          summary: `Created event "${data.title}" on Outlook${joinUrl ? " with Teams meeting" : ""}`,
+          summary: `Created event "${data.title}" on Outlook${result.teams_join_url ? " with Teams meeting" : ""}`,
           payload: {
             title: data.title,
             start: data.start,
             end: data.end,
             attendees: data.attendees ?? [],
             provider: "outlook",
-            teams: !!joinUrl,
+            teams: !!result.teams_join_url,
           },
           status: "ok",
         });
-
-        return json({
-          ok: true,
-          provider: "outlook",
-          id: event.id,
-          link: event.webLink,
-          ...(joinUrl ? { teams_join_url: joinUrl } : {}),
-          ...(wantsTeams && !joinUrl ? { warning: "Outlook created the meeting, but Microsoft did not return the Teams join link yet. Open the Outlook event to view the link." } : {}),
-        });
+        return json(result);
       },
     },
   },
