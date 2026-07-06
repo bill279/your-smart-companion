@@ -533,26 +533,26 @@ function ThreadView({ threadId }: { threadId: string }) {
           return JSON.stringify({ error: "format must be pdf, docx, xlsx or csv" });
         }
         try {
-          const messages: Array<{ role: string; content: string; created_at: string }> = [
-            { role: "assistant", content, created_at: new Date().toISOString() },
-          ];
-          // Build the file bytes but do NOT auto-download. Save it as an
-          // artifact so the assistant message can render a preview card.
-          let built: { blob: Blob; filename: string; mimeType: string };
-          let formatLabel: string;
-          if (format === "pdf") { built = buildPdf(title, messages); formatLabel = "PDF"; }
-          else if (format === "docx") { built = await buildDocx(title, messages); formatLabel = "Word"; }
-          else if (format === "xlsx") { built = buildXlsx(title, messages); formatLabel = "Excel"; }
-          else { built = buildCsv(title, messages); formatLabel = "CSV"; }
-
-          const base64 = await blobToBase64(built.blob);
-          const art = saveArtifact({
-            filename: built.filename,
-            mimeType: built.mimeType,
-            base64,
-            size: built.blob.size,
-            formatLabel,
+          // Use the SERVER-SIDE document generator (proper tables, headings,
+          // page layout) instead of the lightweight client builder that dumps
+          // raw markdown text.
+          const safeBase = title.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 60) || "document";
+          const gen = await generateAndStoreDocument({
+            data: {
+              format: format as "pdf" | "docx" | "xlsx" | "csv",
+              filename: safeBase,
+              title,
+              markdown: content,
+            },
           });
+          const art = saveArtifact({
+            filename: gen.filename,
+            mimeType: gen.mimeType,
+            base64: gen.base64,
+            size: gen.size,
+            formatLabel: gen.formatLabel,
+          });
+          const formatLabel = gen.formatLabel;
 
           // Post an assistant message with the artifact marker so the Bubble
           // renders a preview + download card next to the content.
@@ -570,7 +570,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             ok: true,
             format,
             title,
-            filename: built.filename,
+            filename: gen.filename,
             artifact_id: art.id,
             note: "File is previewed in the chat with Download and Email buttons. Did NOT auto-download.",
           });
