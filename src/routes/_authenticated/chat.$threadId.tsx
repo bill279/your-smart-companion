@@ -6,7 +6,7 @@ import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
 import { createRealtimeSession } from "@/lib/realtime-voice.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Mic, MicOff, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Mic, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown } from "lucide-react";
 import {
   exportToPdf,
   exportToDocx,
@@ -1273,7 +1273,9 @@ function ThreadView({ threadId }: { threadId: string }) {
             {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
             {addMut.isPending && !pendingAssistant && !isConnected && (
               <div className="flex gap-3 justify-start">
-                <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0">BP</div>
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+                  <img src={bpaLogo.url} alt="BPA Bot" className="w-full h-full object-contain p-1" />
+                </div>
                 <div className="flex items-center gap-1.5 pt-3 text-muted-foreground text-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
                   <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -1355,11 +1357,11 @@ function ThreadView({ threadId }: { threadId: string }) {
             }
             className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
               voiceActive
-                ? "border-accent bg-accent/15 hud-pulse text-accent"
+                ? "border-red-500 bg-red-500 text-white hud-pulse shadow-[0_0_0_4px_rgba(239,68,68,0.25)]"
                 : "border-border bg-secondary hover:bg-secondary/80 text-primary"
             }`}
           >
-            {voiceActive ? <MicOff size={18} /> : <Mic size={18} />}
+            <Mic size={18} />
           </button>
           <input
             ref={fileInputRef}
@@ -1526,8 +1528,8 @@ function Bubble({
   }
   return (
     <div className="group flex gap-3">
-      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0 mt-0.5">
-        BP
+      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 overflow-hidden">
+        <img src={bpaLogo.url} alt="BPA Bot" className="w-full h-full object-contain p-1" />
       </div>
       <div className="flex-1 min-w-0">
         {attachments.length > 0 && (

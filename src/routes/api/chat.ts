@@ -37,6 +37,8 @@ You have tools:
 - web_search — search the live web. Use it for anything time-sensitive: companies, people, news, prices, products, current facts.
 - web_scrape — fetch the readable markdown of a specific URL.
 - send_email — send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone (including themselves).
+  - To ATTACH a file you generated with \`generate_document\`, call \`send_email\` with \`attach_file_url\` = the URL returned by \`generate_document\` and \`attach_file_name\` = the returned \`filename\`. NEVER paste that URL into the email body — the recipient sees an attached file, not a link.
+  - Email bodies must be a short human message (greeting, 1–3 sentences about what's attached, sign-off). Do NOT include "You can also download the document directly here: …" or any raw storage URL.
 - list_contacts — load the user's saved address book (name, email, notes). Call this BEFORE asking the user for an email address whenever they refer to a recipient by name (e.g. "email Mike", "send this to Sarah at BP"). Match by name (case-insensitive, partial OK).
 - save_contact — add or update a contact in the user's address book. Use when the user says things like "save this as a contact", "remember john@x.com as John", or after they confirm a brand-new recipient you should remember.
 - list_calendar_events — list upcoming events from the user's connected calendar (Outlook preferred, Google fallback). Use for "what's on my calendar", "am I free Thursday", "next meeting".
@@ -45,7 +47,7 @@ You have tools:
 - remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
 - search_knowledge_base — semantic search over the user's uploaded company documents/SOPs (PDFs, docs, notes). Use this FIRST whenever the user asks about internal/company-specific info, processes, products, pricing sheets, policies, or anything that sounds like it would live in their files. Cite the document name in the answer.
-- generate_document — create a downloadable PDF, Word (.docx), Excel (.xlsx), or CSV file from Markdown content and return a download link. Use this whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc. Default to PDF unless the user specified another format. Never say you cannot generate or attach a file — call this tool, then present the returned URL as a Markdown link like [Download report.pdf](url).
+- generate_document — create a downloadable PDF, Word (.docx), Excel (.xlsx), or CSV file from Markdown content and return a download link. Use this whenever the user asks for a file, attachment, report, export, PDF, spreadsheet, or Word doc. Default to PDF unless the user specified another format. Never say you cannot generate or attach a file — call this tool, then present the returned URL as a single clean Markdown link using the returned \`filename\` as the link text (e.g. \`[Report.pdf](url)\`). Never expose the raw URL string, storage path, or timestamp. If the user then asks to email that document, call \`send_email\` with \`attach_file_url\` set to the URL and \`attach_file_name\` set to the filename — do NOT paste the URL into the email body.
 - save_lesson — silently record a lesson the assistant should apply forever (e.g. user corrections, recurring preferences, "next time do X not Y"). Call this whenever the user corrects you, gives a thumbs-down explanation, or expresses a workflow preference. Do NOT announce it.
 
 Use them instead of refusing or saying you cannot browse. Cite sources with markdown links.
@@ -432,16 +434,47 @@ export const Route = createFileRoute("/api/chat")({
             }),
             send_email: tool({
               description:
-                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves.",
+                "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves. To attach a file you just generated with generate_document, pass its returned `url` as `attach_file_url` (and its `filename` as `attach_file_name`) — do NOT paste the raw URL into the body.",
               inputSchema: z.object({
                 to: z.string().email().describe("Recipient email address"),
                 subject: z.string().min(1).max(200),
                 body: z.string().min(1).max(20000),
                 cc: z.string().email().optional(),
+                attach_file_url: z
+                  .string()
+                  .url()
+                  .optional()
+                  .describe("If set, the server fetches this URL and attaches its bytes to the email."),
+                attach_file_name: z
+                  .string()
+                  .min(1)
+                  .max(160)
+                  .optional()
+                  .describe("Filename to use for the attachment (e.g. 'Report.docx'). Required when attach_file_url is set."),
               }),
-              execute: async ({ to, subject, body: emailBody, cc }) => {
+              execute: async ({ to, subject, body: emailBody, cc, attach_file_url, attach_file_name }) => {
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const { marked } = await import("marked");
+                // Optionally fetch the file bytes for attachment.
+                let attachment: { filename: string; mimeType: string; base64: string } | null = null;
+                if (attach_file_url) {
+                  try {
+                    const r = await fetch(attach_file_url);
+                    if (!r.ok) return { error: `Could not fetch attachment (${r.status})` };
+                    const mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
+                    const buf = new Uint8Array(await r.arrayBuffer());
+                    if (buf.byteLength > 15 * 1024 * 1024) return { error: "Attachment too large (max 15MB)" };
+                    let bin = "";
+                    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+                    attachment = {
+                      filename: (attach_file_name || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
+                      mimeType,
+                      base64: Buffer.from(bin, "binary").toString("base64"),
+                    };
+                  } catch (e) {
+                    return { error: `Attachment fetch failed: ${e instanceof Error ? e.message : String(e)}` };
+                  }
+                }
                 const renderHtml = (md: string) => {
                   const inner = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
                   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -473,6 +506,18 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                            ...(cc
                              ? { ccRecipients: [{ emailAddress: { address: cc } }] }
                              : {}),
+                            ...(attachment
+                              ? {
+                                  attachments: [
+                                    {
+                                      "@odata.type": "#microsoft.graph.fileAttachment",
+                                      name: attachment.filename,
+                                      contentType: attachment.mimeType,
+                                      contentBytes: attachment.base64,
+                                    },
+                                  ],
+                                }
+                              : {}),
                          },
                        }),
                      },
@@ -482,31 +527,51 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                      await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
                      return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
                    }
-                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook" });
-                   return { ok: true, provider: "outlook", to, subject };
+                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attached: attachment?.filename ?? null });
+                   return { ok: true, provider: "outlook", to, subject, attached: attachment?.filename ?? null };
                  }
                  if (process.env.GOOGLE_MAIL_API_KEY) {
-                  const boundary = `bpa_${Math.random().toString(36).slice(2)}`;
+                  const altBoundary = `bpa_alt_${Math.random().toString(36).slice(2)}`;
                   const lines = [`To: ${to}`];
                   if (cc) lines.push(`Cc: ${cc}`);
-                  lines.push(
-                    `Subject: ${subject}`,
-                    "MIME-Version: 1.0",
-                    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+                  lines.push(`Subject: ${subject}`, "MIME-Version: 1.0");
+                  const altPart = [
+                    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
                     "",
-                    `--${boundary}`,
+                    `--${altBoundary}`,
                     "Content-Type: text/plain; charset=UTF-8",
                     "",
                     emailBody,
                     "",
-                    `--${boundary}`,
+                    `--${altBoundary}`,
                     "Content-Type: text/html; charset=UTF-8",
                     "",
                     renderHtml(emailBody),
                     "",
-                    `--${boundary}--`,
-                    "",
-                  );
+                    `--${altBoundary}--`,
+                  ].join("\r\n");
+                  if (attachment) {
+                    const mix = `bpa_mix_${Math.random().toString(36).slice(2)}`;
+                    const wrapped = attachment.base64.replace(/(.{76})/g, "$1\r\n");
+                    lines.push(
+                      `Content-Type: multipart/mixed; boundary="${mix}"`,
+                      "",
+                      `--${mix}`,
+                      altPart,
+                      "",
+                      `--${mix}`,
+                      `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`,
+                      `Content-Disposition: attachment; filename="${attachment.filename}"`,
+                      "Content-Transfer-Encoding: base64",
+                      "",
+                      wrapped,
+                      "",
+                      `--${mix}--`,
+                      "",
+                    );
+                  } else {
+                    lines.push(altPart, "");
+                  }
                   const raw = Buffer.from(lines.join("\r\n"))
                     .toString("base64")
                     .replace(/\+/g, "-")
@@ -525,8 +590,8 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status }, "error");
                     return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
                   }
-                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail" });
-                  return { ok: true, provider: "gmail", to, subject };
+                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail", attached: attachment?.filename ?? null });
+                  return { ok: true, provider: "gmail", to, subject, attached: attachment?.filename ?? null };
                 }
                 return { error: "No email provider connected." };
               },
@@ -894,7 +959,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     markdown,
                   });
                   const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
-                  const path = `generated/${userId}/${Date.now()}-${safeName}.${extension}`;
+                  // Put the timestamp in a folder segment so the visible
+                  // filename in the URL stays clean (e.g. no "1783...-name").
+                  const path = `generated/${userId}/${Date.now().toString(36)}/${safeName}.${extension}`;
                   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
                   const up = await supabaseAdmin.storage
                     .from("chat-uploads")
