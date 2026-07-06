@@ -180,7 +180,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   );
 
   const startSession = useCallback(
-    async (opts: { clientSecret: string; model: string; instructions?: string }) => {
+    async (opts: { clientSecret: string; model: string; instructions?: string; microphoneStream?: MediaStream }) => {
       if (status === "connecting" || status === "connected") return;
       setStatus("connecting");
       try {
@@ -198,7 +198,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           if (audioEl && e.streams[0]) audioEl.srcObject = e.streams[0];
         };
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = opts.microphoneStream ?? await navigator.mediaDevices.getUserMedia({ audio: true });
         localStreamRef.current = stream;
         stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
