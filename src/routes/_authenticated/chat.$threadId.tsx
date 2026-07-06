@@ -834,7 +834,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   }
 
   const addMut = useMutation({
-    mutationFn: async ({ content, files, regenerate }: { content: string; files: Attachment[]; regenerate?: boolean }) => {
+    mutationFn: async ({ content, files, regenerate, forceWebSearch }: { content: string; files: Attachment[]; regenerate?: boolean; forceWebSearch?: boolean }) => {
       if (!regenerate) setPendingUser(content);
       setPendingAssistant("");
 
