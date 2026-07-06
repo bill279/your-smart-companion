@@ -914,6 +914,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       toast.error(e instanceof Error ? e.message : "Failed");
       setPendingUser(null);
       setPendingAssistant("");
+      setPendingActivity([]);
     },
   });
 
