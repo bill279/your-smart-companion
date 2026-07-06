@@ -28,6 +28,9 @@ import {
 } from "@/lib/artifacts";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { base64ToBlob } from "@/lib/artifacts";
+import mammoth from "mammoth";
 import {
   addMessage,
   createThread,
