@@ -649,70 +649,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                    await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attached: attachment?.filename ?? null });
                    return { ok: true, provider: "outlook", to, subject, attached: attachment?.filename ?? null };
                  }
-                 if (process.env.GOOGLE_MAIL_API_KEY) {
-                  const altBoundary = `bpa_alt_${Math.random().toString(36).slice(2)}`;
-                  const lines = [`To: ${to}`];
-                  if (cc) lines.push(`Cc: ${cc}`);
-                  lines.push(`Subject: ${subject}`, "MIME-Version: 1.0");
-                  const altPart = [
-                    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
-                    "",
-                    `--${altBoundary}`,
-                    "Content-Type: text/plain; charset=UTF-8",
-                    "",
-                    emailBody,
-                    "",
-                    `--${altBoundary}`,
-                    "Content-Type: text/html; charset=UTF-8",
-                    "",
-                    renderHtml(emailBody),
-                    "",
-                    `--${altBoundary}--`,
-                  ].join("\r\n");
-                  if (attachment) {
-                    const mix = `bpa_mix_${Math.random().toString(36).slice(2)}`;
-                    const wrapped = attachment.base64.replace(/(.{76})/g, "$1\r\n");
-                    lines.push(
-                      `Content-Type: multipart/mixed; boundary="${mix}"`,
-                      "",
-                      `--${mix}`,
-                      altPart,
-                      "",
-                      `--${mix}`,
-                      `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`,
-                      `Content-Disposition: attachment; filename="${attachment.filename}"`,
-                      "Content-Transfer-Encoding: base64",
-                      "",
-                      wrapped,
-                      "",
-                      `--${mix}--`,
-                      "",
-                    );
-                  } else {
-                    lines.push(altPart, "");
-                  }
-                  const raw = Buffer.from(lines.join("\r\n"))
-                    .toString("base64")
-                    .replace(/\+/g, "-")
-                    .replace(/\//g, "_")
-                    .replace(/=+$/, "");
-                  const r = await fetch(
-                    "https://connector-gateway.lovable.dev/google_mail/gmail/v1/users/me/messages/send",
-                    {
-                      method: "POST",
-                      headers: gatewayHeaders("GOOGLE_MAIL_API_KEY"),
-                      body: JSON.stringify({ raw }),
-                    },
-                  );
-                  if (!r.ok) {
-                    const t = await r.text();
-                    await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "gmail", status: r.status }, "error");
-                    return { error: `Gmail send failed (${r.status})`, detail: t.slice(0, 200) };
-                  }
-                  await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "gmail", attached: attachment?.filename ?? null });
-                  return { ok: true, provider: "gmail", to, subject, attached: attachment?.filename ?? null };
-                }
-                return { error: "No email provider connected." };
+                  return { error: "Outlook is not connected." };
               },
             }),
             list_contacts: tool({
