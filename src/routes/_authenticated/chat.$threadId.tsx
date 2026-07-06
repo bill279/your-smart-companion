@@ -866,17 +866,45 @@ function ThreadView({ threadId }: { threadId: string }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
+      let buf = "";
+      let inCtrl = false;
+      let activity: ToolActivity[] = [];
+      setPendingActivity([]);
       try {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          acc += decoder.decode(value, { stream: true });
+          buf += decoder.decode(value, { stream: true });
+          // Split buffer on RS delimiter, alternating text / control-frame.
+          while (true) {
+            const idx = buf.indexOf(TOOL_FRAME_DELIM);
+            if (idx === -1) break;
+            const chunk = buf.slice(0, idx);
+            buf = buf.slice(idx + 1);
+            if (!inCtrl) {
+              if (chunk) acc += chunk;
+            } else {
+              try {
+                const ev = JSON.parse(chunk) as ToolEvent;
+                activity = foldToolEvent(activity, ev);
+                setPendingActivity(activity);
+              } catch {
+                // ignore malformed frame
+              }
+            }
+            inCtrl = !inCtrl;
+          }
+          if (!inCtrl && buf) {
+            acc += buf;
+            buf = "";
+          }
           setPendingAssistant(cleanAssistantText(acc));
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") throw err;
       }
       setPendingAssistant("");
+      setPendingActivity([]);
       abortRef.current = null;
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
