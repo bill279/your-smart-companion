@@ -1056,6 +1056,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       files,
       forceWebSearch: webSearchOn,
     });
+    if (webSearchOn) setWebSearchOn(false);
   }
 
   async function handleFilesSelected(fileList: FileList | null) {
