@@ -5,24 +5,32 @@ export type ToolEvent =
   | {
       t: "call";
       id: string;
-      name: "web_search" | "web_scrape";
+      name: "web_search" | "web_scrape" | "product_search";
       input: { query?: string; url?: string; limit?: number };
     }
   | {
       t: "result";
       id: string;
-      name: "web_search" | "web_scrape";
+      name: "web_search" | "web_scrape" | "product_search";
       output: unknown;
     };
 
 // Record shape rendered in the UI (call + result merged by id).
 export type ToolActivity = {
   id: string;
-  name: "web_search" | "web_scrape";
+  name: "web_search" | "web_scrape" | "product_search";
   query?: string;
   url?: string;
   results?: Array<{ title?: string; url?: string; snippet?: string }>;
   scraped?: { title?: string; url?: string };
+  products?: Array<{
+    title?: string;
+    url?: string;
+    image?: string;
+    price?: string;
+    merchant?: string;
+    snippet?: string;
+  }>;
   error?: string;
 };
 
@@ -85,6 +93,14 @@ export function foldToolEvent(
   } else {
     const out = ev.output as {
       results?: Array<{ title?: string; url?: string; snippet?: string }>;
+      products?: Array<{
+        title?: string;
+        url?: string;
+        image?: string;
+        price?: string;
+        merchant?: string;
+        snippet?: string;
+      }>;
       title?: string;
       error?: string;
     } | null;
@@ -93,6 +109,8 @@ export function foldToolEvent(
       base.results = out?.results ?? [];
     } else if (ev.name === "web_scrape") {
       base.scraped = { title: out?.title, url: base.url };
+    } else if (ev.name === "product_search") {
+      base.products = out?.products ?? [];
     }
   }
   const next = prev.slice();
