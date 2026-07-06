@@ -24,6 +24,7 @@ import { Route as ApiPublicWebSearchRouteImport } from './routes/api/public/web-
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
+import { Route as ApiPublicMsOauthCallbackRouteImport } from './routes/api/public/ms-oauth/callback'
 import { Route as ApiPublicJarvisToolsSend_emailRouteImport } from './routes/api/public/jarvis/tools/send_email'
 
 const McpRoute = McpRouteImport.update({
@@ -104,6 +105,12 @@ const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
   path: '/.lovable/oauth/consent',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicMsOauthCallbackRoute =
+  ApiPublicMsOauthCallbackRouteImport.update({
+    id: '/api/public/ms-oauth/callback',
+    path: '/api/public/ms-oauth/callback',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicJarvisToolsSend_emailRoute =
   ApiPublicJarvisToolsSend_emailRouteImport.update({
     id: '/api/public/jarvis/tools/send_email',
@@ -126,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/chat/': typeof AuthenticatedChatIndexRoute
+  '/api/public/ms-oauth/callback': typeof ApiPublicMsOauthCallbackRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
 }
 export interface FileRoutesByTo {
@@ -143,6 +151,7 @@ export interface FileRoutesByTo {
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/chat': typeof AuthenticatedChatIndexRoute
+  '/api/public/ms-oauth/callback': typeof ApiPublicMsOauthCallbackRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
 }
 export interface FileRoutesById {
@@ -162,6 +171,7 @@ export interface FileRoutesById {
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/_authenticated/chat/': typeof AuthenticatedChatIndexRoute
+  '/api/public/ms-oauth/callback': typeof ApiPublicMsOauthCallbackRoute
   '/api/public/jarvis/tools/send_email': typeof ApiPublicJarvisToolsSend_emailRoute
 }
 export interface FileRouteTypes {
@@ -181,6 +191,7 @@ export interface FileRouteTypes {
     | '/chat/$threadId'
     | '/api/public/web-search'
     | '/chat/'
+    | '/api/public/ms-oauth/callback'
     | '/api/public/jarvis/tools/send_email'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -198,6 +209,7 @@ export interface FileRouteTypes {
     | '/chat/$threadId'
     | '/api/public/web-search'
     | '/chat'
+    | '/api/public/ms-oauth/callback'
     | '/api/public/jarvis/tools/send_email'
   id:
     | '__root__'
@@ -216,6 +228,7 @@ export interface FileRouteTypes {
     | '/_authenticated/chat/$threadId'
     | '/api/public/web-search'
     | '/_authenticated/chat/'
+    | '/api/public/ms-oauth/callback'
     | '/api/public/jarvis/tools/send_email'
   fileRoutesById: FileRoutesById
 }
@@ -230,6 +243,7 @@ export interface RootRouteChildren {
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
   ApiPublicWebSearchRoute: typeof ApiPublicWebSearchRoute
+  ApiPublicMsOauthCallbackRoute: typeof ApiPublicMsOauthCallbackRoute
   ApiPublicJarvisToolsSend_emailRoute: typeof ApiPublicJarvisToolsSend_emailRoute
 }
 
@@ -340,6 +354,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DotlovableOauthConsentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/ms-oauth/callback': {
+      id: '/api/public/ms-oauth/callback'
+      path: '/api/public/ms-oauth/callback'
+      fullPath: '/api/public/ms-oauth/callback'
+      preLoaderRoute: typeof ApiPublicMsOauthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/jarvis/tools/send_email': {
       id: '/api/public/jarvis/tools/send_email'
       path: '/api/public/jarvis/tools/send_email'
@@ -381,6 +402,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
   ApiPublicWebSearchRoute: ApiPublicWebSearchRoute,
+  ApiPublicMsOauthCallbackRoute: ApiPublicMsOauthCallbackRoute,
   ApiPublicJarvisToolsSend_emailRoute: ApiPublicJarvisToolsSend_emailRoute,
 }
 export const routeTree = rootRouteImport

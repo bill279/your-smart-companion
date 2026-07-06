@@ -11,6 +11,44 @@ import {
   type ToolActivity,
   type ToolEvent,
 } from "@/lib/tool-activity";
+import { getMicrosoftAccessToken } from "@/lib/ms-graph.server";
+
+/**
+ * Call Microsoft Graph on behalf of `userId`.
+ * Prefers the user's own OAuth connection (full delegated scopes including calendar + Teams).
+ * Falls back to the Lovable Outlook connector gateway (mail-only) only if the user has not connected yet.
+ * Returns null when neither path is available.
+ */
+async function msGraphFetch(
+  userId: string,
+  graphPath: string,
+  init: RequestInit & { forceUserToken?: boolean } = {},
+): Promise<{ response: Response; via: "user" | "gateway" } | null> {
+  const { forceUserToken, headers, ...rest } = init;
+  const user = await getMicrosoftAccessToken(userId);
+  if (user) {
+    const r = await fetch(`https://graph.microsoft.com/v1.0${graphPath}`, {
+      ...rest,
+      headers: {
+        Authorization: `Bearer ${user.accessToken}`,
+        "Content-Type": "application/json",
+        ...(headers ?? {}),
+      },
+    });
+    return { response: r, via: "user" };
+  }
+  if (forceUserToken) return null;
+  if (!process.env.MICROSOFT_OUTLOOK_API_KEY) return null;
+  const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
+  const r = await fetch(`https://connector-gateway.lovable.dev/microsoft_outlook${graphPath}`, {
+    ...rest,
+    headers: {
+      ...gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
+      ...(headers ?? {}),
+    },
+  });
+  return { response: r, via: "gateway" };
+}
 
 const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
 
@@ -612,13 +650,10 @@ th{background:#0b2545;color:#fff;font-weight:600;} tr:nth-child(even) td{backgro
 hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
 </style></head><body><div class="container">${inner}</div></body></html>`;
                 };
-                 if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
-                   const r = await fetch(
-                     "https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail",
-                     {
-                       method: "POST",
-                       headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
-                       body: JSON.stringify({
+                 {
+                   const call = await msGraphFetch(userId, "/me/sendMail", {
+                     method: "POST",
+                     body: JSON.stringify({
                          message: {
                            subject,
                            body: { contentType: "HTML", content: renderHtml(emailBody) },
@@ -640,8 +675,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                               : {}),
                          },
                        }),
-                     },
-                   );
+                   });
+                   if (!call) return { error: "Outlook is not connected." };
+                   const r = call.response;
                    if (!r.ok) {
                      const t = await r.text();
                      await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
@@ -650,7 +686,6 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                    await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attached: attachment?.filename ?? null });
                    return { ok: true, provider: "outlook", to, subject, attached: attachment?.filename ?? null };
                  }
-                  return { error: "Outlook is not connected." };
               },
             }),
             list_contacts: tool({
@@ -701,13 +736,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 max_results: z.number().int().min(1).max(50).optional(),
               }),
               execute: async ({ days, max_results }) => {
-                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const now = new Date();
                 const end = new Date(now.getTime() + (days ?? 7) * 86400000);
                 const top = String(max_results ?? 10);
-                if (!process.env.MICROSOFT_OUTLOOK_API_KEY) {
-                  return { error: "Outlook is not connected." };
-                }
                 {
                   const params = new URLSearchParams({
                     startDateTime: now.toISOString(),
@@ -715,10 +746,9 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     $orderby: "start/dateTime",
                     $top: top,
                   });
-                  const r = await fetch(
-                    `https://connector-gateway.lovable.dev/microsoft_outlook/me/calendarView?${params}`,
-                    { headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY") },
-                  );
+                  const call = await msGraphFetch(userId, `/me/calendarView?${params}`, { method: "GET" });
+                  if (!call) return { error: "Microsoft is not connected. Connect it from the Activity page." };
+                  const r = call.response;
                   if (!r.ok) {
                     const t = await r.text();
                     return { error: `Outlook calendar read failed (${r.status})`, detail: t.slice(0, 200) };
@@ -769,18 +799,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   .describe("Attach a Microsoft Teams meeting with a join link. Default true when attendees are present."),
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone, online_meeting }) => {
-                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
-                if (!process.env.MICROSOFT_OUTLOOK_API_KEY) {
-                  return { error: "Outlook is not connected." };
-                }
                 {
                   const wantsTeams = online_meeting ?? (attendees?.length ?? 0) > 0;
-                  const r = await fetch(
-                    "https://connector-gateway.lovable.dev/microsoft_outlook/me/events",
-                    {
-                      method: "POST",
-                      headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
-                      body: JSON.stringify({
+                  const call = await msGraphFetch(userId, "/me/events", {
+                    method: "POST",
+                    body: JSON.stringify({
                         subject: title,
                         body: description
                           ? { contentType: "HTML", content: description }
@@ -803,20 +826,28 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                             }
                           : {}),
                       }),
-                    },
-                  );
+                  });
+                  if (!call) {
+                    return {
+                      error:
+                        "Microsoft is not connected. Open the Activity page and click 'Connect Microsoft' to sign in with your Outlook account.",
+                    };
+                  }
+                  const r = call.response;
                   if (!r.ok) {
                     const t = await r.text();
                      await logAction(
                        "create_calendar_event",
                        `Failed to create Outlook calendar event "${title}"`,
-                       { title, start, end, attendees, location, provider: "outlook", status: r.status, detail: t.slice(0, 500) },
+                       { title, start, end, attendees, location, provider: "outlook", via: call.via, status: r.status, detail: t.slice(0, 500) },
                        "error",
                      );
                      if (r.status === 403) {
                        return {
                          error:
-                           "Outlook calendar create failed (403). The connected Outlook account does not currently allow calendar event creation. A Microsoft Teams connection alone does not grant calendar write access.",
+                           call.via === "gateway"
+                             ? "Outlook calendar create failed (403). Reconnect Microsoft in the Activity page to grant calendar + Teams access."
+                             : "Outlook calendar create failed (403). Your Microsoft account is missing calendar write permission — reconnect and grant all requested permissions.",
                          detail: t.slice(0, 500),
                        };
                      }
