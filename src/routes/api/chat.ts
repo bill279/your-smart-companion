@@ -799,18 +799,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   .describe("Attach a Microsoft Teams meeting with a join link. Default true when attendees are present."),
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone, online_meeting }) => {
-                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
-                if (!process.env.MICROSOFT_OUTLOOK_API_KEY) {
-                  return { error: "Outlook is not connected." };
-                }
                 {
                   const wantsTeams = online_meeting ?? (attendees?.length ?? 0) > 0;
-                  const r = await fetch(
-                    "https://connector-gateway.lovable.dev/microsoft_outlook/me/events",
-                    {
-                      method: "POST",
-                      headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
-                      body: JSON.stringify({
+                  const call = await msGraphFetch(userId, "/me/events", {
+                    method: "POST",
+                    body: JSON.stringify({
                         subject: title,
                         body: description
                           ? { contentType: "HTML", content: description }
@@ -833,20 +826,28 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                             }
                           : {}),
                       }),
-                    },
-                  );
+                  });
+                  if (!call) {
+                    return {
+                      error:
+                        "Microsoft is not connected. Open the Activity page and click 'Connect Microsoft' to sign in with your Outlook account.",
+                    };
+                  }
+                  const r = call.response;
                   if (!r.ok) {
                     const t = await r.text();
                      await logAction(
                        "create_calendar_event",
                        `Failed to create Outlook calendar event "${title}"`,
-                       { title, start, end, attendees, location, provider: "outlook", status: r.status, detail: t.slice(0, 500) },
+                       { title, start, end, attendees, location, provider: "outlook", via: call.via, status: r.status, detail: t.slice(0, 500) },
                        "error",
                      );
                      if (r.status === 403) {
                        return {
                          error:
-                           "Outlook calendar create failed (403). The connected Outlook account does not currently allow calendar event creation. A Microsoft Teams connection alone does not grant calendar write access.",
+                           call.via === "gateway"
+                             ? "Outlook calendar create failed (403). Reconnect Microsoft in the Activity page to grant calendar + Teams access."
+                             : "Outlook calendar create failed (403). Your Microsoft account is missing calendar write permission — reconnect and grant all requested permissions.",
                          detail: t.slice(0, 500),
                        };
                      }
