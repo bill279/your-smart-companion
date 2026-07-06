@@ -23,6 +23,15 @@ import {
   artifactMarker,
   ARTIFACT_MARKER_RE,
 } from "@/lib/artifacts";
+import {
+  TOOL_FRAME_DELIM,
+  extractToolActivity,
+  foldToolEvent,
+  faviconFor,
+  hostOf,
+  type ToolActivity,
+  type ToolEvent,
+} from "@/lib/tool-activity";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -345,6 +354,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string>("");
+  const [pendingActivity, setPendingActivity] = useState<ToolActivity[]>([]);
   type Attachment = { path: string; name: string; mimeType: string; size: number };
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -856,17 +866,45 @@ function ThreadView({ threadId }: { threadId: string }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = "";
+      let buf = "";
+      let inCtrl = false;
+      let activity: ToolActivity[] = [];
+      setPendingActivity([]);
       try {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          acc += decoder.decode(value, { stream: true });
+          buf += decoder.decode(value, { stream: true });
+          // Split buffer on RS delimiter, alternating text / control-frame.
+          while (true) {
+            const idx = buf.indexOf(TOOL_FRAME_DELIM);
+            if (idx === -1) break;
+            const chunk = buf.slice(0, idx);
+            buf = buf.slice(idx + 1);
+            if (!inCtrl) {
+              if (chunk) acc += chunk;
+            } else {
+              try {
+                const ev = JSON.parse(chunk) as ToolEvent;
+                activity = foldToolEvent(activity, ev);
+                setPendingActivity(activity);
+              } catch {
+                // ignore malformed frame
+              }
+            }
+            inCtrl = !inCtrl;
+          }
+          if (!inCtrl && buf) {
+            acc += buf;
+            buf = "";
+          }
           setPendingAssistant(cleanAssistantText(acc));
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") throw err;
       }
       setPendingAssistant("");
+      setPendingActivity([]);
       abortRef.current = null;
       qc.invalidateQueries({ queryKey: ["messages", threadId] });
       qc.invalidateQueries({ queryKey: ["threads"] });
@@ -876,6 +914,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       toast.error(e instanceof Error ? e.message : "Failed");
       setPendingUser(null);
       setPendingAssistant("");
+      setPendingActivity([]);
     },
   });
 
@@ -1266,8 +1305,15 @@ function ThreadView({ threadId }: { threadId: string }) {
               );
             })}
             {pendingUser && <Bubble role="user" content={pendingUser} />}
-            {pendingAssistant && <Bubble role="assistant" content={pendingAssistant} streaming />}
-            {addMut.isPending && !pendingAssistant && !isConnected && (
+            {(pendingAssistant || pendingActivity.length > 0) && (
+              <Bubble
+                role="assistant"
+                content={pendingAssistant}
+                streaming
+                liveActivity={pendingActivity}
+              />
+            )}
+            {addMut.isPending && !pendingAssistant && pendingActivity.length === 0 && !isConnected && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
                   <img src={bpaLogo.url} alt="BPA Bot" className="w-full h-full object-contain p-1" />
@@ -1480,15 +1526,23 @@ function Bubble({
   attachments = [],
   streaming = false,
   messageId,
+  liveActivity,
 }: {
   role: string;
   content: string;
   attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
   streaming?: boolean;
   messageId?: string;
+  liveActivity?: ToolActivity[];
 }) {
   const isUser = role === "user";
-  const cleanedRaw = isUser ? content : cleanAssistantText(content);
+  // Pull tool-activity marker out of persisted assistant messages so we can
+  // render Claude-style search chips above the answer.
+  const { activities: storedActivity, content: withoutActivity } = isUser
+    ? { activities: [] as ToolActivity[], content }
+    : extractToolActivity(content);
+  const cleanedRaw = isUser ? content : cleanAssistantText(withoutActivity);
+  const activities = liveActivity && liveActivity.length > 0 ? liveActivity : storedActivity;
   // Extract artifact markers so we can render preview cards.
   const artifactIds: string[] = [];
   const displayContent = cleanedRaw
@@ -1541,6 +1595,7 @@ function Bubble({
             ))}
           </div>
         )}
+        {activities.length > 0 && <ToolActivityList items={activities} streaming={streaming} />}
         <div
           className="prose prose-sm max-w-none text-foreground prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-table:my-3 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-border prose-th:bg-secondary prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-pre:rounded-md prose-code:before:content-none prose-code:after:content-none prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.9em] prose-a:text-accent prose-a:underline-offset-2 prose-blockquote:border-l-primary prose-blockquote:text-muted-foreground"
         >
@@ -1580,6 +1635,107 @@ function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function ToolActivityList({
+  items,
+  streaming = false,
+}: {
+  items: ToolActivity[];
+  streaming?: boolean;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  return (
+    <div className="mb-3 flex flex-col gap-1.5">
+      {items.map((a, idx) => {
+        const isLast = idx === items.length - 1;
+        const pending = streaming && isLast && !a.results && !a.scraped && !a.error;
+        const isOpen = expandedId === a.id;
+        const label =
+          a.name === "web_search"
+            ? pending
+              ? `Searching the web…`
+              : `Searched the web`
+            : pending
+              ? `Opening ${hostOf(a.url) || "page"}…`
+              : `Read ${hostOf(a.url) || "page"}`;
+        const canExpand =
+          a.name === "web_search" && (a.results?.length ?? 0) > 0;
+        return (
+          <div
+            key={a.id}
+            className="rounded-lg border border-border bg-secondary/40 text-[13px] overflow-hidden"
+          >
+            <button
+              type="button"
+              onClick={() => canExpand && setExpandedId(isOpen ? null : a.id)}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left ${canExpand ? "hover:bg-secondary/70 cursor-pointer" : "cursor-default"}`}
+            >
+              <Search size={13} className="text-muted-foreground shrink-0" />
+              <span className="text-muted-foreground shrink-0">{label}</span>
+              {a.query && (
+                <span className="text-foreground font-medium truncate">
+                  {a.query}
+                </span>
+              )}
+              {a.name === "web_scrape" && a.url && (
+                <span className="text-foreground font-medium truncate">
+                  {hostOf(a.url)}
+                </span>
+              )}
+              {pending && (
+                <span className="ml-auto flex items-center gap-1 text-muted-foreground">
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
+                </span>
+              )}
+              {!pending && canExpand && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {a.results?.length} result{(a.results?.length ?? 0) === 1 ? "" : "s"}
+                </span>
+              )}
+            </button>
+            {isOpen && a.results && a.results.length > 0 && (
+              <div className="border-t border-border bg-background/40 divide-y divide-border">
+                {a.results.map((r, i) => {
+                  const fav = faviconFor(r.url);
+                  return (
+                    <a
+                      key={`${a.id}-${i}`}
+                      href={r.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-start gap-2.5 px-3 py-2 hover:bg-secondary/40"
+                    >
+                      {fav ? (
+                        <img
+                          src={fav}
+                          alt=""
+                          className="w-4 h-4 mt-0.5 rounded-sm shrink-0"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-4 h-4 mt-0.5 rounded-sm bg-muted shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] text-foreground truncate">
+                          {r.title || r.url}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {hostOf(r.url)}
+                        </div>
+                      </div>
+                    </a>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function ArtifactCard({ artifactId }: { artifactId: string }) {

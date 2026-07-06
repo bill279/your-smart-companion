@@ -4,6 +4,13 @@ import { streamText, tool, stepCountIs } from "ai";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
+import {
+  TOOL_FRAME_DELIM,
+  encodeToolActivityMarker,
+  foldToolEvent,
+  type ToolActivity,
+  type ToolEvent,
+} from "@/lib/tool-activity";
 
 const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation (custom engineering solutions). You are professional, clear, and concise — like a sharp executive assistant.
 
@@ -997,11 +1004,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
           },
           onFinish: async ({ text }) => {
+            const marker = encodeToolActivityMarker(collectedActivity);
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
               user_id: userId,
               role: "assistant",
-              content: cleanAssistantText(text),
+              content: marker + cleanAssistantText(text),
             });
             await supabase
               .from("threads")
@@ -1021,7 +1029,79 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
           },
         });
 
-        return result.toTextStreamResponse();
+        // Custom stream: text deltas as UTF-8 text, plus RS-delimited JSON
+        // control frames for web_search / web_scrape tool activity so the
+        // client can render Claude-style live search chips.
+        const collectedActivity: ToolActivity[] = [];
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              for await (const part of result.fullStream) {
+                if (part.type === "text-delta") {
+                  const delta = (part as { text?: string; textDelta?: string }).text
+                    ?? (part as { textDelta?: string }).textDelta
+                    ?? "";
+                  if (delta) controller.enqueue(encoder.encode(delta));
+                } else if (part.type === "tool-call") {
+                  const name = (part as { toolName: string }).toolName;
+                  if (name === "web_search" || name === "web_scrape") {
+                    const rawInput = (part as { input?: Record<string, unknown> }).input ?? {};
+                    const ev: ToolEvent = {
+                      t: "call",
+                      id: (part as { toolCallId: string }).toolCallId,
+                      name,
+                      input: rawInput as { query?: string; url?: string; limit?: number },
+                    };
+                    collectedActivity.splice(
+                      0,
+                      collectedActivity.length,
+                      ...foldToolEvent(collectedActivity, ev),
+                    );
+                    controller.enqueue(
+                      encoder.encode(TOOL_FRAME_DELIM + JSON.stringify(ev) + TOOL_FRAME_DELIM),
+                    );
+                  }
+                } else if (part.type === "tool-result") {
+                  const name = (part as { toolName: string }).toolName;
+                  if (name === "web_search" || name === "web_scrape") {
+                    const output = (part as { output?: unknown; result?: unknown }).output
+                      ?? (part as { result?: unknown }).result;
+                    const ev: ToolEvent = {
+                      t: "result",
+                      id: (part as { toolCallId: string }).toolCallId,
+                      name,
+                      output,
+                    };
+                    collectedActivity.splice(
+                      0,
+                      collectedActivity.length,
+                      ...foldToolEvent(collectedActivity, ev),
+                    );
+                    controller.enqueue(
+                      encoder.encode(TOOL_FRAME_DELIM + JSON.stringify(ev) + TOOL_FRAME_DELIM),
+                    );
+                  }
+                }
+              }
+            } catch (e) {
+              controller.enqueue(
+                encoder.encode(
+                  `\n\n_(stream error: ${e instanceof Error ? e.message : String(e)})_`,
+                ),
+              );
+            } finally {
+              controller.close();
+            }
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+          },
+        });
       },
     },
   },
