@@ -50,8 +50,8 @@ You have tools:
   - Email bodies must be a short human message (greeting, 1–3 sentences about what's attached, sign-off). Do NOT include "You can also download the document directly here: …" or any raw storage URL.
 - list_contacts — load the user's saved address book (name, email, notes). Call this BEFORE asking the user for an email address whenever they refer to a recipient by name (e.g. "email Mike", "send this to Sarah at BP"). Match by name (case-insensitive, partial OK).
 - save_contact — add or update a contact in the user's address book. Use when the user says things like "save this as a contact", "remember john@x.com as John", or after they confirm a brand-new recipient you should remember.
-- list_calendar_events — list upcoming events from the user's connected calendar (Outlook preferred, Google fallback). Use for "what's on my calendar", "am I free Thursday", "next meeting".
-- create_calendar_event — create a new event on the user's connected calendar (Outlook preferred, Google fallback). Confirm title, start, end, and attendees with the user before calling.
+- list_calendar_events — list upcoming events from the user's connected Outlook calendar. Use for "what's on my calendar", "am I free Thursday", "next meeting".
+- create_calendar_event — create a new event on the user's connected Outlook calendar. Set online_meeting=true to attach a Microsoft Teams meeting with a join link (default true when attendees are present). Confirm title, start, end, and attendees with the user before calling.
 - recall_facts — load durable facts the user has asked you to remember (boss, company, preferences, tools). Call this at the start of any conversation where personal context might help.
 - remember_fact — save a durable fact about the user (e.g. "boss = Sarah", "company = BP Automation", "crm = HubSpot"). Use when the user says "remember that…", "save this…", "for future reference…", or when you learn a stable preference.
 - forget_fact — remove a stored fact by key when the user says "forget that…" or corrects it.
