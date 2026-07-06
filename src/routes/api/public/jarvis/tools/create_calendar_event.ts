@@ -9,7 +9,7 @@ const Body = z.object({
   end: z.string().min(1),
   description: z.string().max(5000).optional(),
   location: z.string().max(500).optional(),
-  attendees: z.array(z.string().email()).optional(),
+  attendees: z.array(z.string().min(1).max(320)).optional(),
   timezone: z.string().optional(),
   online_meeting: z.boolean().optional(),
 });
@@ -38,8 +38,20 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
         if (!parsed.success) return json({ error: parsed.error.message }, 400);
         const data = parsed.data;
 
+        const { resolveContactAttendees } = await import("@/lib/contact-resolution.server");
+        const resolved = await resolveContactAttendees(supabase, data.attendees);
+        if (resolved.unresolved.length > 0) {
+          return json(
+            {
+              error: `I couldn't find a saved contact for: ${resolved.unresolved.join(", ")}. Please provide the email address or save the contact first.`,
+              unresolved_attendees: resolved.unresolved,
+            },
+            400,
+          );
+        }
+
         const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
-        const result = await createMicrosoftCalendarEvent(userId, { ...data, online_meeting: data.online_meeting ?? true });
+        const result = await createMicrosoftCalendarEvent(userId, { ...data, attendees: resolved.attendees, online_meeting: data.online_meeting ?? true });
         if ("error" in result) {
           await supabase.from("agent_actions").insert({
             user_id: userId,
@@ -49,7 +61,7 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
               title: data.title,
               start: data.start,
               end: data.end,
-              attendees: data.attendees ?? [],
+              attendees: resolved.attendees,
               provider: "outlook",
               status: result.status,
               detail: result.detail?.slice(0, 500),
@@ -66,7 +78,7 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
             title: data.title,
             start: data.start,
             end: data.end,
-            attendees: data.attendees ?? [],
+            attendees: resolved.attendees,
             provider: "outlook",
             teams: !!result.teams_join_url,
           },
