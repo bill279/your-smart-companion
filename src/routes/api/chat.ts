@@ -479,6 +479,77 @@ export const Route = createFileRoute("/api/chat")({
                 };
               },
             }),
+            product_search: tool({
+              description:
+                "Search the web for real products the user could buy (gadgets, gear, tools, clothing, appliances, software, courses, etc.) and return a compact list of product cards (title, image, price, merchant, url). Use this INSTEAD of web_search whenever the user asks to find, compare, recommend, or shop for a real product. After calling, write a short recommendation paragraph — do NOT re-list every product in prose; the UI renders cards.",
+              inputSchema: z.object({
+                query: z.string().describe("Shopping-style query, e.g. 'best noise cancelling headphones under $300'"),
+                limit: z.number().int().min(1).max(6).optional(),
+              }),
+              execute: async ({ query, limit }) => {
+                const key = process.env.FIRECRAWL_API_KEY;
+                if (!key) return { error: "Product search not configured" };
+                const n = Math.min(limit ?? 5, 6);
+                const r = await fetch("https://api.firecrawl.dev/v2/search", {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${key}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    query,
+                    limit: n,
+                    scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
+                  }),
+                });
+                if (!r.ok) return { error: `Product search failed (${r.status})` };
+                const j = (await r.json()) as {
+                  data?:
+                    | Array<{
+                        title?: string;
+                        url?: string;
+                        description?: string;
+                        markdown?: string;
+                        metadata?: {
+                          title?: string;
+                          description?: string;
+                          ogImage?: string;
+                          "og:image"?: string;
+                          image?: string;
+                          ogSiteName?: string;
+                        };
+                      }>
+                    | { web?: Array<{ title?: string; url?: string; description?: string }> };
+                };
+                const arr = Array.isArray(j.data) ? j.data : j.data?.web ?? [];
+                const hostname = (u?: string) => {
+                  if (!u) return undefined;
+                  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return undefined; }
+                };
+                const extractPrice = (text?: string) => {
+                  if (!text) return undefined;
+                  const m = text.match(/(?:USD|CAD|AUD|GBP|EUR)?\s?[$£€¥]\s?\d{1,3}(?:[,\s]?\d{3})*(?:\.\d{1,2})?/);
+                  return m?.[0]?.trim();
+                };
+                const products = arr.slice(0, n).map((x) => {
+                  const meta = (x as { metadata?: Record<string, unknown> }).metadata ?? {};
+                  const image =
+                    (meta.ogImage as string | undefined) ??
+                    (meta["og:image"] as string | undefined) ??
+                    (meta.image as string | undefined);
+                  const md = (x as { markdown?: string }).markdown ?? "";
+                  return {
+                    title: x.title ?? (meta.title as string | undefined),
+                    url: x.url,
+                    image,
+                    price: extractPrice(md) ?? extractPrice(x.description),
+                    merchant: (meta.ogSiteName as string | undefined) ?? hostname(x.url),
+                    snippet: x.description ?? (meta.description as string | undefined),
+                  };
+                });
+                return { products };
+              },
+            }),
             send_email: tool({
               description:
                 "Send an email from the user's connected Outlook (preferred) or Gmail account. Use when the user asks to email someone, send a message, or email themselves. To attach a file you just generated with generate_document, pass its returned `url` as `attach_file_url` (and its `filename` as `attach_file_name`) — do NOT paste the raw URL into the body.",
