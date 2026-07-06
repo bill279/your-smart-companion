@@ -134,16 +134,40 @@ export async function generateDocument(opts: {
       }
     }
     for (const t of tables) {
+      const colCount = Math.max(1, ...t.map((r) => r.length));
+      const totalWidth = 9360; // US Letter with 1" margins (DXA)
+      const colWidth = Math.floor(totalWidth / colCount);
+      const columnWidths = Array(colCount).fill(colWidth);
+      const cellBorder = { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" };
+      const cellBorders = { top: cellBorder, bottom: cellBorder, left: cellBorder, right: cellBorder };
       children.push(
         new Table({
-          width: { size: 100, type: WidthType.PERCENTAGE },
+          width: { size: totalWidth, type: WidthType.DXA },
+          columnWidths,
           rows: t.map(
-            (row) =>
+            (row, rowIdx) =>
               new TableRow({
-                children: row.map(
-                  (cell) =>
+                tableHeader: rowIdx === 0,
+                children: Array.from({ length: colCount }).map(
+                  (_, colIdx) =>
                     new TableCell({
-                      children: [new Paragraph({ children: [new TextRun(cell)] })],
+                      borders: cellBorders,
+                      width: { size: colWidth, type: WidthType.DXA },
+                      margins: { top: 80, bottom: 80, left: 120, right: 120 },
+                      ...(rowIdx === 0
+                        ? { shading: { fill: "0B2545", type: ShadingType.CLEAR, color: "auto" } }
+                        : {}),
+                      children: [
+                        new Paragraph({
+                          children: [
+                            new TextRun({
+                              text: row[colIdx] ?? "",
+                              bold: rowIdx === 0,
+                              color: rowIdx === 0 ? "FFFFFF" : undefined,
+                            }),
+                          ],
+                        }),
+                      ],
                     }),
                 ),
               }),
@@ -153,7 +177,20 @@ export async function generateDocument(opts: {
     }
     // suppress unused
     void tableSet;
-    const doc = new Document({ sections: [{ children }] });
+    void PageOrientation;
+    const doc = new Document({
+      sections: [
+        {
+          properties: {
+            page: {
+              size: { width: 12240, height: 15840 },
+              margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+            },
+          },
+          children,
+        },
+      ],
+    });
     const buf = await Packer.toBuffer(doc);
     return {
       bytes: new Uint8Array(buf),
