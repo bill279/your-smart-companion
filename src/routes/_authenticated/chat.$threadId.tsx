@@ -1051,7 +1051,11 @@ function ThreadView({ threadId }: { threadId: string }) {
     const files = attachments;
     setInput("");
     setAttachments([]);
-    addMut.mutate({ content: v || (files.length === 1 ? `Sent: ${files[0].name}` : `Sent ${files.length} files`), files });
+    addMut.mutate({
+      content: v || (files.length === 1 ? `Sent: ${files[0].name}` : `Sent ${files.length} files`),
+      files,
+      forceWebSearch: webSearchOn,
+    });
   }
 
   async function handleFilesSelected(fileList: FileList | null) {
