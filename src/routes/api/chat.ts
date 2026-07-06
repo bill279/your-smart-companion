@@ -12,6 +12,7 @@ import {
   type ToolEvent,
 } from "@/lib/tool-activity";
 import { getMicrosoftAccessToken } from "@/lib/ms-graph.server";
+import { looksLikeCalendarInviteText } from "@/lib/calendar-guards";
 
 /**
  * Call Microsoft Graph on behalf of `userId`.
@@ -619,6 +620,12 @@ export const Route = createFileRoute("/api/chat")({
                   .describe("Filename to use for the attachment (e.g. 'Report.docx'). Required when attach_file_url is set."),
               }),
               execute: async ({ to, subject, body: emailBody, cc, attach_file_url, attach_file_name }) => {
+                if (looksLikeCalendarInviteText(`${subject}\n${emailBody}\n${attach_file_name ?? ""}`)) {
+                  return {
+                    error:
+                      "This looks like a calendar/Teams invite. Use create_calendar_event so Outlook sends a real invite with accept/decline and a Teams link.",
+                  };
+                }
                 const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const { marked } = await import("marked");
                 // Optionally fetch the file bytes for attachment.
@@ -759,7 +766,10 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 end: z.string().describe("ISO 8601 end datetime"),
                 description: z.string().max(5000).optional(),
                 location: z.string().max(500).optional(),
-                attendees: z.array(z.string().email()).optional(),
+                attendees: z
+                  .array(z.string().min(1).max(320))
+                  .optional()
+                  .describe("Attendee email addresses or saved contact names, e.g. bill@company.com or Bill."),
                 timezone: z.string().optional().describe("IANA timezone, e.g. America/New_York"),
                 online_meeting: z
                   .boolean()
@@ -767,6 +777,14 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   .describe("Attach a Microsoft Teams meeting with a join link. Default true for all meetings unless user explicitly says no online meeting."),
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone, online_meeting }) => {
+                const { resolveContactAttendees } = await import("@/lib/contact-resolution.server");
+                const resolved = await resolveContactAttendees(supabase, attendees);
+                if (resolved.unresolved.length > 0) {
+                  return {
+                    error: `I couldn't find a saved contact for: ${resolved.unresolved.join(", ")}. Please provide the email address or save the contact first.`,
+                    unresolved_attendees: resolved.unresolved,
+                  };
+                }
                 const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
                 const result = await createMicrosoftCalendarEvent(userId, {
                   title,
@@ -774,7 +792,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   end,
                   description,
                   location,
-                  attendees,
+                  attendees: resolved.attendees,
                   timezone,
                   online_meeting: online_meeting ?? true,
                 });
@@ -783,7 +801,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   "error" in result
                     ? `Failed to create Outlook calendar event "${title}"`
                     : `Created event "${title}" on Outlook${result.teams_join_url ? " with Teams meeting" : ""}`,
-                  { title, start, end, attendees, location, provider: "outlook", result },
+                  { title, start, end, attendees: resolved.attendees, location, provider: "outlook", result },
                   "error" in result ? "error" : "ok",
                 );
                 return result;
@@ -972,7 +990,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               }),
               execute: async ({ format, filename, title, markdown }) => {
                 try {
-                  if (/(calendar\s+invite|meeting\s+invite|teams\s+meeting|outlook\s+invite|please\s+accept\s+or\s+decline|\[insert\s+teams\s+link\s+here\])/i.test(`${title}\n${markdown}`)) {
+                  if (looksLikeCalendarInviteText(`${title}\n${filename}\n${markdown}`)) {
                     return {
                       error:
                         "This is a calendar/Teams invite, not a document. Call create_calendar_event with online_meeting=true so Outlook sends the real invite and Teams link.",
