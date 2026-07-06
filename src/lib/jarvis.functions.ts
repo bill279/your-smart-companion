@@ -107,6 +107,20 @@ export const addMessage = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ context, data }) => {
+    // Ensure the thread exists and belongs to this user (self-heals stale
+    // URLs / deleted threads that would otherwise trip the FK constraint).
+    const { data: existing } = await context.supabase
+      .from("threads")
+      .select("id")
+      .eq("id", data.threadId)
+      .maybeSingle();
+    if (!existing) {
+      const { error: tErr } = await context.supabase
+        .from("threads")
+        .insert({ id: data.threadId, user_id: context.userId });
+      if (tErr) throw new Error(tErr.message);
+    }
+
     const { data: row, error } = await context.supabase
       .from("messages")
       .insert({
