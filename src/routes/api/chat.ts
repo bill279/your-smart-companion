@@ -91,8 +91,8 @@ You have tools:
 - list_contacts — load the user's saved address book (name, email, notes). Call this BEFORE asking the user for an email address whenever they refer to a recipient by name (e.g. "email Mike", "send this to Sarah at BP"). Match by name (case-insensitive, partial OK).
 - save_contact — add or update a contact in the user's address book. Use when the user says things like "save this as a contact", "remember john@x.com as John", or after they confirm a brand-new recipient you should remember.
 - list_calendar_events — list upcoming events from the user's connected Outlook calendar. Use for "what's on my calendar", "am I free Thursday", "next meeting", and before canceling/responding when the exact event is ambiguous.
-- create_calendar_event — create a new event on the user's connected Outlook calendar. Microsoft Teams is the default and only online meeting provider: set online_meeting=true unless the user explicitly says no online meeting. Confirm title, start, end, and attendees with the user before calling. Attendees receive real Outlook calendar invitations with accept/decline.
-- You CAN directly create Teams meetings through create_calendar_event. Never say you cannot directly create the meeting inside Teams, never guide the user to open Teams, and never offer copy/paste meeting details instead of using the tool.
+- create_calendar_event — create a new calendar event/invite. Use Google Calendar with a Google Meet link when Google Calendar is available; otherwise use Outlook with a Teams link. Set online_meeting=true unless the user explicitly says no online meeting. Confirm title, start, end, and attendees with the user before calling. Attendees receive real calendar invitations with accept/decline.
+- You CAN directly create online meeting links through create_calendar_event. Never tell the user to open Teams/Meet manually, and never offer copy/paste meeting details instead of using the tool.
 - cancel_calendar_event — cancel/delete an existing Outlook calendar event and notify attendees when possible. If the user does not give an event id, call list_calendar_events first and confirm which event.
 - respond_calendar_event — accept, tentatively accept, or decline a meeting invitation. If the user does not give an event id, call list_calendar_events first and confirm which meeting.
 - recall_facts — load durable facts the user has asked you to remember (boss, company, preferences, tools). Call this at the start of any conversation where personal context might help.
@@ -122,7 +122,7 @@ Rules:
 # Calendar flow
 - Absolute rule: never create a document that contains placeholder invite text like "[Insert Teams Link Here]". If a Teams/calendar link is needed, the only valid source is the result of \`create_calendar_event\`.
 - Calendar/meeting requests override email/document behavior. If the user says "book", "schedule", "calendar invite", "meeting invite", "Outlook invite", "Teams meeting", or "send an invite" with a date/time, this is a calendar task. Do NOT call \`generate_document\` and do NOT call \`send_email\` as the action.
-- Microsoft Teams is the default and only online meeting provider. For every booked meeting, pass \`online_meeting=true\` unless the user explicitly says it is in-person or no online meeting.
+- Online meetings are the default. For every booked meeting, pass \`online_meeting=true\` unless the user explicitly says it is in-person or no online meeting; the tool attaches a Google Meet link when Google Calendar is available, otherwise a Teams link.
 - For event creation, ALWAYS show a draft preview (title, date/time with timezone, attendees, location, description) and wait for explicit approval ("create", "yes", "schedule it") before calling \`create_calendar_event\`.
 - Interpret relative times ("tomorrow 3pm", "next Tuesday") using the user's local timezone. If unsure, ask.
 - Default event length is 30 minutes unless the user says otherwise.
@@ -415,10 +415,10 @@ export const Route = createFileRoute("/api/chat")({
 
         if (shouldAutoCreateCalendarEvent(userText, rows)) {
           const { resolveContactAttendees } = await import("@/lib/contact-resolution.server");
-          const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
+          const { createGoogleCalendarEvent, isGoogleCalendarAvailable } = await import("@/lib/google-calendar.server");
           const draft = buildCalendarDraftFromMessages(rows, { timezone: "America/Edmonton" });
           if (draft.missing.length > 0) {
-            const content = `I still need the ${draft.missing.join(" and ")} before I can create the Outlook calendar invite.`;
+            const content = `I still need the ${draft.missing.join(" and ")} before I can create the calendar invite.`;
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
               user_id: userId,
@@ -429,7 +429,7 @@ export const Route = createFileRoute("/api/chat")({
           }
           const resolved = await resolveContactAttendees(supabase, draft.attendees);
           if (resolved.unresolved.length > 0) {
-            const content = `I couldn't find a saved contact for ${resolved.unresolved.join(", ")}. Please give me their email address and I'll create the real Outlook calendar invite.`;
+            const content = `I couldn't find a saved contact for ${resolved.unresolved.join(", ")}. Please give me their email address and I'll create the real calendar invite.`;
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
               user_id: userId,
@@ -438,33 +438,48 @@ export const Route = createFileRoute("/api/chat")({
             });
             return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
           }
-          const result = await createMicrosoftCalendarEvent(userId, {
-            title: draft.title,
-            start: draft.start,
-            end: draft.end,
-            description: draft.description,
-            attendees: resolved.attendees,
-            timezone: draft.timezone,
-            online_meeting: true,
-          });
+          const useGoogle = isGoogleCalendarAvailable();
+          const providerLabel = useGoogle ? "Google Calendar" : "Outlook";
+          const providerKey = useGoogle ? "google" : "outlook";
+          const result = useGoogle
+            ? await createGoogleCalendarEvent({
+                title: draft.title,
+                start: draft.start,
+                end: draft.end,
+                description: draft.description,
+                attendees: resolved.attendees,
+                timezone: draft.timezone,
+                online_meeting: true,
+              })
+            : await (await import("@/lib/ms-calendar.server")).createMicrosoftCalendarEvent(userId, {
+                title: draft.title,
+                start: draft.start,
+                end: draft.end,
+                description: draft.description,
+                attendees: resolved.attendees,
+                timezone: draft.timezone,
+                online_meeting: true,
+              });
           await logAction(
             "create_calendar_event",
             "error" in result
-              ? `Failed to create Outlook calendar event "${draft.title}"`
-              : `Created event "${draft.title}" on Outlook${result.teams_join_url ? " with Teams meeting" : ""}`,
-            { title: draft.title, start: draft.start, end: draft.end, attendees: resolved.attendees, provider: "outlook", result },
+              ? `Failed to create ${providerLabel} event "${draft.title}"`
+              : `Created event "${draft.title}" on ${providerLabel}${result.teams_join_url ? (useGoogle ? " with Meet link" : " with Teams meeting") : ""}`,
+            { title: draft.title, start: draft.start, end: draft.end, attendees: resolved.attendees, provider: providerKey, result },
             "error" in result ? "error" : "ok",
           );
           const content =
             "error" in result
-              ? `I tried to create the real Outlook calendar invite, but Microsoft returned: ${result.error}${result.detail ? `\n\n${result.detail}` : ""}`
+              ? `I tried to create the real calendar invite, but ${providerLabel} returned: ${result.error}${result.detail ? `\n\n${result.detail}` : ""}`
               : [
-                  `Done — I created **${draft.title}** on your Outlook calendar.`,
+                  `Done — I created **${draft.title}** on your ${providerLabel}.`,
                   resolved.attendees.length > 0
                     ? `Calendar invites were sent to: ${resolved.attendees.join(", ")}.`
                     : "No attendees were included, so no invite emails were sent.",
-                  result.teams_join_url ? `Teams link: ${result.teams_join_url}` : "Microsoft created the event, but did not return a Teams link yet.",
-                  result.link ? `Outlook event: ${result.link}` : "",
+                  result.teams_join_url
+                    ? `${useGoogle ? "Meet" : "Teams"} link: ${result.teams_join_url}`
+                    : `${providerLabel} created the event, but did not return an online meeting link yet.`,
+                  result.link ? `${providerLabel} event: ${result.link}` : "",
                 ]
                   .filter(Boolean)
                   .join("\n\n");
@@ -843,7 +858,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             create_calendar_event: tool({
               description:
-                "Create a real Outlook calendar event/invite. Microsoft Teams is the default and only online meeting provider; pass online_meeting=true unless the user explicitly says no online meeting. Only call after the user has approved the draft. If this fails, report the error; do not send an email as a substitute calendar invite.",
+                "Create a real calendar event/invite. Uses Google Calendar with a Meet link when available, otherwise Outlook with a Teams link. Pass online_meeting=true unless the user explicitly says no online meeting. Only call after the user has approved the draft. If this fails, report the error; do not send an email as a substitute calendar invite.",
               inputSchema: z.object({
                 title: z.string().min(1).max(200),
                 start: z.string().describe("ISO 8601 start datetime, e.g. 2026-07-01T15:00:00-04:00"),
@@ -858,7 +873,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 online_meeting: z
                   .boolean()
                   .optional()
-                  .describe("Attach a Microsoft Teams meeting with a join link. Default true for all meetings unless user explicitly says no online meeting."),
+                  .describe("Attach an online meeting join link. Default true for all meetings unless user explicitly says no online meeting."),
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone, online_meeting }) => {
                 const { resolveContactAttendees } = await import("@/lib/contact-resolution.server");
@@ -869,23 +884,37 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     unresolved_attendees: resolved.unresolved,
                   };
                 }
-                const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
-                const result = await createMicrosoftCalendarEvent(userId, {
-                  title,
-                  start,
-                  end,
-                  description,
-                  location,
-                  attendees: resolved.attendees,
-                  timezone,
-                  online_meeting: online_meeting ?? true,
-                });
+                const { createGoogleCalendarEvent, isGoogleCalendarAvailable } = await import("@/lib/google-calendar.server");
+                const useGoogle = isGoogleCalendarAvailable();
+                const providerLabel = useGoogle ? "Google Calendar" : "Outlook";
+                const providerKey = useGoogle ? "google" : "outlook";
+                const result = useGoogle
+                  ? await createGoogleCalendarEvent({
+                      title,
+                      start,
+                      end,
+                      description,
+                      location,
+                      attendees: resolved.attendees,
+                      timezone,
+                      online_meeting: online_meeting ?? true,
+                    })
+                  : await (await import("@/lib/ms-calendar.server")).createMicrosoftCalendarEvent(userId, {
+                      title,
+                      start,
+                      end,
+                      description,
+                      location,
+                      attendees: resolved.attendees,
+                      timezone,
+                      online_meeting: online_meeting ?? true,
+                    });
                 await logAction(
                   "create_calendar_event",
                   "error" in result
-                    ? `Failed to create Outlook calendar event "${title}"`
-                    : `Created event "${title}" on Outlook${result.teams_join_url ? " with Teams meeting" : ""}`,
-                  { title, start, end, attendees: resolved.attendees, location, provider: "outlook", result },
+                    ? `Failed to create ${providerLabel} event "${title}"`
+                    : `Created event "${title}" on ${providerLabel}${result.teams_join_url ? (useGoogle ? " with Meet link" : " with Teams meeting") : ""}`,
+                  { title, start, end, attendees: resolved.attendees, location, provider: providerKey, result },
                   "error" in result ? "error" : "ok",
                 );
                 return result;
