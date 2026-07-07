@@ -13,6 +13,7 @@ import {
 } from "@/lib/tool-activity";
 import { getMicrosoftAccessToken } from "@/lib/ms-graph.server";
 import { looksLikeCalendarInviteText } from "@/lib/calendar-guards";
+import { buildCalendarDraftFromMessages, shouldAutoCreateCalendarEvent } from "@/lib/calendar-direct";
 
 /**
  * Call Microsoft Graph on behalf of `userId`.
@@ -411,6 +412,74 @@ export const Route = createFileRoute("/api/chat")({
         const lessonRows = lessonsRes.data ?? [];
         const feedbackRows = feedbackRes.data ?? [];
         const contactRows = contactsRes.data ?? [];
+
+        if (shouldAutoCreateCalendarEvent(userText, rows)) {
+          const { resolveContactAttendees } = await import("@/lib/contact-resolution.server");
+          const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
+          const draft = buildCalendarDraftFromMessages(rows, { timezone: "America/Toronto" });
+          if (draft.missing.length > 0) {
+            const content = `I still need the ${draft.missing.join(" and ")} before I can create the Outlook calendar invite.`;
+            await supabase.from("messages").insert({
+              thread_id: body.threadId!,
+              user_id: userId,
+              role: "assistant",
+              content,
+            });
+            return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+          }
+          const resolved = await resolveContactAttendees(supabase, draft.attendees);
+          if (resolved.unresolved.length > 0) {
+            const content = `I couldn't find a saved contact for ${resolved.unresolved.join(", ")}. Please give me their email address and I'll create the real Outlook calendar invite.`;
+            await supabase.from("messages").insert({
+              thread_id: body.threadId!,
+              user_id: userId,
+              role: "assistant",
+              content,
+            });
+            return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+          }
+          const result = await createMicrosoftCalendarEvent(userId, {
+            title: draft.title,
+            start: draft.start,
+            end: draft.end,
+            description: draft.description,
+            attendees: resolved.attendees,
+            timezone: draft.timezone,
+            online_meeting: true,
+          });
+          await logAction(
+            "create_calendar_event",
+            "error" in result
+              ? `Failed to create Outlook calendar event "${draft.title}"`
+              : `Created event "${draft.title}" on Outlook${result.teams_join_url ? " with Teams meeting" : ""}`,
+            { title: draft.title, start: draft.start, end: draft.end, attendees: resolved.attendees, provider: "outlook", result },
+            "error" in result ? "error" : "ok",
+          );
+          const content =
+            "error" in result
+              ? `I tried to create the real Outlook calendar invite, but Microsoft returned: ${result.error}${result.detail ? `\n\n${result.detail}` : ""}`
+              : [
+                  `Done — I created **${draft.title}** on your Outlook calendar.`,
+                  resolved.attendees.length > 0
+                    ? `Calendar invites were sent to: ${resolved.attendees.join(", ")}.`
+                    : "No attendees were included, so no invite emails were sent.",
+                  result.teams_join_url ? `Teams link: ${result.teams_join_url}` : "Microsoft created the event, but did not return a Teams link yet.",
+                  result.link ? `Outlook event: ${result.link}` : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n\n");
+          await supabase.from("messages").insert({
+            thread_id: body.threadId!,
+            user_id: userId,
+            role: "assistant",
+            content,
+          });
+          await supabase
+            .from("threads")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", body.threadId!);
+          return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+        }
 
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
         const factsBlock =
