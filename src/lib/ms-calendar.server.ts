@@ -162,16 +162,27 @@ export async function listMicrosoftCalendarEvents(
 
 export async function createMicrosoftCalendarEvent(userId: string, input: EventCreateInput) {
   const attendees = cleanAttendees(input.attendees);
-  const timezone = input.timezone ?? "UTC";
+  const timezone = input.timezone ?? "America/Edmonton";
   const wantsTeams = input.online_meeting ?? true;
+  const precreatedTeamsJoinUrl = wantsTeams
+    ? await createStandaloneTeamsMeeting(userId, input, attendees).catch(() => undefined)
+    : undefined;
   const body = {
     subject: input.title,
-    ...(input.description ? { body: { contentType: "HTML", content: input.description } } : {}),
+    ...(precreatedTeamsJoinUrl
+      ? { body: { contentType: "HTML", content: htmlWithTeamsLink(input.description, precreatedTeamsJoinUrl) } }
+      : input.description
+        ? { body: { contentType: "HTML", content: input.description } }
+        : {}),
     start: { dateTime: input.start, timeZone: timezone },
     end: { dateTime: input.end, timeZone: timezone },
     responseRequested: true,
     allowNewTimeProposals: true,
-    ...(input.location ? { location: { displayName: input.location } } : {}),
+    ...(precreatedTeamsJoinUrl
+      ? { location: { displayName: "Microsoft Teams Meeting" } }
+      : input.location
+        ? { location: { displayName: input.location } }
+        : {}),
     ...(attendees.length
       ? {
           attendees: attendees.map((email) => ({
@@ -192,13 +203,13 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
   if (!response.ok) return providerError(response, "Outlook calendar create");
 
   let event = (await response.json()) as GraphEvent;
-  let joinUrl = teamsJoinUrl(event);
-  let joinUrlSource: "event" | "onlineMeeting" | undefined = joinUrl ? "event" : undefined;
+  let joinUrl = teamsJoinUrl(event) ?? precreatedTeamsJoinUrl;
+  let joinUrlSource: "event" | "onlineMeeting" | undefined = teamsJoinUrl(event) ? "event" : precreatedTeamsJoinUrl ? "onlineMeeting" : undefined;
 
   const createdEventId = event.id;
-  if (wantsTeams && createdEventId && !joinUrl) {
-    for (let attempt = 0; attempt < 8 && !joinUrl; attempt += 1) {
-      await wait(attempt < 3 ? 700 : 1200);
+  if (wantsTeams && createdEventId && (!teamsJoinUrl(event) || !joinUrl)) {
+    for (let attempt = 0; attempt < 3 && !teamsJoinUrl(event); attempt += 1) {
+      await wait(attempt === 0 ? 500 : 900);
       if (attempt === 2) {
         await graphFetch(userId, `/me/events/${encodeURIComponent(createdEventId)}`, {
           method: "PATCH",
@@ -212,8 +223,11 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
       );
       if (fresh?.ok) {
         event = (await fresh.json()) as GraphEvent;
-        joinUrl = teamsJoinUrl(event);
-        if (joinUrl) joinUrlSource = "event";
+        const eventJoinUrl = teamsJoinUrl(event);
+        if (eventJoinUrl) {
+          joinUrl = eventJoinUrl;
+          joinUrlSource = "event";
+        }
       }
     }
   }
@@ -243,6 +257,7 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
     id: eventId,
     link: event.webLink,
     invite_sent: attendees.length > 0,
+    calendar_invite_sent: attendees.length > 0,
     attendees,
     ...(joinUrl ? { teams_join_url: joinUrl } : {}),
     ...(joinUrlSource ? { teams_join_url_source: joinUrlSource } : {}),

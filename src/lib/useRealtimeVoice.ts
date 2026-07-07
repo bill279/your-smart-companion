@@ -161,12 +161,20 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         } else {
           let parsed: Record<string, unknown> = {};
           try { parsed = JSON.parse(argsRaw || "{}"); } catch { parsed = {}; }
+          let shouldCreateResponse = true;
           try {
             const r = await tool(parsed);
+            shouldCreateResponse = !(typeof r === "object" && r !== null && "shown_to_user" in r);
             output = typeof r === "string" ? r : JSON.stringify(r);
           } catch (err) {
             output = JSON.stringify({ error: err instanceof Error ? err.message : "tool failed" });
           }
+          sendEvent({
+            type: "conversation.item.create",
+            item: { type: "function_call_output", call_id: callId, output },
+          });
+          if (shouldCreateResponse) sendEvent({ type: "response.create" });
+          return;
         }
         sendEvent({
           type: "conversation.item.create",
@@ -302,6 +310,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     [sendEvent],
   );
 
+  const cancelResponse = useCallback(() => {
+    sendEvent({ type: "response.cancel" });
+  }, [sendEvent]);
+
   const sendContextualUpdate = useCallback(
     (text: string) => {
       // System note that does NOT trigger a response.
@@ -333,6 +345,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     startSession,
     endSession,
     sendUserMessage,
+    cancelResponse,
     sendContextualUpdate,
     setVolume,
   };
