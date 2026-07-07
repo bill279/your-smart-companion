@@ -253,7 +253,7 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
       joinUrl = standalone.joinUrl;
       standaloneTeamsUsed = true;
       teamsUnavailable = false;
-    } else if (standalone && "error" in standalone) {
+    } else if (standalone && "error" in standalone && standalone.error) {
       teamsErrorDetail = standalone.error.detail ?? teamsErrorDetail;
     }
   }
