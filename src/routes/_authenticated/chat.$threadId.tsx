@@ -1335,7 +1335,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function signOut() {
     await supabase.auth.signOut();
-    navigate({ to: "/auth" });
+    navigate({ to: "/auth", search: {} });
   }
 
   const voiceActive = voiceUiState === "connected" || voiceUiState === "starting";
