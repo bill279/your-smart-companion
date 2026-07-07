@@ -61,6 +61,7 @@ Never say you are unable to display a visual table directly in this chat interfa
 
 TOOL USE — non-negotiable:
 - CALENDAR MEETINGS COME FIRST: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting.
+- YOU CAN CREATE TEAMS MEETINGS: create_calendar_event creates the Outlook calendar invite and Microsoft Teams join link. Never say you cannot directly create the Teams meeting, never tell the user to open Teams, and never offer copy/paste meeting details instead.
 - CALENDAR MANAGEMENT: For "what meetings do I have", availability, canceling, accepting, tentatively accepting, or declining meetings, use the calendar tools. If cancel/respond is ambiguous, list events first and confirm which one.
 - CONTACT NAMES FOR MEETINGS: If the user says a saved contact name like "Bill", pass that name in attendees or call list_contacts; do not ask again if the contact exists in the chat/contact list. The server resolves saved names to email addresses.
 - For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
@@ -142,6 +143,16 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         },
       },
       required: ["to", "subject", "body"],
+    },
+  },
+  {
+    type: "function",
+    name: "list_contacts",
+    description:
+      "List the user's saved contacts. Call this before asking for an email address when the user names a person such as Bill, Sarah, Mike, etc.",
+    parameters: {
+      type: "object",
+      properties: {},
     },
   },
   {
