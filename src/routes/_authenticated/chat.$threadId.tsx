@@ -716,8 +716,8 @@ function ThreadView({ threadId }: { threadId: string }) {
         } catch (err) {
           console.warn("calendar confirmation persist failed", err);
         }
-        if (!res.ok) return JSON.stringify({ error: data?.error ?? "calendar create failed", detail: data?.detail, shown_to_user: true });
-        return JSON.stringify({ ...data, shown_to_user: true, final_message: assistantMessage });
+        if (!res.ok) return { error: data?.error ?? "calendar create failed", detail: data?.detail, shown_to_user: true };
+        return { ...data, shown_to_user: true, final_message: assistantMessage };
       },
       list_calendar_events: async (params) => {
         const p = params as { days?: number; max_results?: number; start?: string; end?: string };
