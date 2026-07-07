@@ -415,7 +415,7 @@ export const Route = createFileRoute("/api/chat")({
 
         if (shouldAutoCreateCalendarEvent(userText, rows)) {
           const { resolveContactAttendees } = await import("@/lib/contact-resolution.server");
-          const { createGoogleCalendarEvent, isGoogleCalendarAvailable } = await import("@/lib/google-calendar.server");
+          const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
           const draft = buildCalendarDraftFromMessages(rows, { timezone: "America/Edmonton" });
           if (draft.missing.length > 0) {
             const content = `I still need the ${draft.missing.join(" and ")} before I can create the calendar invite.`;
@@ -438,33 +438,22 @@ export const Route = createFileRoute("/api/chat")({
             });
             return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
           }
-          const useGoogle = isGoogleCalendarAvailable();
-          const providerLabel = useGoogle ? "Google Calendar" : "Outlook";
-          const providerKey = useGoogle ? "google" : "outlook";
-          const result = useGoogle
-            ? await createGoogleCalendarEvent({
-                title: draft.title,
-                start: draft.start,
-                end: draft.end,
-                description: draft.description,
-                attendees: resolved.attendees,
-                timezone: draft.timezone,
-                online_meeting: true,
-              })
-            : await (await import("@/lib/ms-calendar.server")).createMicrosoftCalendarEvent(userId, {
-                title: draft.title,
-                start: draft.start,
-                end: draft.end,
-                description: draft.description,
-                attendees: resolved.attendees,
-                timezone: draft.timezone,
-                online_meeting: true,
-              });
+          const providerLabel = "Outlook";
+          const providerKey = "outlook";
+          const result = await createMicrosoftCalendarEvent(userId, {
+            title: draft.title,
+            start: draft.start,
+            end: draft.end,
+            description: draft.description,
+            attendees: resolved.attendees,
+            timezone: draft.timezone,
+            online_meeting: true,
+          });
           await logAction(
             "create_calendar_event",
             "error" in result
               ? `Failed to create ${providerLabel} event "${draft.title}"`
-              : `Created event "${draft.title}" on ${providerLabel}${result.teams_join_url ? (useGoogle ? " with Meet link" : " with Teams meeting") : ""}`,
+              : `Created event "${draft.title}" on ${providerLabel}${result.teams_join_url ? " with Teams meeting" : ""}`,
             { title: draft.title, start: draft.start, end: draft.end, attendees: resolved.attendees, provider: providerKey, result },
             "error" in result ? "error" : "ok",
           );
@@ -477,8 +466,8 @@ export const Route = createFileRoute("/api/chat")({
                     ? `Calendar invites were sent to: ${resolved.attendees.join(", ")}.`
                     : "No attendees were included, so no invite emails were sent.",
                   result.teams_join_url
-                    ? `${useGoogle ? "Meet" : "Teams"} link: ${result.teams_join_url}`
-                    : `${providerLabel} created the event, but did not return an online meeting link yet.`,
+                    ? `Teams link: ${result.teams_join_url}`
+                    : `${providerLabel} created the event, but did not return a Teams link. ${(result as { teams_unavailable_reason?: string }).teams_unavailable_reason ?? ""}`.trim(),
                   result.link ? `${providerLabel} event: ${result.link}` : "",
                 ]
                   .filter(Boolean)
