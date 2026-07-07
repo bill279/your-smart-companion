@@ -590,6 +590,85 @@ export const Route = createFileRoute("/api/chat")({
           return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
         }
 
+        const directDeepResearchKey = shouldDirectDeepResearch(userText, body.forceWebSearch)
+          ? process.env.PERPLEXITY_API_KEY
+          : undefined;
+        if (directDeepResearchKey) {
+          const toolCallId = `deep_research_${crypto.randomUUID()}`;
+          let collectedActivity: ToolActivity[] = [];
+          const encoder = new TextEncoder();
+          const stream = new ReadableStream<Uint8Array>({
+            async start(controller) {
+              const enqueueToolEvent = (ev: ToolEvent) => {
+                collectedActivity = foldToolEvent(collectedActivity, ev);
+                controller.enqueue(
+                  encoder.encode(TOOL_FRAME_DELIM + JSON.stringify(ev) + TOOL_FRAME_DELIM),
+                );
+              };
+
+              try {
+                enqueueToolEvent({
+                  t: "call",
+                  id: toolCallId,
+                  name: "deep_research",
+                  input: { query: userText },
+                });
+
+                const research = await runDeepResearch(directDeepResearchKey, userText);
+                enqueueToolEvent({
+                  t: "result",
+                  id: toolCallId,
+                  name: "deep_research",
+                  output: research.error
+                    ? { error: research.error, citations: research.citations }
+                    : { citations: research.citations },
+                });
+
+                const content = research.answer
+                  ? withSources(research.answer, research.citations)
+                  : `Deep research did run, but it failed: ${research.error ?? "No answer returned."}`;
+
+                controller.enqueue(encoder.encode(content));
+                const marker = encodeToolActivityMarker(collectedActivity);
+                await supabase.from("messages").insert({
+                  thread_id: body.threadId!,
+                  user_id: userId,
+                  role: "assistant",
+                  content: marker + cleanAssistantText(content),
+                });
+                await supabase
+                  .from("threads")
+                  .update({ updated_at: new Date().toISOString() })
+                  .eq("id", body.threadId!);
+                const { data: t } = await supabase
+                  .from("threads")
+                  .select("title")
+                  .eq("id", body.threadId!)
+                  .single();
+                if (t?.title === "New conversation") {
+                  const title = userText.slice(0, 48).replace(/\s+/g, " ").trim();
+                  await supabase.from("threads").update({ title }).eq("id", body.threadId!);
+                }
+              } catch (e) {
+                controller.enqueue(
+                  encoder.encode(
+                    `\n\n_(stream error: ${e instanceof Error ? e.message : String(e)})_`,
+                  ),
+                );
+              } finally {
+                controller.close();
+              }
+            },
+          });
+          return new Response(stream, {
+            headers: {
+              "Content-Type": "text/plain; charset=utf-8",
+              "Cache-Control": "no-cache, no-transform",
+              "X-Accel-Buffering": "no",
+            },
+          });
+        }
+
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
         const factsBlock =
           factRows && factRows.length > 0
@@ -706,60 +785,7 @@ export const Route = createFileRoute("/api/chat")({
               execute: async ({ query }) => {
                 const key = process.env.PERPLEXITY_API_KEY;
                 if (!key) return { error: "Deep research not configured" };
-                try {
-                  const r = await fetch("https://api.perplexity.ai/chat/completions", {
-                    method: "POST",
-                    headers: {
-                      Authorization: `Bearer ${key}`,
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      model: "sonar-pro",
-                      messages: [
-                        {
-                          role: "system",
-                          content:
-                            "You are a senior domain-expert consultant. Answer thoroughly with named vendors, model numbers, hard specs, prices when known, tradeoffs, and a clear ranked recommendation. Use inline numbered citations [1][2] tied to the source list. Use ## headings and short paragraphs. 400-800 words unless the question is trivially small.",
-                        },
-                        { role: "user", content: query },
-                      ],
-                      temperature: 0.2,
-                    }),
-                  });
-                  if (!r.ok) {
-                    const text = await r.text().catch(() => "");
-                    return { error: `Deep research failed (${r.status}): ${text.slice(0, 200)}` };
-                  }
-                  const j = (await r.json()) as {
-                    choices?: Array<{ message?: { content?: string } }>;
-                    citations?: string[];
-                    search_results?: Array<{ title?: string; url?: string }>;
-                  };
-                  const answer = j.choices?.[0]?.message?.content ?? "";
-                  const rawCitations: Array<{ title?: string; url?: string }> =
-                    (j.search_results && j.search_results.length > 0
-                      ? j.search_results
-                      : (j.citations ?? []).map((u) => ({ url: u }))) as Array<{ title?: string; url?: string }>;
-                  const citations = rawCitations
-                    .filter((c) => !!c.url)
-                    .slice(0, 12)
-                    .map((c) => {
-                      let title = c.title;
-                      if (!title && c.url) {
-                        try {
-                          title = new URL(c.url).hostname.replace(/^www\./, "");
-                        } catch {
-                          title = c.url;
-                        }
-                      }
-                      return { title, url: c.url };
-                    });
-                  return { answer, citations };
-                } catch (e) {
-                  return {
-                    error: `Deep research error: ${e instanceof Error ? e.message : String(e)}`,
-                  };
-                }
+                return runDeepResearch(key, query);
               },
             }),
             web_scrape: tool({
