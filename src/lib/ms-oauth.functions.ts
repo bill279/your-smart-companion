@@ -21,10 +21,27 @@ export const getMicrosoftConnectionStatus = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data } = await context.supabase
       .from("ms_oauth_tokens")
-      .select("ms_email,updated_at")
+      .select("ms_email,updated_at,scope")
       .eq("user_id", context.userId)
       .maybeSingle();
-    return { connected: !!data, email: data?.ms_email ?? null, updatedAt: data?.updated_at ?? null };
+    const requiredScopes = ["Calendars.ReadWrite", "OnlineMeetings.ReadWrite"];
+    const granted = new Set(
+      String(data?.scope ?? "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((scope) => scope.toLowerCase()),
+    );
+    const missingScopes = data?.scope
+      ? requiredScopes.filter((scope) => !granted.has(scope.toLowerCase()))
+      : [];
+    return {
+      connected: !!data,
+      email: data?.ms_email ?? null,
+      updatedAt: data?.updated_at ?? null,
+      scopesKnown: !!data?.scope,
+      missingScopes,
+      canCreateTeamsLinks: !!data && missingScopes.length === 0,
+    };
   });
 
 export const disconnectMicrosoftAccount = createServerFn({ method: "POST" })

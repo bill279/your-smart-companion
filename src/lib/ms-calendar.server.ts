@@ -76,9 +76,10 @@ async function createStandaloneTeamsMeeting(userId: string, input: EventCreateIn
         : {}),
     }),
   });
-  if (!response?.ok) return undefined;
+  if (!response) return { error: { error: "Microsoft is not connected. Open Activity & memory and click Connect Microsoft.", provider: "outlook" as const } };
+  if (!response.ok) return { error: await providerError(response, "Teams meeting create") };
   const meeting = (await response.json().catch(() => ({}))) as { joinWebUrl?: string };
-  return meeting.joinWebUrl;
+  return { joinUrl: meeting.joinWebUrl };
 }
 
 async function wait(ms: number) {
@@ -164,9 +165,17 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
   const attendees = cleanAttendees(input.attendees);
   const timezone = input.timezone ?? "America/Edmonton";
   const wantsTeams = input.online_meeting ?? true;
-  const precreatedTeamsJoinUrl = wantsTeams
-    ? await createStandaloneTeamsMeeting(userId, input, attendees).catch(() => undefined)
+  const precreatedTeams = wantsTeams
+    ? await createStandaloneTeamsMeeting(userId, input, attendees).catch((e) => ({
+        error: { error: "Teams meeting create failed", detail: e instanceof Error ? e.message : String(e), provider: "outlook" as const },
+      }))
     : undefined;
+  const precreatedTeamsJoinUrl = precreatedTeams && "joinUrl" in precreatedTeams ? precreatedTeams.joinUrl : undefined;
+  const attendeePayload = attendees.map((email) => ({
+    emailAddress: { address: email },
+    type: "required",
+  }));
+  const delayAttendeesUntilTeamsLink = wantsTeams && attendees.length > 0 && !precreatedTeamsJoinUrl;
   const body = {
     subject: input.title,
     ...(precreatedTeamsJoinUrl
@@ -183,12 +192,9 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
       : input.location
         ? { location: { displayName: input.location } }
         : {}),
-    ...(attendees.length
+    ...(!delayAttendeesUntilTeamsLink && attendeePayload.length
       ? {
-          attendees: attendees.map((email) => ({
-            emailAddress: { address: email },
-            type: "required",
-          })),
+          attendees: attendeePayload,
         }
       : {}),
     ...(wantsTeams ? { isOnlineMeeting: true, onlineMeetingProvider: "teamsForBusiness" } : {}),
@@ -233,22 +239,41 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
   }
 
   if (wantsTeams && !joinUrl) {
-    const standaloneJoinUrl = await createStandaloneTeamsMeeting(userId, input, attendees).catch(() => undefined);
-    if (standaloneJoinUrl) {
-      joinUrl = standaloneJoinUrl;
+    const standalone = await createStandaloneTeamsMeeting(userId, input, attendees).catch(() => undefined);
+    if (standalone && "joinUrl" in standalone && standalone.joinUrl) {
+      joinUrl = standalone.joinUrl;
       joinUrlSource = "onlineMeeting";
     }
   }
 
+  if (wantsTeams && !joinUrl) {
+    if (event.id) {
+      await graphFetch(userId, `/me/events/${encodeURIComponent(event.id)}`, { method: "DELETE" }).catch(() => undefined);
+    }
+    const detail = precreatedTeams && "error" in precreatedTeams ? precreatedTeams.error.detail : undefined;
+    return {
+      error:
+        "I did not send the calendar invite because Microsoft did not return a Teams join link. Reconnect Microsoft from Activity & memory and approve OnlineMeetings.ReadWrite, then try again.",
+      detail,
+      status: precreatedTeams && "error" in precreatedTeams ? precreatedTeams.error.status : undefined,
+      provider: "outlook" as const,
+    };
+  }
+
   const eventId = event.id;
   if (eventId && joinUrl) {
-    await graphFetch(userId, `/me/events/${encodeURIComponent(eventId)}`, {
+    const patchResponse = await graphFetch(userId, `/me/events/${encodeURIComponent(eventId)}`, {
       method: "PATCH",
       body: JSON.stringify({
         body: { contentType: "HTML", content: htmlWithTeamsLink(input.description, joinUrl) },
         location: { displayName: "Microsoft Teams Meeting" },
+        ...(delayAttendeesUntilTeamsLink && attendeePayload.length ? { attendees: attendeePayload } : {}),
       }),
     }).catch(() => undefined);
+    if (delayAttendeesUntilTeamsLink && patchResponse && !patchResponse.ok) {
+      await graphFetch(userId, `/me/events/${encodeURIComponent(eventId)}`, { method: "DELETE" }).catch(() => undefined);
+      return providerError(patchResponse, "Outlook calendar invite send");
+    }
   }
 
   return {
@@ -261,12 +286,6 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
     attendees,
     ...(joinUrl ? { teams_join_url: joinUrl } : {}),
     ...(joinUrlSource ? { teams_join_url_source: joinUrlSource } : {}),
-    ...(wantsTeams && !joinUrl
-      ? {
-          warning:
-            "Outlook created the event, but Microsoft did not return the Teams join link. Open the Outlook event to view it or reconnect Microsoft with OnlineMeetings.ReadWrite consent.",
-        }
-      : {}),
   };
 }
 

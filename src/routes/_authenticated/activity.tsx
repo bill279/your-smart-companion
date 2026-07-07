@@ -87,13 +87,18 @@ function ActivityPage() {
                 <div className="text-xs text-muted-foreground mt-0.5">
                   Connected as <span className="text-foreground">{msQ.data.email ?? "your Microsoft account"}</span>. BPA Bot can send email, read your calendar, and create Teams meetings on your behalf.
                 </div>
+                {msQ.data.missingScopes?.length ? (
+                  <div className="mt-2 rounded border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+                    Missing Microsoft permission: {msQ.data.missingScopes.join(", ")}. Click Reconnect and approve the permissions screen so Teams links can be created.
+                  </div>
+                ) : null}
                 <div className="mt-2 flex gap-2">
                   <button
                     onClick={() => connectMs.mutate()}
                     disabled={connectMs.isPending}
                     className="text-xs px-2.5 py-1 rounded border border-border hover:bg-muted"
                   >
-                    Reconnect
+                    {connectMs.isPending ? "Opening Microsoft…" : "Reconnect"}
                   </button>
                   <button
                     onClick={() => {
