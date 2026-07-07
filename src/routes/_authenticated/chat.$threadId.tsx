@@ -1067,7 +1067,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (!regenerate) setPendingUser(content);
       setPendingAssistant("");
 
-      // If voice is connected, route through ElevenLabs instead.
+      // If voice is connected, route through the realtime voice channel instead.
       if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
@@ -1463,6 +1463,13 @@ function ThreadView({ threadId }: { threadId: string }) {
           className="mx-4 mt-3 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
         >
           <Users size={12} /> Saved contacts
+        </Link>
+        <Link
+          to="/inbox"
+          onClick={() => setSidebarOpen(false)}
+          className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          <Mail size={12} /> Inbox triage
         </Link>
         <Link
           to="/knowledge"
