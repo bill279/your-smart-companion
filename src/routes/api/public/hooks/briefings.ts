@@ -61,7 +61,7 @@ export const Route = createFileRoute("/api/public/hooks/briefings")({
               content: briefing,
             });
 
-            const update: Record<string, string> = {};
+            const update: { last_daily_run_at?: string; last_weekly_run_at?: string } = {};
             if (isDaily) update.last_daily_run_at = now.toISOString();
             if (isWeekly) update.last_weekly_run_at = now.toISOString();
             await supabaseAdmin.from("user_briefing_prefs").update(update).eq("user_id", p.user_id);
