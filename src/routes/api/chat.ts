@@ -873,36 +873,24 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     unresolved_attendees: resolved.unresolved,
                   };
                 }
-                const { createGoogleCalendarEvent, isGoogleCalendarAvailable } = await import("@/lib/google-calendar.server");
-                const useGoogle = isGoogleCalendarAvailable();
-                const providerLabel = useGoogle ? "Google Calendar" : "Outlook";
-                const providerKey = useGoogle ? "google" : "outlook";
-                const result = useGoogle
-                  ? await createGoogleCalendarEvent({
-                      title,
-                      start,
-                      end,
-                      description,
-                      location,
-                      attendees: resolved.attendees,
-                      timezone,
-                      online_meeting: online_meeting ?? true,
-                    })
-                  : await (await import("@/lib/ms-calendar.server")).createMicrosoftCalendarEvent(userId, {
-                      title,
-                      start,
-                      end,
-                      description,
-                      location,
-                      attendees: resolved.attendees,
-                      timezone,
-                      online_meeting: online_meeting ?? true,
-                    });
+                const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
+                const providerLabel = "Outlook";
+                const providerKey = "outlook";
+                const result = await createMicrosoftCalendarEvent(userId, {
+                  title,
+                  start,
+                  end,
+                  description,
+                  location,
+                  attendees: resolved.attendees,
+                  timezone,
+                  online_meeting: online_meeting ?? true,
+                });
                 await logAction(
                   "create_calendar_event",
                   "error" in result
                     ? `Failed to create ${providerLabel} event "${title}"`
-                    : `Created event "${title}" on ${providerLabel}${result.teams_join_url ? (useGoogle ? " with Meet link" : " with Teams meeting") : ""}`,
+                    : `Created event "${title}" on ${providerLabel}${result.teams_join_url ? " with Teams meeting" : ""}`,
                   { title, start, end, attendees: resolved.attendees, location, provider: providerKey, result },
                   "error" in result ? "error" : "ok",
                 );
