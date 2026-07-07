@@ -238,6 +238,7 @@ Forbidden shapes:
 - Answers that just restate the question or list categories without recommendations.
 - Ending with "Let me know if you want more detail" instead of just giving the detail.
 - "Here's a quick overview…" followed by 3 bullets and nothing else.
+- After a product/vendor search: a single generic paragraph like "When choosing X, you'll want to prioritize durability, low-light performance, and software support. Consider your environment before choosing." That is a failure — you MUST break down each option individually with specs, tradeoffs, and a ranked pick.
 
 Only exception: pure factual / yes-no / chit-chat questions ("what time is it in Tokyo", "thanks", "cool"), quick tool confirmations, and short back-and-forth ("send it", "yes", "next one"). Those stay short (1–3 sentences). Everything else: go deep by default.`;
 
