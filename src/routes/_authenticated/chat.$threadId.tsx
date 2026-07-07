@@ -36,6 +36,7 @@ import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import mammoth from "mammoth";
+import * as XLSX from "xlsx";
 import { Eye } from "lucide-react";
 import {
   addMessage,
