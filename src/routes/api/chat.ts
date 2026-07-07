@@ -611,6 +611,76 @@ export const Route = createFileRoute("/api/chat")({
                 };
               },
             }),
+            deep_research: tool({
+              description:
+                "Grounded expert research powered by Perplexity Sonar Pro. Returns a fully-written expert answer with inline citations and a list of source URLs. USE THIS as the default for research-style questions: 'best X for Y', comparisons, market scans, in-depth explanations, buying advice, vendor rundowns, technical deep-dives. Reproduce the returned `answer` in your reply (verbatim or lightly polished), keep inline citations, and add a Sources list.",
+              inputSchema: z.object({
+                query: z
+                  .string()
+                  .min(4)
+                  .describe(
+                    "The full research question in plain English, e.g. 'What are the best stereoscopic cameras for underground drilling / mining borehole inspection? Include vendor names, model numbers, IP ratings, depth range, and price.'",
+                  ),
+              }),
+              execute: async ({ query }) => {
+                const key = process.env.PERPLEXITY_API_KEY;
+                if (!key) return { error: "Deep research not configured" };
+                try {
+                  const r = await fetch("https://api.perplexity.ai/chat/completions", {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${key}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      model: "sonar-pro",
+                      messages: [
+                        {
+                          role: "system",
+                          content:
+                            "You are a senior domain-expert consultant. Answer thoroughly with named vendors, model numbers, hard specs, prices when known, tradeoffs, and a clear ranked recommendation. Use inline numbered citations [1][2] tied to the source list. Use ## headings and short paragraphs. 400-800 words unless the question is trivially small.",
+                        },
+                        { role: "user", content: query },
+                      ],
+                      temperature: 0.2,
+                    }),
+                  });
+                  if (!r.ok) {
+                    const text = await r.text().catch(() => "");
+                    return { error: `Deep research failed (${r.status}): ${text.slice(0, 200)}` };
+                  }
+                  const j = (await r.json()) as {
+                    choices?: Array<{ message?: { content?: string } }>;
+                    citations?: string[];
+                    search_results?: Array<{ title?: string; url?: string }>;
+                  };
+                  const answer = j.choices?.[0]?.message?.content ?? "";
+                  const rawCitations: Array<{ title?: string; url?: string }> =
+                    (j.search_results && j.search_results.length > 0
+                      ? j.search_results
+                      : (j.citations ?? []).map((u) => ({ url: u }))) as Array<{ title?: string; url?: string }>;
+                  const citations = rawCitations
+                    .filter((c) => !!c.url)
+                    .slice(0, 12)
+                    .map((c) => {
+                      let title = c.title;
+                      if (!title && c.url) {
+                        try {
+                          title = new URL(c.url).hostname.replace(/^www\./, "");
+                        } catch {
+                          title = c.url;
+                        }
+                      }
+                      return { title, url: c.url };
+                    });
+                  return { answer, citations };
+                } catch (e) {
+                  return {
+                    error: `Deep research error: ${e instanceof Error ? e.message : String(e)}`,
+                  };
+                }
+              },
+            }),
             web_scrape: tool({
               description: "Fetch the readable markdown contents of a specific URL.",
               inputSchema: z.object({ url: z.string().url() }),
