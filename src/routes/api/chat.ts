@@ -82,8 +82,7 @@ This assistant may also be spoken aloud via voice mode. Voice mode has its OWN s
 
 # Live web access
 You have tools:
-- deep_research — grounded expert research via Perplexity Sonar Pro. **This is your default for any question that asks for the "best X", a comparison, a market/vendor scan, an in-depth explanation, or anything that would benefit from named vendors, specs, numbers, and citations.** It returns a fully written expert answer PLUS an array of source citations. When you use it, you MUST reproduce the returned answer verbatim (or lightly polished for tone) as your reply, keep the inline citations, and end with a "Sources" list. Do NOT summarize a 600-word Perplexity answer down to 3 sentences — that defeats the whole point. Use this INSTEAD of web_search for research/analysis/"which one should I buy" style questions. Only fall back to web_search for quick single-fact lookups (a phone number, one price, one date).
-- web_search — search the live web for quick, targeted lookups. Use it for a single fact, a specific URL, a fresh news item, or when deep_research already ran and you need one more data point. Prefer deep_research for anything analytical.
+- web_search — search the live web. Use it for current facts, prices, news, vendor lookups, comparisons, and any research-style question. For "best X" / comparison / market-scan questions, call web_search 2–4 times with different angles (vendor lists, specs, pricing, reviews) then scrape the most promising results with web_scrape before writing a thorough expert answer with cited sources.
 - web_scrape — fetch the readable markdown of a specific URL.
 - product_search — search for REAL products the user could buy (gadgets, gear, tools, clothing, appliances, software, courses). Returns product cards (title, image, price, merchant, url) that the UI renders as a visual carousel. Use this INSTEAD of web_search whenever the user asks to find, compare, recommend, or shop for a specific product. After it returns, write a **full expert analysis** (350–700+ words) — do NOT re-list every product's price/title in prose (the cards handle that), but DO discuss each option's strengths/weaknesses, specific specs that matter (sensor size, resolution, baseline, depth range, IP rating, SDK, low-light performance, etc.), which use case each is best for, common pitfalls, and end with a clear ranked recommendation ("If it were me, I'd start with X because…, fallback to Y if…"). A one-paragraph "consider your environment and software support" summary is a FAILURE — the cards without depth is worse than ChatGPT and the whole point of this bot is to be smarter than that.
 - send_email — send an email from the user's connected Outlook account. Use when the user asks to email someone (including themselves). Do NOT use this as a fallback for failed meeting/calendar creation; if calendar creation fails, report the calendar error instead of sending a fake invite email.
@@ -269,87 +268,6 @@ function cleanAssistantText(text: string) {
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
     .trim();
-}
-
-function shouldDirectDeepResearch(userText: string, forceWebSearch?: boolean) {
-  const q = userText.trim();
-  if (q.length < 12) return false;
-  if (/\b(email|send|draft|calendar|meeting|schedule|book|contact|remember|forget|export|pdf|word|excel|csv)\b/i.test(q)) {
-    return false;
-  }
-
-  const researchIntent = /\b(best|top|compare|comparison|recommend|recommendation|which|vendors?|suppliers?|market scan|vendor scan|options?|products?|equipment|specs?|pricing|price|cost)\b/i.test(q);
-  const technicalContext = /\b(camera|cameras|stereo|stereoscopic|mining|underground|drilling|borehole|industrial|inspection|application|sensor|sensors|tooling|hardware|software|platform)\b/i.test(q);
-
-  return researchIntent && (technicalContext || !!forceWebSearch);
-}
-
-async function runDeepResearch(apiKey: string, query: string): Promise<{
-  answer?: string;
-  citations: Array<{ title?: string; url?: string }>;
-  error?: string;
-}> {
-  try {
-    const r = await fetch("https://api.perplexity.ai/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "sonar-pro",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a senior domain-expert consultant. Answer thoroughly with named vendors, model numbers, hard specs, prices when known, tradeoffs, and a clear ranked recommendation. Use inline numbered citations [1][2] tied to the source list. Use ## headings and short paragraphs. 500-900 words unless the question is trivially small.",
-          },
-          { role: "user", content: query },
-        ],
-        temperature: 0.2,
-      }),
-    });
-    if (!r.ok) {
-      const text = await r.text().catch(() => "");
-      return { citations: [], error: `Deep research failed (${r.status}): ${text.slice(0, 220)}` };
-    }
-    const j = (await r.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      citations?: string[];
-      search_results?: Array<{ title?: string; url?: string }>;
-    };
-    const answer = j.choices?.[0]?.message?.content?.trim() ?? "";
-    const rawCitations: Array<{ title?: string; url?: string }> =
-      (j.search_results && j.search_results.length > 0
-        ? j.search_results
-        : (j.citations ?? []).map((u) => ({ url: u }))) as Array<{ title?: string; url?: string }>;
-    const citations = rawCitations
-      .filter((c) => !!c.url)
-      .slice(0, 12)
-      .map((c) => {
-        let title = c.title;
-        if (!title && c.url) {
-          try {
-            title = new URL(c.url).hostname.replace(/^www\./, "");
-          } catch {
-            title = c.url;
-          }
-        }
-        return { title, url: c.url };
-      });
-    return { answer, citations };
-  } catch (e) {
-    return { citations: [], error: `Deep research error: ${e instanceof Error ? e.message : String(e)}` };
-  }
-}
-
-function withSources(answer: string, citations: Array<{ title?: string; url?: string }>) {
-  const cleaned = answer.trim();
-  if (!citations.length || /^##?\s+sources\b/im.test(cleaned)) return cleaned;
-  const sourceList = citations
-    .map((c, i) => `${i + 1}. [${c.title || c.url}](${c.url})`)
-    .join("\n");
-  return `${cleaned}\n\n## Sources\n${sourceList}`;
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -590,88 +508,6 @@ export const Route = createFileRoute("/api/chat")({
           return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
         }
 
-        const effectiveUserText = body.regenerate
-          ? [...rows].reverse().find((r) => r.role === "user")?.content?.trim() ?? userText
-          : userText;
-        const directDeepResearchKey = shouldDirectDeepResearch(effectiveUserText, body.forceWebSearch)
-          ? process.env.PERPLEXITY_API_KEY
-          : undefined;
-        if (directDeepResearchKey) {
-          const toolCallId = `deep_research_${crypto.randomUUID()}`;
-          let collectedActivity: ToolActivity[] = [];
-          const encoder = new TextEncoder();
-          const stream = new ReadableStream<Uint8Array>({
-            async start(controller) {
-              const enqueueToolEvent = (ev: ToolEvent) => {
-                collectedActivity = foldToolEvent(collectedActivity, ev);
-                controller.enqueue(
-                  encoder.encode(TOOL_FRAME_DELIM + JSON.stringify(ev) + TOOL_FRAME_DELIM),
-                );
-              };
-
-              try {
-                enqueueToolEvent({
-                  t: "call",
-                  id: toolCallId,
-                  name: "deep_research",
-                  input: { query: effectiveUserText },
-                });
-
-                const research = await runDeepResearch(directDeepResearchKey, effectiveUserText);
-                enqueueToolEvent({
-                  t: "result",
-                  id: toolCallId,
-                  name: "deep_research",
-                  output: research.error
-                    ? { error: research.error, citations: research.citations }
-                    : { citations: research.citations },
-                });
-
-                const content = research.answer
-                  ? withSources(research.answer, research.citations)
-                  : `Deep research did run, but it failed: ${research.error ?? "No answer returned."}`;
-
-                controller.enqueue(encoder.encode(content));
-                const marker = encodeToolActivityMarker(collectedActivity);
-                await supabase.from("messages").insert({
-                  thread_id: body.threadId!,
-                  user_id: userId,
-                  role: "assistant",
-                  content: marker + cleanAssistantText(content),
-                });
-                await supabase
-                  .from("threads")
-                  .update({ updated_at: new Date().toISOString() })
-                  .eq("id", body.threadId!);
-                const { data: t } = await supabase
-                  .from("threads")
-                  .select("title")
-                  .eq("id", body.threadId!)
-                  .single();
-                if (t?.title === "New conversation") {
-                  const title = effectiveUserText.slice(0, 48).replace(/\s+/g, " ").trim();
-                  await supabase.from("threads").update({ title }).eq("id", body.threadId!);
-                }
-              } catch (e) {
-                controller.enqueue(
-                  encoder.encode(
-                    `\n\n_(stream error: ${e instanceof Error ? e.message : String(e)})_`,
-                  ),
-                );
-              } finally {
-                controller.close();
-              }
-            },
-          });
-          return new Response(stream, {
-            headers: {
-              "Content-Type": "text/plain; charset=utf-8",
-              "Cache-Control": "no-cache, no-transform",
-              "X-Accel-Buffering": "no",
-            },
-          });
-        }
-
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
         const factsBlock =
           factRows && factRows.length > 0
@@ -772,23 +608,6 @@ export const Route = createFileRoute("/api/chat")({
                     snippet: x.description,
                   })),
                 };
-              },
-            }),
-            deep_research: tool({
-              description:
-                "Grounded expert research powered by Perplexity Sonar Pro. Returns a fully-written expert answer with inline citations and a list of source URLs. USE THIS as the default for research-style questions: 'best X for Y', comparisons, market scans, in-depth explanations, buying advice, vendor rundowns, technical deep-dives. Reproduce the returned `answer` in your reply (verbatim or lightly polished), keep inline citations, and add a Sources list.",
-              inputSchema: z.object({
-                query: z
-                  .string()
-                  .min(4)
-                  .describe(
-                    "The full research question in plain English, e.g. 'What are the best stereoscopic cameras for underground drilling / mining borehole inspection? Include vendor names, model numbers, IP ratings, depth range, and price.'",
-                  ),
-              }),
-              execute: async ({ query }) => {
-                const key = process.env.PERPLEXITY_API_KEY;
-                if (!key) return { error: "Deep research not configured" };
-                return runDeepResearch(key, query);
               },
             }),
             web_scrape: tool({
