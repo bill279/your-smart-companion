@@ -14,8 +14,10 @@ export const MS_SCOPES = [
 ].join(" ");
 
 function tenantAuthority() {
-  const tenant = process.env.MS_TENANT_ID;
-  if (!tenant) throw new Error("MS_TENANT_ID is not configured");
+  // Use Microsoft's multi-account authority so both work/school accounts and
+  // personal Outlook/Live accounts can complete consent. A tenant-specific
+  // authority sends personal accounts to that tenant and triggers AADSTS50020.
+  const tenant = process.env.MS_AUTHORITY_TENANT || "common";
   return `https://login.microsoftonline.com/${tenant}`;
 }
 
