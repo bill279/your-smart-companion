@@ -1067,7 +1067,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (!regenerate) setPendingUser(content);
       setPendingAssistant("");
 
-      // If voice is connected, route through ElevenLabs instead.
+      // If voice is connected, route through the realtime voice channel instead.
       if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
