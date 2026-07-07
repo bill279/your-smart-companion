@@ -215,6 +215,15 @@ export const Route = createFileRoute("/api/chat")({
         // tells the model to ask for it.
         const userEmail = (claims.claims as { email?: string }).email ?? null;
 
+        // Fire-and-forget: ensure a briefing prefs row exists so the cron
+        // starts sending morning briefings once the user has any activity.
+        // Ignore conflicts — first-time inserts get defaults, existing rows
+        // are left alone.
+        void supabase
+          .from("user_briefing_prefs")
+          .insert({ user_id: userId })
+          .then(() => undefined, () => undefined);
+
         // Helper: log an agent action (best-effort, never throws)
         const logAction = async (
           action: string,
