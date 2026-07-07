@@ -692,8 +692,32 @@ function ThreadView({ threadId }: { threadId: string }) {
           }),
         });
         const data = await res.json().catch(() => ({ error: "calendar create failed" }));
-        if (!res.ok) return JSON.stringify({ error: data?.error ?? "calendar create failed", detail: data?.detail });
-        return JSON.stringify(data);
+        const assistantMessage = !res.ok
+          ? `I tried to create the real Outlook calendar invite, but Microsoft returned: ${data?.error ?? "calendar create failed"}${data?.detail ? `\n\n${data.detail}` : ""}`
+          : [
+              `Done — I created **${p.title}** on your Outlook calendar.`,
+              Array.isArray(data?.attendees) && data.attendees.length > 0
+                ? `Calendar invites were sent to: ${data.attendees.join(", ")}.`
+                : "No attendees were included, so no invite emails were sent.",
+              data?.teams_join_url ? `Teams link: ${data.teams_join_url}` : "Microsoft created the event, but did not return a Teams link yet.",
+              data?.link ? `Outlook event: ${data.link}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n\n");
+        try {
+          setPendingAssistant(assistantMessage);
+          liveAssistantRef.current = assistantMessage;
+          await add({ data: { threadId, role: "assistant", content: assistantMessage } });
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          await qc.invalidateQueries({ queryKey: ["threads"] });
+          setPendingAssistant("");
+          liveAssistantRef.current = "";
+          conversationRef.current?.cancelResponse();
+        } catch (err) {
+          console.warn("calendar confirmation persist failed", err);
+        }
+        if (!res.ok) return JSON.stringify({ error: data?.error ?? "calendar create failed", detail: data?.detail, shown_to_user: true });
+        return JSON.stringify({ ...data, shown_to_user: true, final_message: assistantMessage });
       },
       list_calendar_events: async (params) => {
         const p = params as { days?: number; max_results?: number; start?: string; end?: string };
