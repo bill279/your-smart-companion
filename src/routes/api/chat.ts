@@ -269,6 +269,30 @@ export const Route = createFileRoute("/api/chat")({
           }
         };
 
+        // Helper: log a usage/spend event (best-effort, never throws)
+        const logUsage = async (
+          kind: string,
+          model: string | null,
+          inputTokens: number,
+          outputTokens: number,
+          costUsd: number,
+          metadata: Record<string, unknown> = {},
+        ) => {
+          try {
+            await supabase.from("usage_events").insert({
+              user_id: userId,
+              kind,
+              model,
+              input_tokens: Math.max(0, Math.round(inputTokens)),
+              output_tokens: Math.max(0, Math.round(outputTokens)),
+              cost_usd: Number(costUsd.toFixed(6)),
+              metadata: metadata as never,
+            });
+          } catch {
+            /* ignore */
+          }
+        };
+
         const body = (await request.json()) as {
           threadId?: string;
           content?: string;
