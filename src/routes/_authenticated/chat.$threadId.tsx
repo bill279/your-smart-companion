@@ -1926,7 +1926,7 @@ function ToolActivityList({
       {items.map((a, idx) => {
         const isLast = idx === items.length - 1;
         const pending =
-          streaming && isLast && !a.results && !a.scraped && !a.products && !a.error;
+          streaming && isLast && !a.results && !a.scraped && !a.products && !a.citations && !a.error;
         const isOpen = expandedId === a.id;
         const label =
           a.name === "web_search"
@@ -1937,12 +1937,19 @@ function ToolActivityList({
               ? pending
                 ? `Finding products…`
                 : `Found products`
-              : pending
-                ? `Opening ${hostOf(a.url) || "page"}…`
-                : `Read ${hostOf(a.url) || "page"}`;
+              : a.name === "deep_research"
+                ? pending
+                  ? `Researching…`
+                  : `Deep research`
+                : pending
+                  ? `Opening ${hostOf(a.url) || "page"}…`
+                  : `Read ${hostOf(a.url) || "page"}`;
         const canExpand =
-          a.name === "web_search" && (a.results?.length ?? 0) > 0;
+          (a.name === "web_search" && (a.results?.length ?? 0) > 0) ||
+          (a.name === "deep_research" && (a.citations?.length ?? 0) > 0);
         const hasProducts = a.name === "product_search" && (a.products?.length ?? 0) > 0;
+        const expandItems =
+          a.name === "deep_research" ? (a.citations ?? []).map((c) => ({ title: c.title, url: c.url, snippet: undefined })) : a.results;
         return (
           <div
             key={a.id}
@@ -1955,6 +1962,8 @@ function ToolActivityList({
             >
               {a.name === "product_search" ? (
                 <ShoppingBag size={13} className="text-muted-foreground shrink-0" />
+              ) : a.name === "deep_research" ? (
+                <BookOpen size={13} className="text-muted-foreground shrink-0" />
               ) : (
                 <Search size={13} className="text-muted-foreground shrink-0" />
               )}
@@ -1978,7 +1987,9 @@ function ToolActivityList({
               )}
               {!pending && canExpand && (
                 <span className="ml-auto text-xs text-muted-foreground">
-                  {a.results?.length} result{(a.results?.length ?? 0) === 1 ? "" : "s"}
+                  {a.name === "deep_research"
+                    ? `${a.citations?.length} source${(a.citations?.length ?? 0) === 1 ? "" : "s"}`
+                    : `${a.results?.length} result${(a.results?.length ?? 0) === 1 ? "" : "s"}`}
                 </span>
               )}
               {!pending && hasProducts && (
@@ -1987,9 +1998,9 @@ function ToolActivityList({
                 </span>
               )}
             </button>
-            {isOpen && a.results && a.results.length > 0 && (
+            {isOpen && expandItems && expandItems.length > 0 && (
               <div className="border-t border-border bg-background/40 divide-y divide-border">
-                {a.results.map((r, i) => {
+                {expandItems.map((r, i) => {
                   const fav = faviconFor(r.url);
                   return (
                     <a
