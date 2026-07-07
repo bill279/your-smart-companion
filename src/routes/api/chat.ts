@@ -15,6 +15,29 @@ import { getMicrosoftAccessToken } from "@/lib/ms-graph.server";
 import { looksLikeCalendarInviteText } from "@/lib/calendar-guards";
 import { buildCalendarDraftFromMessages, shouldAutoCreateCalendarEvent } from "@/lib/calendar-direct";
 
+const TRACKED_TOOL_NAMES = new Set([
+  "web_search",
+  "web_scrape",
+  "product_search",
+  "deep_research",
+  "search_knowledge_base",
+  "send_email",
+  "list_contacts",
+  "save_contact",
+  "list_calendar_events",
+  "create_calendar_event",
+  "cancel_calendar_event",
+  "respond_calendar_event",
+  "generate_document",
+  "recall_facts",
+  "remember_fact",
+  "forget_fact",
+  "save_lesson",
+]);
+function isTrackedTool(name: string): boolean {
+  return TRACKED_TOOL_NAMES.has(name);
+}
+
 /**
  * Call Microsoft Graph on behalf of `userId`.
  * Prefers the user's own OAuth connection (full delegated scopes including calendar + Teams).
@@ -214,6 +237,15 @@ export const Route = createFileRoute("/api/chat")({
         // (saves ~150–300ms per chat request). If absent, the system prompt
         // tells the model to ask for it.
         const userEmail = (claims.claims as { email?: string }).email ?? null;
+
+        // Fire-and-forget: ensure a briefing prefs row exists so the cron
+        // starts sending morning briefings once the user has any activity.
+        // Ignore conflicts — first-time inserts get defaults, existing rows
+        // are left alone.
+        void supabase
+          .from("user_briefing_prefs")
+          .insert({ user_id: userId })
+          .then(() => undefined, () => undefined);
 
         // Helper: log an agent action (best-effort, never throws)
         const logAction = async (
@@ -1109,18 +1141,20 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   if (delta) controller.enqueue(encoder.encode(delta));
                 } else if (part.type === "tool-call") {
                   const name = (part as { toolName: string }).toolName;
-                  if (
-                    name === "web_search" ||
-                    name === "web_scrape" ||
-                    name === "product_search" ||
-                    name === "deep_research"
-                  ) {
+                  if (isTrackedTool(name)) {
                     const rawInput = (part as { input?: Record<string, unknown> }).input ?? {};
                     const ev: ToolEvent = {
                       t: "call",
                       id: (part as { toolCallId: string }).toolCallId,
                       name: name as ToolEvent["name"],
-                      input: rawInput as { query?: string; url?: string; limit?: number },
+                      input: rawInput as {
+                        query?: string;
+                        url?: string;
+                        limit?: number;
+                        subject?: string;
+                        title?: string;
+                        to?: string;
+                      },
                     };
                     collectedActivity.splice(
                       0,
@@ -1133,12 +1167,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   }
                 } else if (part.type === "tool-result") {
                   const name = (part as { toolName: string }).toolName;
-                  if (
-                    name === "web_search" ||
-                    name === "web_scrape" ||
-                    name === "product_search" ||
-                    name === "deep_research"
-                  ) {
+                  if (isTrackedTool(name)) {
                     const output = (part as { output?: unknown; result?: unknown }).output
                       ?? (part as { result?: unknown }).result;
                     const ev: ToolEvent = {

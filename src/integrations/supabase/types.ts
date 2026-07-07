@@ -362,6 +362,59 @@ export type Database = {
         }
         Relationships: []
       }
+      user_briefing_prefs: {
+        Row: {
+          briefing_thread_id: string | null
+          created_at: string
+          daily_enabled: boolean
+          daily_hour: number
+          last_daily_run_at: string | null
+          last_weekly_run_at: string | null
+          timezone: string
+          updated_at: string
+          user_id: string
+          weekly_dow: number
+          weekly_enabled: boolean
+          weekly_hour: number
+        }
+        Insert: {
+          briefing_thread_id?: string | null
+          created_at?: string
+          daily_enabled?: boolean
+          daily_hour?: number
+          last_daily_run_at?: string | null
+          last_weekly_run_at?: string | null
+          timezone?: string
+          updated_at?: string
+          user_id: string
+          weekly_dow?: number
+          weekly_enabled?: boolean
+          weekly_hour?: number
+        }
+        Update: {
+          briefing_thread_id?: string | null
+          created_at?: string
+          daily_enabled?: boolean
+          daily_hour?: number
+          last_daily_run_at?: string | null
+          last_weekly_run_at?: string | null
+          timezone?: string
+          updated_at?: string
+          user_id?: string
+          weekly_dow?: number
+          weekly_enabled?: boolean
+          weekly_hour?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_briefing_prefs_briefing_thread_id_fkey"
+            columns: ["briefing_thread_id"]
+            isOneToOne: false
+            referencedRelation: "threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_facts: {
         Row: {
           created_at: string
