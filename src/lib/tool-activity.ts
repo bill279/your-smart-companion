@@ -5,20 +5,20 @@ export type ToolEvent =
   | {
       t: "call";
       id: string;
-      name: "web_search" | "web_scrape" | "product_search";
+      name: "web_search" | "web_scrape" | "product_search" | "deep_research";
       input: { query?: string; url?: string; limit?: number };
     }
   | {
       t: "result";
       id: string;
-      name: "web_search" | "web_scrape" | "product_search";
+      name: "web_search" | "web_scrape" | "product_search" | "deep_research";
       output: unknown;
     };
 
 // Record shape rendered in the UI (call + result merged by id).
 export type ToolActivity = {
   id: string;
-  name: "web_search" | "web_scrape" | "product_search";
+  name: "web_search" | "web_scrape" | "product_search" | "deep_research";
   query?: string;
   url?: string;
   results?: Array<{ title?: string; url?: string; snippet?: string }>;
@@ -31,6 +31,7 @@ export type ToolActivity = {
     merchant?: string;
     snippet?: string;
   }>;
+  citations?: Array<{ title?: string; url?: string }>;
   error?: string;
 };
 
@@ -111,6 +112,9 @@ export function foldToolEvent(
       base.scraped = { title: out?.title, url: base.url };
     } else if (ev.name === "product_search") {
       base.products = out?.products ?? [];
+    } else if (ev.name === "deep_research") {
+      const dr = ev.output as { citations?: Array<{ title?: string; url?: string }> } | null;
+      base.citations = dr?.citations ?? [];
     }
   }
   const next = prev.slice();
