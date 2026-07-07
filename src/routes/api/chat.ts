@@ -858,7 +858,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             }),
             create_calendar_event: tool({
               description:
-                "Create a real Outlook calendar event/invite. Microsoft Teams is the default and only online meeting provider; pass online_meeting=true unless the user explicitly says no online meeting. Only call after the user has approved the draft. If this fails, report the error; do not send an email as a substitute calendar invite.",
+                "Create a real calendar event/invite. Uses Google Calendar with a Meet link when available, otherwise Outlook with a Teams link. Pass online_meeting=true unless the user explicitly says no online meeting. Only call after the user has approved the draft. If this fails, report the error; do not send an email as a substitute calendar invite.",
               inputSchema: z.object({
                 title: z.string().min(1).max(200),
                 start: z.string().describe("ISO 8601 start datetime, e.g. 2026-07-01T15:00:00-04:00"),
@@ -873,7 +873,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 online_meeting: z
                   .boolean()
                   .optional()
-                  .describe("Attach a Microsoft Teams meeting with a join link. Default true for all meetings unless user explicitly says no online meeting."),
+                  .describe("Attach an online meeting join link. Default true for all meetings unless user explicitly says no online meeting."),
               }),
               execute: async ({ title, start, end, description, location, attendees, timezone, online_meeting }) => {
                 const { resolveContactAttendees } = await import("@/lib/contact-resolution.server");
@@ -884,23 +884,37 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     unresolved_attendees: resolved.unresolved,
                   };
                 }
-                const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
-                const result = await createMicrosoftCalendarEvent(userId, {
-                  title,
-                  start,
-                  end,
-                  description,
-                  location,
-                  attendees: resolved.attendees,
-                  timezone,
-                  online_meeting: online_meeting ?? true,
-                });
+                const { createGoogleCalendarEvent, isGoogleCalendarAvailable } = await import("@/lib/google-calendar.server");
+                const useGoogle = isGoogleCalendarAvailable();
+                const providerLabel = useGoogle ? "Google Calendar" : "Outlook";
+                const providerKey = useGoogle ? "google" : "outlook";
+                const result = useGoogle
+                  ? await createGoogleCalendarEvent({
+                      title,
+                      start,
+                      end,
+                      description,
+                      location,
+                      attendees: resolved.attendees,
+                      timezone,
+                      online_meeting: online_meeting ?? true,
+                    })
+                  : await (await import("@/lib/ms-calendar.server")).createMicrosoftCalendarEvent(userId, {
+                      title,
+                      start,
+                      end,
+                      description,
+                      location,
+                      attendees: resolved.attendees,
+                      timezone,
+                      online_meeting: online_meeting ?? true,
+                    });
                 await logAction(
                   "create_calendar_event",
                   "error" in result
-                    ? `Failed to create Outlook calendar event "${title}"`
-                    : `Created event "${title}" on Outlook${result.teams_join_url ? " with Teams meeting" : ""}`,
-                  { title, start, end, attendees: resolved.attendees, location, provider: "outlook", result },
+                    ? `Failed to create ${providerLabel} event "${title}"`
+                    : `Created event "${title}" on ${providerLabel}${result.teams_join_url ? (useGoogle ? " with Meet link" : " with Teams meeting") : ""}`,
+                  { title, start, end, attendees: resolved.attendees, location, provider: providerKey, result },
                   "error" in result ? "error" : "ok",
                 );
                 return result;

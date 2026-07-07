@@ -692,15 +692,17 @@ function ThreadView({ threadId }: { threadId: string }) {
           }),
         });
         const data = await res.json().catch(() => ({ error: "calendar create failed" }));
+        const providerLabel = data?.provider === "google" ? "Google Calendar" : "Outlook";
+        const meetingLabel = data?.provider === "google" ? "Meet" : "Teams";
         const assistantMessage = !res.ok
-          ? `I tried to create the real Outlook calendar invite, but Microsoft returned: ${data?.error ?? "calendar create failed"}${data?.detail ? `\n\n${data.detail}` : ""}`
+          ? `I tried to create the real calendar invite, but ${providerLabel} returned: ${data?.error ?? "calendar create failed"}${data?.detail ? `\n\n${data.detail}` : ""}`
           : [
-              `Done — I created **${p.title}** on your Outlook calendar.`,
+              `Done — I created **${p.title}** on your ${providerLabel}.`,
               Array.isArray(data?.attendees) && data.attendees.length > 0
                 ? `Calendar invites were sent to: ${data.attendees.join(", ")}.`
                 : "No attendees were included, so no invite emails were sent.",
-              data?.teams_join_url ? `Teams link: ${data.teams_join_url}` : "Microsoft created the event, but did not return a Teams link yet.",
-              data?.link ? `Outlook event: ${data.link}` : "",
+              data?.teams_join_url ? `${meetingLabel} link: ${data.teams_join_url}` : `${providerLabel} created the event, but did not return an online meeting link yet.`,
+              data?.link ? `${providerLabel} event: ${data.link}` : "",
             ]
               .filter(Boolean)
               .join("\n\n");
