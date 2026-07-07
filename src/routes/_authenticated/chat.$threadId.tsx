@@ -36,6 +36,7 @@ import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import mammoth from "mammoth";
+import * as XLSX from "xlsx";
 import { Eye } from "lucide-react";
 import {
   addMessage,
@@ -2098,7 +2099,7 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
     );
   }
   const ext = art.filename.toLowerCase().split(".").pop() ?? "";
-  const canPreview = ["pdf", "docx", "csv", "txt", "md"].includes(ext);
+  const canPreview = ["pdf", "docx", "csv", "txt", "md", "xlsx", "xls"].includes(ext);
 
   async function openPreview() {
     if (!art) return;
@@ -2116,6 +2117,17 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
         setPreviewHtml(value || "<p><em>Document is empty.</em></p>");
       } else if (ext === "csv" || ext === "txt" || ext === "md") {
         setPreviewText(await blob.text());
+      } else if (ext === "xlsx" || ext === "xls") {
+        const buf = await blob.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const parts = wb.SheetNames.map((name) => {
+          const sheet = wb.Sheets[name];
+          const html = XLSX.utils.sheet_to_html(sheet, { editable: false });
+          return `<h3 style="margin:16px 0 8px;font-size:14px;font-weight:600;color:#374151">${name}</h3>${html}`;
+        }).join("");
+        setPreviewHtml(
+          `<style>table{border-collapse:collapse;width:100%;font-size:12px}td,th{border:1px solid #e5e7eb;padding:4px 8px;text-align:left}tr:nth-child(even) td{background:#f9fafb}</style>${parts || "<p><em>Empty spreadsheet.</em></p>"}`,
+        );
       }
     } catch (e) {
       setPreviewError(e instanceof Error ? e.message : "Could not preview file");
