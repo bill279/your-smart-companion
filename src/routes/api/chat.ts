@@ -1059,6 +1059,16 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               const title = firstUser.slice(0, 48).replace(/\s+/g, " ").trim();
               await supabase.from("threads").update({ title }).eq("id", body.threadId!);
             }
+            // Fire-and-forget: quietly review this thread for durable lessons.
+            // The reviewer has its own threshold/cooldown checks and swallows errors.
+            void (async () => {
+              try {
+                const { reviewThreadForLessons } = await import("@/lib/self-improvement.server");
+                await reviewThreadForLessons(body.threadId!, userId);
+              } catch {
+                /* never break the response */
+              }
+            })();
           },
         });
 
