@@ -91,6 +91,7 @@ function extractTime(text: string) {
 
 function extractAttendees(text: string) {
   const emails = text.match(EMAIL_RE) ?? [];
+  if (emails.length > 0) return unique(emails.map((email) => email.toLowerCase()));
   const names: string[] = [];
   const withMatch = text.match(/\bwith\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
   if (withMatch?.[1] && !/tomorrow|today|meeting|calendar|teams/i.test(withMatch[1])) {
