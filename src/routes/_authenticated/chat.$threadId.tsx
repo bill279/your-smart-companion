@@ -1920,6 +1920,32 @@ function ToolActivityList({
   items: ToolActivity[];
   streaming?: boolean;
 }) {
+function labelFor(a: ToolActivity, pending: boolean): string {
+  const host = hostOf(a.url) || "page";
+  const map: Record<string, [string, string]> = {
+    web_search: ["Searching the web…", "Searched the web"],
+    web_scrape: [`Opening ${host}…`, `Read ${host}`],
+    product_search: ["Finding products…", "Found products"],
+    deep_research: ["Researching…", "Deep research"],
+    search_knowledge_base: ["Searching your docs…", "Searched your docs"],
+    send_email: ["Sending email…", "Email sent"],
+    list_contacts: ["Looking up contacts…", "Contacts loaded"],
+    save_contact: ["Saving contact…", "Contact saved"],
+    list_calendar_events: ["Checking your calendar…", "Calendar checked"],
+    create_calendar_event: ["Creating calendar event…", "Meeting scheduled"],
+    cancel_calendar_event: ["Cancelling event…", "Event cancelled"],
+    respond_calendar_event: ["Responding to invite…", "Invite response sent"],
+    generate_document: ["Generating document…", "Document ready"],
+    recall_facts: ["Recalling what I know…", ""],
+    remember_fact: ["Saving note…", "Noted"],
+    forget_fact: ["Forgetting…", "Forgotten"],
+    save_lesson: ["Learning from this…", "Learned"],
+  };
+  const pair = map[a.name] ?? ["Working…", "Done"];
+  const base = pending ? pair[0] : pair[1];
+  return a.label ? `${base} — ${a.label}` : base;
+}
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
   return (
     <div className="mb-3 flex flex-col gap-1.5">
