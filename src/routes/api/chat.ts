@@ -610,23 +610,6 @@ export const Route = createFileRoute("/api/chat")({
                 };
               },
             }),
-            deep_research: tool({
-              description:
-                "Grounded expert research powered by Perplexity Sonar Pro. Returns a fully-written expert answer with inline citations and a list of source URLs. USE THIS as the default for research-style questions: 'best X for Y', comparisons, market scans, in-depth explanations, buying advice, vendor rundowns, technical deep-dives. Reproduce the returned `answer` in your reply (verbatim or lightly polished), keep inline citations, and add a Sources list.",
-              inputSchema: z.object({
-                query: z
-                  .string()
-                  .min(4)
-                  .describe(
-                    "The full research question in plain English, e.g. 'What are the best stereoscopic cameras for underground drilling / mining borehole inspection? Include vendor names, model numbers, IP ratings, depth range, and price.'",
-                  ),
-              }),
-              execute: async ({ query }) => {
-                const key = process.env.PERPLEXITY_API_KEY;
-                if (!key) return { error: "Deep research not configured" };
-                return runDeepResearch(key, query);
-              },
-            }),
             web_scrape: tool({
               description: "Fetch the readable markdown contents of a specific URL.",
               inputSchema: z.object({ url: z.string().url() }),
