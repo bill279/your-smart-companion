@@ -205,7 +205,7 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
 
   const bodyWithAttendees = attendeePayload.length ? { ...baseBody, attendees: attendeePayload } : baseBody;
 
-  if (wantsTeams && attendeePayload.length > 0) {
+  if (wantsTeams) {
     let draftEvent: GraphEvent | undefined;
     let draftEventId: string | undefined;
     let joinUrl: string | undefined;
@@ -295,8 +295,8 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
         provider: "outlook" as const,
         id: event.id ?? draftEventId,
         link: event.webLink ?? draftEvent?.webLink,
-        invite_sent: true,
-        calendar_invite_sent: true,
+        invite_sent: attendees.length > 0,
+        calendar_invite_sent: attendees.length > 0,
         attendees,
         teams_join_url: joinUrl,
         teams_join_url_source: (standaloneTeamsUsed ? "standalone" : "event") as "event" | "standalone",
@@ -320,8 +320,8 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
       provider: "outlook" as const,
       id: event.id,
       link: event.webLink,
-      invite_sent: true,
-      calendar_invite_sent: true,
+      invite_sent: attendees.length > 0,
+      calendar_invite_sent: attendees.length > 0,
       attendees,
       teams_join_url: joinUrl,
       teams_join_url_source: "standalone" as const,
