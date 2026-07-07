@@ -19,7 +19,7 @@ export type UsageSummary = {
     output_tokens: number;
     cost_usd: number;
     created_at: string;
-    metadata: Record<string, unknown> | null;
+    metadata: string | null;
   }>;
 };
 
@@ -81,7 +81,7 @@ export const getUsageSummary = createServerFn({ method: "GET" })
       byDay: [...dayMap.entries()].map(([day, v]) => ({ day, ...v })).sort((a, b) => a.day.localeCompare(b.day)),
       recent: rows.slice(0, 50).map((r) => ({
         ...r,
-        metadata: (r.metadata as Record<string, unknown> | null) ?? null,
+        metadata: r.metadata ? JSON.stringify(r.metadata) : null,
       })),
     };
   });
