@@ -416,7 +416,7 @@ export const Route = createFileRoute("/api/chat")({
         if (shouldAutoCreateCalendarEvent(userText, rows)) {
           const { resolveContactAttendees } = await import("@/lib/contact-resolution.server");
           const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
-          const draft = buildCalendarDraftFromMessages(rows, { timezone: "America/Toronto" });
+          const draft = buildCalendarDraftFromMessages(rows, { timezone: "America/Edmonton" });
           if (draft.missing.length > 0) {
             const content = `I still need the ${draft.missing.join(" and ")} before I can create the Outlook calendar invite.`;
             await supabase.from("messages").insert({
