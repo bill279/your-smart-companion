@@ -302,6 +302,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     [sendEvent],
   );
 
+  const cancelResponse = useCallback(() => {
+    sendEvent({ type: "response.cancel" });
+  }, [sendEvent]);
+
   const sendContextualUpdate = useCallback(
     (text: string) => {
       // System note that does NOT trigger a response.
@@ -333,6 +337,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     startSession,
     endSession,
     sendUserMessage,
+    cancelResponse,
     sendContextualUpdate,
     setVolume,
   };
