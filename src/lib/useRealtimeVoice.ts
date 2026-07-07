@@ -49,6 +49,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const assistantAccumRef = useRef<Map<string, string>>(new Map());
+  const activeResponseRef = useRef(false);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -92,7 +93,18 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
 
       if (type === "error") {
         const err = (msg.error as { message?: string } | undefined)?.message ?? "Realtime error";
+        // Swallow benign cancel-with-no-active-response errors — they happen
+        // when the user (or our code) issues response.cancel between turns.
+        if (/no active response/i.test(err) || /cancellation failed/i.test(err)) {
+          activeResponseRef.current = false;
+          return;
+        }
         opts.onError?.(err);
+        return;
+      }
+
+      if (type === "response.created") {
+        activeResponseRef.current = true;
         return;
       }
 
@@ -146,6 +158,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         type === "response.done"
       ) {
         setIsSpeaking(false);
+        if (type === "response.done") activeResponseRef.current = false;
         return;
       }
 
@@ -311,6 +324,8 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   );
 
   const cancelResponse = useCallback(() => {
+    if (!activeResponseRef.current) return;
+    activeResponseRef.current = false;
     sendEvent({ type: "response.cancel" });
   }, [sendEvent]);
 
