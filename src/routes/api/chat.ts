@@ -1042,6 +1042,16 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     `KB search: ${query.slice(0, 60)}`,
                     { query, hits: matches?.length ?? 0 },
                   );
+                  // Rough token estimate — embeddings are cheap but worth tracking.
+                  const inTok = Math.ceil(query.length / 4);
+                  await logUsage(
+                    "embedding",
+                    "openai/text-embedding-3-small",
+                    inTok,
+                    0,
+                    computeCost("openai/text-embedding-3-small", inTok, 0),
+                    { query: query.slice(0, 120) },
+                  );
                   return {
                     results: (matches ?? []).map((m) => ({
                       document: m.document_name,
