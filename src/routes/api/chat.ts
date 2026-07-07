@@ -4,6 +4,7 @@ import { streamText, tool, stepCountIs } from "ai";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
+import { computeCost, TOOL_FLAT_COST_USD } from "@/lib/usage-pricing";
 import {
   TOOL_FRAME_DELIM,
   encodeToolActivityMarker,
@@ -262,6 +263,30 @@ export const Route = createFileRoute("/api/chat")({
               summary,
               payload: payload as never,
               status,
+            });
+          } catch {
+            /* ignore */
+          }
+        };
+
+        // Helper: log a usage/spend event (best-effort, never throws)
+        const logUsage = async (
+          kind: string,
+          model: string | null,
+          inputTokens: number,
+          outputTokens: number,
+          costUsd: number,
+          metadata: Record<string, unknown> = {},
+        ) => {
+          try {
+            await supabase.from("usage_events").insert({
+              user_id: userId,
+              kind,
+              model,
+              input_tokens: Math.max(0, Math.round(inputTokens)),
+              output_tokens: Math.max(0, Math.round(outputTokens)),
+              cost_usd: Number(costUsd.toFixed(6)),
+              metadata: metadata as never,
             });
           } catch {
             /* ignore */
@@ -1017,6 +1042,16 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     `KB search: ${query.slice(0, 60)}`,
                     { query, hits: matches?.length ?? 0 },
                   );
+                  // Rough token estimate — embeddings are cheap but worth tracking.
+                  const inTok = Math.ceil(query.length / 4);
+                  await logUsage(
+                    "embedding",
+                    "openai/text-embedding-3-small",
+                    inTok,
+                    0,
+                    computeCost("openai/text-embedding-3-small", inTok, 0),
+                    { query: query.slice(0, 120) },
+                  );
                   return {
                     results: (matches ?? []).map((m) => ({
                       document: m.document_name,
@@ -1089,7 +1124,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               },
             }),
           },
-          onFinish: async ({ text }) => {
+          onFinish: async ({ text, usage }) => {
             const marker = encodeToolActivityMarker(collectedActivity);
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
@@ -1101,6 +1136,26 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               .from("threads")
               .update({ updated_at: new Date().toISOString() })
               .eq("id", body.threadId!);
+            // Log the chat completion spend (whole multi-step run).
+            const inTok = usage?.inputTokens ?? 0;
+            const outTok = usage?.outputTokens ?? 0;
+            await logUsage(
+              "chat_completion",
+              "openai/gpt-5.5",
+              inTok,
+              outTok,
+              computeCost("openai/gpt-5.5", inTok, outTok),
+              { threadId: body.threadId, steps: collectedActivity.length },
+            );
+            // Log a flat per-call cost for each tool the model invoked.
+            for (const ev of collectedActivity) {
+              const flat = TOOL_FLAT_COST_USD[ev.name];
+              if (flat === undefined) continue;
+              await logUsage("tool_call", null, 0, 0, flat, {
+                tool: ev.name,
+                threadId: body.threadId,
+              });
+            }
             // Auto-name new threads on first reply
             const { data: t } = await supabase
               .from("threads")

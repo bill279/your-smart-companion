@@ -362,6 +362,42 @@ export type Database = {
         }
         Relationships: []
       }
+      usage_events: {
+        Row: {
+          cost_usd: number
+          created_at: string
+          id: string
+          input_tokens: number
+          kind: string
+          metadata: Json
+          model: string | null
+          output_tokens: number
+          user_id: string
+        }
+        Insert: {
+          cost_usd?: number
+          created_at?: string
+          id?: string
+          input_tokens?: number
+          kind: string
+          metadata?: Json
+          model?: string | null
+          output_tokens?: number
+          user_id: string
+        }
+        Update: {
+          cost_usd?: number
+          created_at?: string
+          id?: string
+          input_tokens?: number
+          kind?: string
+          metadata?: Json
+          model?: string | null
+          output_tokens?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_briefing_prefs: {
         Row: {
           briefing_thread_id: string | null

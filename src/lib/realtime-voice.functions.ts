@@ -7,7 +7,7 @@ const REALTIME_VOICE = "alloy";
 
 export const createRealtimeSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .handler(async ({ context }) => {
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new Error("OPENAI_API_KEY not configured");
     // `/v1/realtime/sessions` was retired — mint an ephemeral client secret
@@ -40,6 +40,22 @@ export const createRealtimeSession = createServerFn({ method: "POST" })
     const clientSecret = data.value ?? data.client_secret?.value;
     const expiresAt = data.expires_at ?? data.client_secret?.expires_at ?? null;
     if (!clientSecret) throw new Error("Realtime session missing client_secret");
+    // Log a marker event so voice sessions show up in the spend dashboard.
+    // Actual audio-token totals aren't returned here; we log the start
+    // event with 0 cost — see usage-pricing.ts for the per-token rate.
+    try {
+      await context.supabase.from("usage_events").insert({
+        user_id: context.userId,
+        kind: "voice_session",
+        model: REALTIME_MODEL,
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0,
+        metadata: { event: "session_created" } as never,
+      });
+    } catch {
+      /* ignore */
+    }
     return {
       clientSecret,
       expiresAt,
