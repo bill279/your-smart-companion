@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { gatewayHeaders, json } from "@/lib/jarvis-tools.server";
+import { json } from "@/lib/jarvis-tools.server";
+import { getMicrosoftAccessToken } from "@/lib/ms-graph.server";
 import { marked } from "marked";
 import { looksLikeCalendarInviteText } from "@/lib/calendar-guards";
 
@@ -70,8 +71,9 @@ export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
           );
         }
 
-        // Send via Outlook.
-        if (process.env.MICROSOFT_OUTLOOK_API_KEY) {
+        // Send via Outlook using the user's own connected Microsoft account.
+        const ms = await getMicrosoftAccessToken(claims.claims.sub as string);
+        if (ms) {
           const payload = {
             message: {
               subject: data.subject,
@@ -95,10 +97,13 @@ export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
             },
           };
           const res = await fetch(
-            "https://connector-gateway.lovable.dev/microsoft_outlook/me/sendMail",
+            "https://graph.microsoft.com/v1.0/me/sendMail",
             {
               method: "POST",
-              headers: gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
+              headers: {
+                Authorization: `Bearer ${ms.accessToken}`,
+                "Content-Type": "application/json",
+              },
               body: JSON.stringify(payload),
             },
           );
@@ -106,9 +111,9 @@ export const Route = createFileRoute("/api/public/jarvis/tools/send_email")({
             const text = await res.text();
             return json({ error: `outlook send failed (${res.status})`, detail: text.slice(0, 300) }, 502);
           }
-          return json({ ok: true, provider: "outlook" });
+          return json({ ok: true, provider: "outlook", from: ms.email ?? undefined });
         }
-        return json({ error: "Outlook is not connected." }, 503);
+        return json({ error: "Microsoft is not connected. Open Activity & memory and click Connect Microsoft." }, 503);
       },
     },
   },
