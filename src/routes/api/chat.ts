@@ -590,7 +590,10 @@ export const Route = createFileRoute("/api/chat")({
           return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
         }
 
-        const directDeepResearchKey = shouldDirectDeepResearch(userText, body.forceWebSearch)
+        const effectiveUserText = body.regenerate
+          ? [...rows].reverse().find((r) => r.role === "user")?.content?.trim() ?? userText
+          : userText;
+        const directDeepResearchKey = shouldDirectDeepResearch(effectiveUserText, body.forceWebSearch)
           ? process.env.PERPLEXITY_API_KEY
           : undefined;
         if (directDeepResearchKey) {
@@ -611,10 +614,10 @@ export const Route = createFileRoute("/api/chat")({
                   t: "call",
                   id: toolCallId,
                   name: "deep_research",
-                  input: { query: userText },
+                  input: { query: effectiveUserText },
                 });
 
-                const research = await runDeepResearch(directDeepResearchKey, userText);
+                const research = await runDeepResearch(directDeepResearchKey, effectiveUserText);
                 enqueueToolEvent({
                   t: "result",
                   id: toolCallId,
@@ -646,7 +649,7 @@ export const Route = createFileRoute("/api/chat")({
                   .eq("id", body.threadId!)
                   .single();
                 if (t?.title === "New conversation") {
-                  const title = userText.slice(0, 48).replace(/\s+/g, " ").trim();
+                  const title = effectiveUserText.slice(0, 48).replace(/\s+/g, " ").trim();
                   await supabase.from("threads").update({ title }).eq("id", body.threadId!);
                 }
               } catch (e) {
