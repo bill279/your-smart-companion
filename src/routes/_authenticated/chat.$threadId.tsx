@@ -1879,7 +1879,7 @@ function Bubble({
             remarkPlugins={[remarkGfm]}
             components={{
               table: ({ node: _n, ...props }) => (
-                <div className="my-3 -mx-1 overflow-x-auto rounded-md border border-border">
+                <div className="my-3 -mx-1 max-h-[420px] overflow-auto rounded-md border border-border">
                   <table {...props} className="w-full min-w-max border-collapse text-sm" />
                 </div>
               ),
