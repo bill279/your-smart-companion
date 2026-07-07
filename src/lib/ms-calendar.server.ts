@@ -162,7 +162,7 @@ export async function listMicrosoftCalendarEvents(
 
 export async function createMicrosoftCalendarEvent(userId: string, input: EventCreateInput) {
   const attendees = cleanAttendees(input.attendees);
-  const timezone = input.timezone ?? "UTC";
+  const timezone = input.timezone ?? "America/Edmonton";
   const wantsTeams = input.online_meeting ?? true;
   const precreatedTeamsJoinUrl = wantsTeams
     ? await createStandaloneTeamsMeeting(userId, input, attendees).catch(() => undefined)
