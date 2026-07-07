@@ -68,7 +68,7 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
             },
             status: "error",
           });
-          return json(result, result.error.includes("not connected") ? 409 : 502);
+          return json(result, String(result.error ?? "").includes("not connected") ? 409 : 502);
         }
         await supabase.from("agent_actions").insert({
           user_id: userId,

@@ -66,7 +66,10 @@ export function buildAuthorizeUrl(state: string, redirectUri: string): string {
     response_mode: "query",
     scope: MS_SCOPES,
     state,
-    prompt: "select_account",
+    // Force the Microsoft consent screen so newly-added permissions like
+    // OnlineMeetings.ReadWrite are actually granted instead of silently reusing
+    // the previous cached sign-in.
+    prompt: "consent",
   });
   return `${tenantAuthority()}/oauth2/v2.0/authorize?${params.toString()}`;
 }
