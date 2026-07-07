@@ -243,6 +243,21 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
     }
   }
 
+  // Fallback: if the event never got a Teams link (common for accounts where
+  // Outlook's implicit Teams meeting attach silently fails), mint a standalone
+  // Teams meeting via /me/onlineMeetings and patch it into the event.
+  let standaloneTeamsUsed = false;
+  if (wantsTeams && createdEventId && !joinUrl) {
+    const standalone = await createStandaloneTeamsMeeting(userId, input);
+    if (standalone && !("error" in standalone) && standalone.joinUrl) {
+      joinUrl = standalone.joinUrl;
+      standaloneTeamsUsed = true;
+      teamsUnavailable = false;
+    } else if (standalone && "error" in standalone && standalone.error) {
+      teamsErrorDetail = standalone.error.detail ?? teamsErrorDetail;
+    }
+  }
+
   if (createdEventId && joinUrl) {
     await graphFetch(userId, `/me/events/${encodeURIComponent(createdEventId)}`, {
       method: "PATCH",
@@ -261,12 +276,19 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
     invite_sent: attendees.length > 0,
     calendar_invite_sent: attendees.length > 0,
     attendees,
-    ...(joinUrl ? { teams_join_url: joinUrl, teams_join_url_source: "event" as const } : {}),
+    ...(joinUrl
+      ? {
+          teams_join_url: joinUrl,
+          teams_join_url_source: (standaloneTeamsUsed ? "standalone" : "event") as
+            | "event"
+            | "standalone",
+        }
+      : {}),
     ...(wantsTeams && !joinUrl
       ? {
           teams_unavailable: true,
           teams_unavailable_reason:
-            "Microsoft did not return a Teams join link for this account. This usually means the Microsoft 365 account is not licensed for Teams online meetings (Graph error 9024). The calendar invite was sent without a Teams link.",
+            "Microsoft did not return a Teams join link, and the standalone /me/onlineMeetings fallback also failed. The account likely does not have a Teams license (Graph error 9024) or OnlineMeetings.ReadWrite consent is missing. The calendar invite was sent without a Teams link.",
           ...(teamsErrorDetail ? { teams_unavailable_detail: teamsErrorDetail } : {}),
         }
       : {}),

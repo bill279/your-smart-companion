@@ -50,15 +50,14 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
           );
         }
 
-        const { isGoogleCalendarAvailable, createGoogleCalendarEvent } = await import(
-          "@/lib/google-calendar.server"
-        );
-        const useGoogle = isGoogleCalendarAvailable();
-        const result = useGoogle
-          ? await createGoogleCalendarEvent({ ...data, attendees: resolved.attendees, online_meeting: data.online_meeting ?? true })
-          : await (await import("@/lib/ms-calendar.server")).createMicrosoftCalendarEvent(userId, { ...data, attendees: resolved.attendees, online_meeting: data.online_meeting ?? true });
-        const providerLabel = useGoogle ? "Google Calendar" : "Outlook";
-        const providerKey = useGoogle ? "google" : "outlook";
+        const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
+        const result = await createMicrosoftCalendarEvent(userId, {
+          ...data,
+          attendees: resolved.attendees,
+          online_meeting: data.online_meeting ?? true,
+        });
+        const providerLabel = "Outlook";
+        const providerKey = "outlook";
         if ("error" in result) {
           await supabase.from("agent_actions").insert({
             user_id: userId,
@@ -80,7 +79,7 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
         await supabase.from("agent_actions").insert({
           user_id: userId,
           action: "create_calendar_event",
-          summary: `Created event "${data.title}" on ${providerLabel}${result.teams_join_url ? (useGoogle ? " with Meet link" : " with Teams meeting") : ""}`,
+          summary: `Created event "${data.title}" on ${providerLabel}${result.teams_join_url ? " with Teams meeting" : ""}`,
           payload: {
             title: data.title,
             start: data.start,
