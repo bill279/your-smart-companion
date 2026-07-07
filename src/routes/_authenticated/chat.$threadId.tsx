@@ -1465,6 +1465,13 @@ function ThreadView({ threadId }: { threadId: string }) {
           <Users size={12} /> Saved contacts
         </Link>
         <Link
+          to="/inbox"
+          onClick={() => setSidebarOpen(false)}
+          className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          <Mail size={12} /> Inbox triage
+        </Link>
+        <Link
           to="/knowledge"
           onClick={() => setSidebarOpen(false)}
           className="mx-4 mt-2 flex items-center gap-2 justify-center py-2 rounded-md border border-border bg-card hover:bg-secondary text-xs font-medium text-muted-foreground hover:text-foreground"
