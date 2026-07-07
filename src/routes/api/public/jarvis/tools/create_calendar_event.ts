@@ -50,19 +50,26 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
           );
         }
 
-        const { createMicrosoftCalendarEvent } = await import("@/lib/ms-calendar.server");
-        const result = await createMicrosoftCalendarEvent(userId, { ...data, attendees: resolved.attendees, online_meeting: data.online_meeting ?? true });
+        const { isGoogleCalendarAvailable, createGoogleCalendarEvent } = await import(
+          "@/lib/google-calendar.server"
+        );
+        const useGoogle = isGoogleCalendarAvailable();
+        const result = useGoogle
+          ? await createGoogleCalendarEvent({ ...data, attendees: resolved.attendees, online_meeting: data.online_meeting ?? true })
+          : await (await import("@/lib/ms-calendar.server")).createMicrosoftCalendarEvent(userId, { ...data, attendees: resolved.attendees, online_meeting: data.online_meeting ?? true });
+        const providerLabel = useGoogle ? "Google Calendar" : "Outlook";
+        const providerKey = useGoogle ? "google" : "outlook";
         if ("error" in result) {
           await supabase.from("agent_actions").insert({
             user_id: userId,
             action: "create_calendar_event",
-            summary: `Failed to create Outlook calendar event "${data.title}"`,
+            summary: `Failed to create ${providerLabel} event "${data.title}"`,
             payload: {
               title: data.title,
               start: data.start,
               end: data.end,
               attendees: resolved.attendees,
-              provider: "outlook",
+              provider: providerKey,
               status: result.status,
               detail: result.detail?.slice(0, 500),
             },
@@ -73,14 +80,14 @@ export const Route = createFileRoute("/api/public/jarvis/tools/create_calendar_e
         await supabase.from("agent_actions").insert({
           user_id: userId,
           action: "create_calendar_event",
-          summary: `Created event "${data.title}" on Outlook${result.teams_join_url ? " with Teams meeting" : ""}`,
+          summary: `Created event "${data.title}" on ${providerLabel}${result.teams_join_url ? (useGoogle ? " with Meet link" : " with Teams meeting") : ""}`,
           payload: {
             title: data.title,
             start: data.start,
             end: data.end,
             attendees: resolved.attendees,
-            provider: "outlook",
-            teams: !!result.teams_join_url,
+            provider: providerKey,
+            meeting_link: !!result.teams_join_url,
           },
           status: "ok",
         });
