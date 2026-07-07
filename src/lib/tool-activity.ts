@@ -1,26 +1,46 @@
 // Shared helpers for streaming/rendering "live search" style tool activity
 // (Claude-style chips showing what the AI is searching / opening in real time).
 
+export type ToolName =
+  | "web_search"
+  | "web_scrape"
+  | "product_search"
+  | "deep_research"
+  | "search_knowledge_base"
+  | "send_email"
+  | "list_contacts"
+  | "save_contact"
+  | "list_calendar_events"
+  | "create_calendar_event"
+  | "cancel_calendar_event"
+  | "respond_calendar_event"
+  | "generate_document"
+  | "recall_facts"
+  | "remember_fact"
+  | "forget_fact"
+  | "save_lesson";
+
 export type ToolEvent =
   | {
       t: "call";
       id: string;
-      name: "web_search" | "web_scrape" | "product_search" | "deep_research";
-      input: { query?: string; url?: string; limit?: number };
+      name: ToolName;
+      input: { query?: string; url?: string; limit?: number; subject?: string; title?: string; to?: string };
     }
   | {
       t: "result";
       id: string;
-      name: "web_search" | "web_scrape" | "product_search" | "deep_research";
+      name: ToolName;
       output: unknown;
     };
 
 // Record shape rendered in the UI (call + result merged by id).
 export type ToolActivity = {
   id: string;
-  name: "web_search" | "web_scrape" | "product_search" | "deep_research";
+  name: ToolName;
   query?: string;
   url?: string;
+  label?: string;
   results?: Array<{ title?: string; url?: string; snippet?: string }>;
   scraped?: { title?: string; url?: string };
   products?: Array<{
@@ -91,6 +111,11 @@ export function foldToolEvent(
   if (ev.t === "call") {
     base.query = ev.input?.query ?? base.query;
     base.url = ev.input?.url ?? base.url;
+    base.label =
+      ev.input?.subject ??
+      ev.input?.title ??
+      ev.input?.to ??
+      base.label;
   } else {
     const out = ev.output as {
       results?: Array<{ title?: string; url?: string; snippet?: string }>;
