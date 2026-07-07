@@ -1928,22 +1928,7 @@ function ToolActivityList({
         const pending =
           streaming && isLast && !a.results && !a.scraped && !a.products && !a.citations && !a.error;
         const isOpen = expandedId === a.id;
-        const label =
-          a.name === "web_search"
-            ? pending
-              ? `Searching the web…`
-              : `Searched the web`
-            : a.name === "product_search"
-              ? pending
-                ? `Finding products…`
-                : `Found products`
-              : a.name === "deep_research"
-                ? pending
-                  ? `Researching…`
-                  : `Deep research`
-                : pending
-                  ? `Opening ${hostOf(a.url) || "page"}…`
-                  : `Read ${hostOf(a.url) || "page"}`;
+        const label = labelFor(a, pending);
         const canExpand =
           (a.name === "web_search" && (a.results?.length ?? 0) > 0) ||
           (a.name === "deep_research" && (a.citations?.length ?? 0) > 0);
