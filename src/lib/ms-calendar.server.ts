@@ -67,13 +67,6 @@ async function createStandaloneTeamsMeeting(userId: string, input: EventCreateIn
       subject: input.title,
       startDateTime: startDateTime.toISOString(),
       endDateTime: endDateTime.toISOString(),
-      ...(attendees.length
-        ? {
-            participants: {
-              attendees: attendees.map((email) => ({ upn: email, role: "attendee" })),
-            },
-          }
-        : {}),
     }),
   });
   if (!response) return { error: { error: "Microsoft is not connected. Open Activity & memory and click Connect Microsoft.", provider: "outlook" as const } };
@@ -214,9 +207,10 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
 
   const createdEventId = event.id;
   if (wantsTeams && createdEventId && (!teamsJoinUrl(event) || !joinUrl)) {
-    for (let attempt = 0; attempt < 3 && !teamsJoinUrl(event); attempt += 1) {
-      await wait(attempt === 0 ? 500 : 900);
-      if (attempt === 2) {
+    const delays = [700, 1000, 1400, 1800, 2300, 2800];
+    for (let attempt = 0; attempt < delays.length && !teamsJoinUrl(event); attempt += 1) {
+      await wait(delays[attempt]);
+      if (attempt === 1 || attempt === 3) {
         await graphFetch(userId, `/me/events/${encodeURIComponent(createdEventId)}`, {
           method: "PATCH",
           body: JSON.stringify({ isOnlineMeeting: true, onlineMeetingProvider: "teamsForBusiness" }),
