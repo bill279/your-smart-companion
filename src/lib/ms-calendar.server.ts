@@ -56,7 +56,7 @@ function htmlWithTeamsLink(description: string | undefined, joinUrl: string) {
   return `${intro}<div><strong>Microsoft Teams meeting</strong><br><a href="${joinUrl}">Join the meeting</a></div>`;
 }
 
-async function createStandaloneTeamsMeeting(userId: string, input: EventCreateInput, attendees: string[]) {
+async function createStandaloneTeamsMeeting(userId: string, input: EventCreateInput) {
   const startDateTime = new Date(input.start);
   const endDateTime = new Date(input.end);
   if (Number.isNaN(startDateTime.getTime()) || Number.isNaN(endDateTime.getTime())) return undefined;
@@ -67,13 +67,6 @@ async function createStandaloneTeamsMeeting(userId: string, input: EventCreateIn
       subject: input.title,
       startDateTime: startDateTime.toISOString(),
       endDateTime: endDateTime.toISOString(),
-      ...(attendees.length
-        ? {
-            participants: {
-              attendees: attendees.map((email) => ({ upn: email, role: "attendee" })),
-            },
-          }
-        : {}),
     }),
   });
   if (!response) return { error: { error: "Microsoft is not connected. Open Activity & memory and click Connect Microsoft.", provider: "outlook" as const } };
@@ -166,7 +159,7 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
   const timezone = input.timezone ?? "America/Edmonton";
   const wantsTeams = input.online_meeting ?? true;
   const precreatedTeams = wantsTeams
-    ? await createStandaloneTeamsMeeting(userId, input, attendees).catch((e) => ({
+    ? await createStandaloneTeamsMeeting(userId, input).catch((e) => ({
         error: { error: "Teams meeting create failed", detail: e instanceof Error ? e.message : String(e), provider: "outlook" as const },
       }))
     : undefined;
@@ -214,9 +207,10 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
 
   const createdEventId = event.id;
   if (wantsTeams && createdEventId && (!teamsJoinUrl(event) || !joinUrl)) {
-    for (let attempt = 0; attempt < 3 && !teamsJoinUrl(event); attempt += 1) {
-      await wait(attempt === 0 ? 500 : 900);
-      if (attempt === 2) {
+    const delays = [700, 1000, 1400, 1800, 2300, 2800];
+    for (let attempt = 0; attempt < delays.length && !teamsJoinUrl(event); attempt += 1) {
+      await wait(delays[attempt]);
+      if (attempt === 1 || attempt === 3) {
         await graphFetch(userId, `/me/events/${encodeURIComponent(createdEventId)}`, {
           method: "PATCH",
           body: JSON.stringify({ isOnlineMeeting: true, onlineMeetingProvider: "teamsForBusiness" }),
@@ -239,7 +233,7 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
   }
 
   if (wantsTeams && !joinUrl) {
-    const standalone = await createStandaloneTeamsMeeting(userId, input, attendees).catch(() => undefined);
+    const standalone = await createStandaloneTeamsMeeting(userId, input).catch(() => undefined);
     if (standalone && "joinUrl" in standalone && standalone.joinUrl) {
       joinUrl = standalone.joinUrl;
       joinUrlSource = "onlineMeeting";
