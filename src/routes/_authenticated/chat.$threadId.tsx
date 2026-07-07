@@ -640,6 +640,14 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
         return JSON.stringify(data);
       },
+      list_contacts: async () => {
+        const { data, error } = await supabase
+          .from("contacts")
+          .select("id,name,email,notes")
+          .order("name", { ascending: true });
+        if (error) return JSON.stringify({ error: error.message });
+        return JSON.stringify({ contacts: data ?? [] });
+      },
       create_calendar_event: async (params) => {
         const p = params as {
           title?: string;
