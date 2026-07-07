@@ -82,7 +82,8 @@ This assistant may also be spoken aloud via voice mode. Voice mode has its OWN s
 
 # Live web access
 You have tools:
-- web_search — search the live web. Use it for anything time-sensitive: companies, people, news, prices, products, current facts.
+- deep_research — grounded expert research via Perplexity Sonar Pro. **This is your default for any question that asks for the "best X", a comparison, a market/vendor scan, an in-depth explanation, or anything that would benefit from named vendors, specs, numbers, and citations.** It returns a fully written expert answer PLUS an array of source citations. When you use it, you MUST reproduce the returned answer verbatim (or lightly polished for tone) as your reply, keep the inline citations, and end with a "Sources" list. Do NOT summarize a 600-word Perplexity answer down to 3 sentences — that defeats the whole point. Use this INSTEAD of web_search for research/analysis/"which one should I buy" style questions. Only fall back to web_search for quick single-fact lookups (a phone number, one price, one date).
+- web_search — search the live web for quick, targeted lookups. Use it for a single fact, a specific URL, a fresh news item, or when deep_research already ran and you need one more data point. Prefer deep_research for anything analytical.
 - web_scrape — fetch the readable markdown of a specific URL.
 - product_search — search for REAL products the user could buy (gadgets, gear, tools, clothing, appliances, software, courses). Returns product cards (title, image, price, merchant, url) that the UI renders as a visual carousel. Use this INSTEAD of web_search whenever the user asks to find, compare, recommend, or shop for a specific product. After it returns, write a **full expert analysis** (350–700+ words) — do NOT re-list every product's price/title in prose (the cards handle that), but DO discuss each option's strengths/weaknesses, specific specs that matter (sensor size, resolution, baseline, depth range, IP rating, SDK, low-light performance, etc.), which use case each is best for, common pitfalls, and end with a clear ranked recommendation ("If it were me, I'd start with X because…, fallback to Y if…"). A one-paragraph "consider your environment and software support" summary is a FAILURE — the cards without depth is worse than ChatGPT and the whole point of this bot is to be smarter than that.
 - send_email — send an email from the user's connected Outlook account. Use when the user asks to email someone (including themselves). Do NOT use this as a fallback for failed meeting/calendar creation; if calendar creation fails, report the calendar error instead of sending a fake invite email.
@@ -608,6 +609,76 @@ export const Route = createFileRoute("/api/chat")({
                     snippet: x.description,
                   })),
                 };
+              },
+            }),
+            deep_research: tool({
+              description:
+                "Grounded expert research powered by Perplexity Sonar Pro. Returns a fully-written expert answer with inline citations and a list of source URLs. USE THIS as the default for research-style questions: 'best X for Y', comparisons, market scans, in-depth explanations, buying advice, vendor rundowns, technical deep-dives. Reproduce the returned `answer` in your reply (verbatim or lightly polished), keep inline citations, and add a Sources list.",
+              inputSchema: z.object({
+                query: z
+                  .string()
+                  .min(4)
+                  .describe(
+                    "The full research question in plain English, e.g. 'What are the best stereoscopic cameras for underground drilling / mining borehole inspection? Include vendor names, model numbers, IP ratings, depth range, and price.'",
+                  ),
+              }),
+              execute: async ({ query }) => {
+                const key = process.env.PERPLEXITY_API_KEY;
+                if (!key) return { error: "Deep research not configured" };
+                try {
+                  const r = await fetch("https://api.perplexity.ai/chat/completions", {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${key}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      model: "sonar-pro",
+                      messages: [
+                        {
+                          role: "system",
+                          content:
+                            "You are a senior domain-expert consultant. Answer thoroughly with named vendors, model numbers, hard specs, prices when known, tradeoffs, and a clear ranked recommendation. Use inline numbered citations [1][2] tied to the source list. Use ## headings and short paragraphs. 400-800 words unless the question is trivially small.",
+                        },
+                        { role: "user", content: query },
+                      ],
+                      temperature: 0.2,
+                    }),
+                  });
+                  if (!r.ok) {
+                    const text = await r.text().catch(() => "");
+                    return { error: `Deep research failed (${r.status}): ${text.slice(0, 200)}` };
+                  }
+                  const j = (await r.json()) as {
+                    choices?: Array<{ message?: { content?: string } }>;
+                    citations?: string[];
+                    search_results?: Array<{ title?: string; url?: string }>;
+                  };
+                  const answer = j.choices?.[0]?.message?.content ?? "";
+                  const rawCitations: Array<{ title?: string; url?: string }> =
+                    (j.search_results && j.search_results.length > 0
+                      ? j.search_results
+                      : (j.citations ?? []).map((u) => ({ url: u }))) as Array<{ title?: string; url?: string }>;
+                  const citations = rawCitations
+                    .filter((c) => !!c.url)
+                    .slice(0, 12)
+                    .map((c) => {
+                      let title = c.title;
+                      if (!title && c.url) {
+                        try {
+                          title = new URL(c.url).hostname.replace(/^www\./, "");
+                        } catch {
+                          title = c.url;
+                        }
+                      }
+                      return { title, url: c.url };
+                    });
+                  return { answer, citations };
+                } catch (e) {
+                  return {
+                    error: `Deep research error: ${e instanceof Error ? e.message : String(e)}`,
+                  };
+                }
               },
             }),
             web_scrape: tool({
@@ -1186,7 +1257,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   if (delta) controller.enqueue(encoder.encode(delta));
                 } else if (part.type === "tool-call") {
                   const name = (part as { toolName: string }).toolName;
-                  if (name === "web_search" || name === "web_scrape" || name === "product_search") {
+                  if (
+                    name === "web_search" ||
+                    name === "web_scrape" ||
+                    name === "product_search" ||
+                    name === "deep_research"
+                  ) {
                     const rawInput = (part as { input?: Record<string, unknown> }).input ?? {};
                     const ev: ToolEvent = {
                       t: "call",
@@ -1205,7 +1281,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   }
                 } else if (part.type === "tool-result") {
                   const name = (part as { toolName: string }).toolName;
-                  if (name === "web_search" || name === "web_scrape" || name === "product_search") {
+                  if (
+                    name === "web_search" ||
+                    name === "web_scrape" ||
+                    name === "product_search" ||
+                    name === "deep_research"
+                  ) {
                     const output = (part as { output?: unknown; result?: unknown }).output
                       ?? (part as { result?: unknown }).result;
                     const ev: ToolEvent = {
