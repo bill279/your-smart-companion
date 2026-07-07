@@ -467,7 +467,8 @@ export const Route = createFileRoute("/api/chat")({
                     : "No attendees were included, so no invite emails were sent.",
                   result.teams_join_url
                     ? `Teams link: ${result.teams_join_url}`
-                    : `${providerLabel} created the event, but did not return a Teams link. ${(result as { teams_unavailable_reason?: string }).teams_unavailable_reason ?? ""}`.trim(),
+                    : (result as { teams_unavailable_reason?: string }).teams_unavailable_reason ??
+                      `${providerLabel} created the event, but Microsoft did not create a Teams link for this account.`,
                   result.link ? `${providerLabel} event: ${result.link}` : "",
                 ]
                   .filter(Boolean)

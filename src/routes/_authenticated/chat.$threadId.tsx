@@ -701,7 +701,10 @@ function ThreadView({ threadId }: { threadId: string }) {
               Array.isArray(data?.attendees) && data.attendees.length > 0
                 ? `Calendar invites were sent to: ${data.attendees.join(", ")}.`
                 : "No attendees were included, so no invite emails were sent.",
-              data?.teams_join_url ? `${meetingLabel} link: ${data.teams_join_url}` : `${providerLabel} created the event, but did not return an online meeting link yet.`,
+              data?.teams_join_url
+                ? `${meetingLabel} link: ${data.teams_join_url}`
+                : data?.teams_unavailable_reason ??
+                  `${providerLabel} created the event, but Microsoft did not create a Teams link for this account.`,
               data?.link ? `${providerLabel} event: ${data.link}` : "",
             ]
               .filter(Boolean)
