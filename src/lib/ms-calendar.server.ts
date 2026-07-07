@@ -250,12 +250,12 @@ export async function createMicrosoftCalendarEvent(userId: string, input: EventC
     if (event.id) {
       await graphFetch(userId, `/me/events/${encodeURIComponent(event.id)}`, { method: "DELETE" }).catch(() => undefined);
     }
-    const detail = precreatedTeams && "error" in precreatedTeams ? precreatedTeams.error.detail : undefined;
+    const precreateError = precreatedTeams && "error" in precreatedTeams ? precreatedTeams.error : undefined;
     return {
       error:
         "I did not send the calendar invite because Microsoft did not return a Teams join link. Reconnect Microsoft from Activity & memory and approve OnlineMeetings.ReadWrite, then try again.",
-      detail,
-      status: precreatedTeams && "error" in precreatedTeams ? precreatedTeams.error.status : undefined,
+      detail: precreateError?.detail,
+      status: precreateError && "status" in precreateError ? precreateError.status : undefined,
       provider: "outlook" as const,
     };
   }
