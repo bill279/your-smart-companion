@@ -692,8 +692,8 @@ function ThreadView({ threadId }: { threadId: string }) {
           }),
         });
         const data = await res.json().catch(() => ({ error: "calendar create failed" }));
-        const providerLabel = data?.provider === "google" ? "Google Calendar" : "Outlook";
-        const meetingLabel = data?.provider === "google" ? "Meet" : "Teams";
+        const providerLabel = "Outlook";
+        const meetingLabel = "Teams";
         const assistantMessage = !res.ok
           ? `I tried to create the real calendar invite, but ${providerLabel} returned: ${data?.error ?? "calendar create failed"}${data?.detail ? `\n\n${data.detail}` : ""}`
           : [
