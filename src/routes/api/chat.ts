@@ -15,6 +15,29 @@ import { getMicrosoftAccessToken } from "@/lib/ms-graph.server";
 import { looksLikeCalendarInviteText } from "@/lib/calendar-guards";
 import { buildCalendarDraftFromMessages, shouldAutoCreateCalendarEvent } from "@/lib/calendar-direct";
 
+const TRACKED_TOOL_NAMES = new Set([
+  "web_search",
+  "web_scrape",
+  "product_search",
+  "deep_research",
+  "search_knowledge_base",
+  "send_email",
+  "list_contacts",
+  "save_contact",
+  "list_calendar_events",
+  "create_calendar_event",
+  "cancel_calendar_event",
+  "respond_calendar_event",
+  "generate_document",
+  "recall_facts",
+  "remember_fact",
+  "forget_fact",
+  "save_lesson",
+]);
+function isTrackedTool(name: string): boolean {
+  return TRACKED_TOOL_NAMES.has(name);
+}
+
 /**
  * Call Microsoft Graph on behalf of `userId`.
  * Prefers the user's own OAuth connection (full delegated scopes including calendar + Teams).
