@@ -61,6 +61,7 @@ Never say you are unable to display a visual table directly in this chat interfa
 
 TOOL USE — non-negotiable:
 - CALENDAR MEETINGS COME FIRST: If the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise meeting draft in chat and wait for explicit approval, then CALL create_calendar_event. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting.
+- YOU CAN CREATE TEAMS MEETINGS: create_calendar_event creates the Outlook calendar invite and Microsoft Teams join link. Never say you cannot directly create the Teams meeting, never tell the user to open Teams, and never offer copy/paste meeting details instead.
 - CALENDAR MANAGEMENT: For "what meetings do I have", availability, canceling, accepting, tentatively accepting, or declining meetings, use the calendar tools. If cancel/respond is ambiguous, list events first and confirm which one.
 - CONTACT NAMES FOR MEETINGS: If the user says a saved contact name like "Bill", pass that name in attendees or call list_contacts; do not ask again if the contact exists in the chat/contact list. The server resolves saved names to email addresses.
 - For ANY table, comparison, list, code block, email draft, or long structured content: CALL the show_in_chat tool with the markdown. Do NOT read the content aloud. After the tool returns, say ONE short spoken sentence like "Here's the table" or "I've put the draft in the chat."
@@ -142,6 +143,16 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         },
       },
       required: ["to", "subject", "body"],
+    },
+  },
+  {
+    type: "function",
+    name: "list_contacts",
+    description:
+      "List the user's saved contacts. Call this before asking for an email address when the user names a person such as Bill, Sarah, Mike, etc.",
+    parameters: {
+      type: "object",
+      properties: {},
     },
   },
   {
@@ -444,6 +455,18 @@ function ThreadView({ threadId }: { threadId: string }) {
     queryKey: ["messages", threadId],
     queryFn: () => getMsgs({ data: { threadId } }),
   });
+  const contactsQ = useQuery({
+    queryKey: ["contacts-for-voice"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("name,email,notes")
+        .order("name", { ascending: true })
+        .limit(100);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    },
+  });
 
   const [input, setInput] = useState("");
   const [webSearchOn, setWebSearchOn] = useState(false);
@@ -628,6 +651,14 @@ function ThreadView({ threadId }: { threadId: string }) {
         const data = await res.json().catch(() => ({ error: "send failed" }));
         if (!res.ok) return JSON.stringify({ error: data?.error ?? "send failed" });
         return JSON.stringify(data);
+      },
+      list_contacts: async () => {
+        const { data, error } = await supabase
+          .from("contacts")
+          .select("id,name,email,notes")
+          .order("name", { ascending: true });
+        if (error) return JSON.stringify({ error: error.message });
+        return JSON.stringify({ contacts: data ?? [] });
       },
       create_calendar_event: async (params) => {
         const p = params as {
@@ -907,6 +938,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- TABLES / LONG STRUCTURED CONTENT: call the show_in_chat tool with the full Markdown table. Do NOT read the table aloud. After the tool returns, say one short spoken sentence (e.g. \"Here's the table.\").",
       "- FACTS: for any real company, person, address, price, phone number, or current event, call web_search FIRST. Never invent details.",
       "- CALENDAR MEETINGS COME FIRST: if the user asks to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting, this is NEVER a file/document task. Show a concise draft, wait for explicit approval, then CALL create_calendar_event. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting.",
+      "- YOU CAN CREATE TEAMS MEETINGS: create_calendar_event creates the Outlook calendar invite and Microsoft Teams join link. Never say you cannot directly create the meeting inside Teams, never tell the user to open Teams, and never offer copy/paste meeting details instead.",
       "- CALENDAR MANAGEMENT: for what meetings do I have, availability, canceling, accepting, tentatively accepting, or declining meetings, use the calendar tools. If cancel/respond is ambiguous, list events first and confirm which one.",
       "- CONTACT NAMES FOR MEETINGS: saved contact names like Bill are valid attendees. Pass the contact name to create_calendar_event; the server resolves it to an email address.",
       "- FILE EXPORTS: if the user asks to create, generate, export, download, save, or convert to PDF, Word, DOCX, Excel, XLSX, or CSV, CALL the generate_document tool. This does NOT apply to calendar/meeting invites. Never say you cannot make a file. Never tell them to copy into Word or Google Docs.",
@@ -921,9 +953,13 @@ function ThreadView({ threadId }: { threadId: string }) {
       "- REMEMBER WITHIN THE TURN: once the user confirms something (a recipient, a draft, a choice), do not ask again in the same task. Move forward.",
       "- ONE QUESTION AT A TIME: if you truly need missing info, ask only the single most important question, not a checklist.",
     ].join("\n");
+    const contacts = (contactsQ.data ?? [])
+      .map((contact) => `- ${contact.name}: ${contact.email}${contact.notes ? ` (${contact.notes})` : ""}`)
+      .join("\n");
+    const currentContext = `Current server time: ${new Date().toISOString()}\n${contacts ? `\nSaved contacts:\n${contacts}` : ""}`;
     return history
-      ? `Prior conversation in this thread (most recent last):\n${history}\n\n${rules}\n\nContinue naturally from here.`
-      : `Voice mode is open. Wait for the user's next message.\n\n${rules}`;
+      ? `${currentContext}\n\nPrior conversation in this thread (most recent last):\n${history}\n\n${rules}\n\nContinue naturally from here.`
+      : `${currentContext}\n\nVoice mode is open. Wait for the user's next message.\n\n${rules}`;
   }
 
   async function startVoice() {

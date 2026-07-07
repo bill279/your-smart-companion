@@ -91,6 +91,7 @@ You have tools:
 - save_contact — add or update a contact in the user's address book. Use when the user says things like "save this as a contact", "remember john@x.com as John", or after they confirm a brand-new recipient you should remember.
 - list_calendar_events — list upcoming events from the user's connected Outlook calendar. Use for "what's on my calendar", "am I free Thursday", "next meeting", and before canceling/responding when the exact event is ambiguous.
 - create_calendar_event — create a new event on the user's connected Outlook calendar. Microsoft Teams is the default and only online meeting provider: set online_meeting=true unless the user explicitly says no online meeting. Confirm title, start, end, and attendees with the user before calling. Attendees receive real Outlook calendar invitations with accept/decline.
+- You CAN directly create Teams meetings through create_calendar_event. Never say you cannot directly create the meeting inside Teams, never guide the user to open Teams, and never offer copy/paste meeting details instead of using the tool.
 - cancel_calendar_event — cancel/delete an existing Outlook calendar event and notify attendees when possible. If the user does not give an event id, call list_calendar_events first and confirm which event.
 - respond_calendar_event — accept, tentatively accept, or decline a meeting invitation. If the user does not give an event id, call list_calendar_events first and confirm which meeting.
 - recall_facts — load durable facts the user has asked you to remember (boss, company, preferences, tools). Call this at the start of any conversation where personal context might help.
@@ -375,7 +376,7 @@ export const Route = createFileRoute("/api/chat")({
         // turns — anything older is rarely useful and just inflates latency
         // and token cost. Durable context lives in user_facts.
         const HISTORY_LIMIT = 40;
-        const [histRes, factsRes, lessonsRes, feedbackRes] = await Promise.all([
+        const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes] = await Promise.all([
           supabase
             .from("messages")
             .select("role,content")
@@ -398,12 +399,18 @@ export const Route = createFileRoute("/api/chat")({
             .eq("rating", "down")
             .order("created_at", { ascending: false })
             .limit(5),
+          supabase
+            .from("contacts")
+            .select("name,email,notes")
+            .order("name", { ascending: true })
+            .limit(100),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         const rows = (histRes.data ?? []).slice().reverse();
         const factRows = factsRes.data;
         const lessonRows = lessonsRes.data ?? [];
         const feedbackRows = feedbackRes.data ?? [];
+        const contactRows = contactsRes.data ?? [];
 
         const gateway = createLovableAiGatewayProvider(LOVABLE_API_KEY);
         const factsBlock =
@@ -430,10 +437,17 @@ export const Route = createFileRoute("/api/chat")({
         const userBlock = userEmail
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
+        const runtimeBlock = `\n\n# Current date/time\nCurrent server time is ${new Date().toISOString()}. Use this for relative calendar dates like "tomorrow" and "next Tuesday".`;
+        const contactsBlock =
+          contactRows.length > 0
+            ? `\n\n# Saved contacts\nUse these for named recipients/attendees. Do not ask for an email when exactly one saved contact matches the name.\n${contactRows
+                .map((c) => `- ${c.name}: ${c.email}${c.notes ? ` (${c.notes})` : ""}`)
+                .join("\n")}`
+            : "";
         const forceSearchBlock = body.forceWebSearch
           ? `\n\n# 🌐 Web-search mode is ON for this turn (user toggled it)\nYou MUST call the \`web_search\` tool at least once before answering. If the user is asking about specific products, gear, or things they might buy (phones, cameras, tools, gadgets, clothes, appliances, software, courses, etc.), call the \`product_search\` tool instead of \`web_search\`. After the tool returns, write a real answer that cites sources. Do NOT answer from memory when this mode is on.`
           : "";
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${userBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
