@@ -773,6 +773,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const suppressNextVoiceAssistantRef = useRef(false);
   const readAloudAbortRef = useRef<AbortController | null>(null);
   const readAloudAudioRef = useRef<AudioContext | null>(null);
+  const readAloudSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -901,6 +902,10 @@ function ThreadView({ threadId }: { threadId: string }) {
   const stopReadAloud = useCallback(() => {
     readAloudAbortRef.current?.abort();
     readAloudAbortRef.current = null;
+    readAloudSourcesRef.current.forEach((source) => {
+      try { source.stop(); } catch { /* already stopped */ }
+    });
+    readAloudSourcesRef.current.clear();
   }, []);
 
   const streamVoiceReadout = useCallback(async (rawText: string) => {
@@ -935,6 +940,8 @@ function ThreadView({ threadId }: { threadId: string }) {
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
       source.connect(audioCtx.destination);
+      readAloudSourcesRef.current.add(source);
+      source.onended = () => readAloudSourcesRef.current.delete(source);
       playhead = playhead === 0 ? audioCtx.currentTime + 0.05 : Math.max(playhead, audioCtx.currentTime);
       source.start(playhead);
       playhead += buffer.duration;
