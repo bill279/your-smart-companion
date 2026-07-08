@@ -693,6 +693,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   // is already streaming (or done). Massive perceived-latency win.
   const deepAnswerInFlightRef = useRef<{
     query: string;
+    key: string;
     promise: Promise<{ ok?: boolean; error?: string; note?: string }>;
     abort: AbortController;
   } | null>(null);
@@ -743,7 +744,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (!token) return { error: "not signed in" };
       try {
         setPendingActivity([]);
-        setPendingAssistant("🔍 Researching your question — pulling live sources and building the full answer. This usually takes 15–30 seconds…");
+        setPendingAssistant("🔍 Researching your question — pulling live sources and building the full answer now. I’ll speak once it’s actually in the chat.");
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: {
@@ -806,10 +807,10 @@ function ThreadView({ threadId }: { threadId: string }) {
         await qc.invalidateQueries({ queryKey: ["threads"] });
         setPendingAssistant("");
         setPendingActivity([]);
-        lastDeepAnswerQueryRef.current = query;
+        lastDeepAnswerQueryRef.current = normalizeVoiceQuery(query);
         return {
           ok: true,
-          note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
+          note: "The full researched answer is now posted and visible in the chat. Say ONE short spoken sentence only — do NOT re-read the content aloud and do NOT post another chat message.",
         };
       } catch (err) {
         setPendingAssistant("");
@@ -892,27 +893,28 @@ function ThreadView({ threadId }: { threadId: string }) {
           [...(messagesQ.data ?? [])].reverse().find((m) => m.role === "user")?.content?.trim() ||
           "";
         if (!latestUserMessage) return { error: "no user message available" };
+        const latestKey = normalizeVoiceQuery(latestUserMessage);
         // Reuse the speculative prefetch if it matches — this is the whole
         // point: by the time the model calls deep_answer, the answer is
         // usually already streaming into the chat.
         const inflight = deepAnswerInFlightRef.current;
-        if (inflight && inflight.query === latestUserMessage) {
+        if (inflight && inflight.key === latestKey) {
           return await inflight.promise;
         }
         // Dedupe: if this exact query was JUST completed (e.g. the model
         // heard "I don't see it" and is retrying), don't run the whole
         // pipeline again — the answer is already in chat.
-        if (lastDeepAnswerQueryRef.current === latestUserMessage) {
+        if (lastDeepAnswerQueryRef.current === latestKey) {
           return {
             ok: true,
-            note: "The researched answer for this exact question is already in the chat from a moment ago — do NOT run again. Just point the user to it in one short sentence.",
+            note: "The researched answer for this exact question is already in the chat from a moment ago — do NOT run again and do NOT post another chat message. Just point the user to it in one short spoken sentence.",
           };
         }
         const abort = new AbortController();
         const promise = startDeepAnswer(latestUserMessage, abort.signal);
-        deepAnswerInFlightRef.current = { query: latestUserMessage, promise, abort };
+        deepAnswerInFlightRef.current = { query: latestUserMessage, key: latestKey, promise, abort };
         const result = await promise;
-        if (deepAnswerInFlightRef.current?.query === latestUserMessage) {
+        if (deepAnswerInFlightRef.current?.key === latestKey) {
           deepAnswerInFlightRef.current = null;
         }
         return result;
