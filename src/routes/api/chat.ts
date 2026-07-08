@@ -938,15 +938,29 @@ export const Route = createFileRoute("/api/chat")({
                 const { marked } = await import("marked");
                 // Optionally fetch the file bytes for attachment.
                 let attachment: { filename: string; mimeType: string; base64: string } | null = null;
-                if (attach_file_url) {
+                let effectiveAttachUrl = attach_file_url;
+                let effectiveAttachName = attach_file_name;
+                const mustAttach = emailNeedsGeneratedAttachment(userText, subject, emailBody);
+                if (!effectiveAttachUrl && mustAttach) {
+                  const doc = latestGeneratedDocFromHistory(rows, requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`));
+                  if (!doc) {
+                    return {
+                      error:
+                        "No generated document was found to attach. Generate the PDF/Word document first, then send the email.",
+                    };
+                  }
+                  effectiveAttachUrl = doc.url;
+                  effectiveAttachName = doc.filename;
+                }
+                if (effectiveAttachUrl) {
                   try {
-                    const r = await fetch(attach_file_url);
+                    const r = await fetch(effectiveAttachUrl);
                     let mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
                     let buf: Uint8Array | null = null;
                     if (r.ok) {
                       buf = new Uint8Array(await r.arrayBuffer());
                     } else {
-                      const storagePath = storagePathFromSignedUrl(attach_file_url);
+                      const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
                       if (!storagePath) return { error: `Could not fetch attachment (${r.status})` };
                       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
                       const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
@@ -958,7 +972,7 @@ export const Route = createFileRoute("/api/chat")({
                     let bin = "";
                     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
                     attachment = {
-                      filename: (attach_file_name || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
+                      filename: (effectiveAttachName || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
                       mimeType,
                       base64: Buffer.from(bin, "binary").toString("base64"),
                     };
