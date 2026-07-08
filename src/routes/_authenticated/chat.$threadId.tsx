@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
 import { createRealtimeSession } from "@/lib/realtime-voice.functions";
+import { logVoiceUsage } from "@/lib/realtime-voice.functions";
 import {
   voiceWebScrape,
   voiceProductSearch,
