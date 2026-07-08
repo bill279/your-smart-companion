@@ -2991,7 +2991,27 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
       } else if (ext === "docx") {
         const buf = await blob.arrayBuffer();
         const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });
-        setPreviewHtml(value || "<p><em>Document is empty.</em></p>");
+        // Match the branded DOCX template so the preview visually mirrors
+        // the downloaded file (title colour, heading colour, spacing, rule).
+        const brand = "#0D4763";
+        const stripped = (value || "").replace(/^\s*<h1[^>]*>[^<]*<\/h1>/i, "");
+        const titleHtml = `<h1 style="font-size:26px;font-weight:700;color:${brand};margin:0 0 4px">${art.filename.replace(/\.[^.]+$/, "")}</h1><div style="height:2px;background:${brand};width:64px;margin:0 0 20px"></div>`;
+        setPreviewHtml(
+          `<style>
+            .docx-preview{font-family:Arial,sans-serif;color:#1f2937;font-size:14px;line-height:1.55}
+            .docx-preview h1,.docx-preview h2,.docx-preview h3{color:${brand};font-weight:700;margin:18px 0 8px}
+            .docx-preview h1{font-size:20px}
+            .docx-preview h2{font-size:16px}
+            .docx-preview h3{font-size:14px}
+            .docx-preview p{margin:0 0 10px}
+            .docx-preview ul,.docx-preview ol{margin:0 0 12px 22px}
+            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+            .docx-preview th{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left}
+            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px}
+            .docx-preview tr:nth-child(even) td{background:#F8FAFC}
+          </style>
+          <div class="docx-preview">${titleHtml}${stripped || "<p><em>Document is empty.</em></p>"}</div>`,
+        );
       } else if (ext === "csv" || ext === "txt" || ext === "md") {
         setPreviewText(await blob.text());
       } else if (ext === "xlsx" || ext === "xls") {
