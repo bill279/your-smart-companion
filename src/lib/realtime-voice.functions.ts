@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertUnderCap } from "@/lib/spend-cap.functions";
+import { computeCost } from "@/lib/usage-pricing";
+import { z } from "zod";
 
 // OpenAI Realtime — mini is ~4× cheaper than the full model and plenty for chat.
 const REALTIME_MODEL = "gpt-realtime";
@@ -64,4 +66,47 @@ export const createRealtimeSession = createServerFn({ method: "POST" })
       expiresAt,
       model: REALTIME_MODEL,
     };
+  });
+
+// Log per-turn realtime token usage from client-side `response.done` events.
+// The realtime API returns audio + text token totals in `response.usage`;
+// we price audio and text separately and insert one usage_event per turn.
+export const logVoiceUsage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      inputAudioTokens: z.number().int().min(0).default(0),
+      outputAudioTokens: z.number().int().min(0).default(0),
+      inputTextTokens: z.number().int().min(0).default(0),
+      outputTextTokens: z.number().int().min(0).default(0),
+      responseId: z.string().optional(),
+    }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const audioCost = computeCost(REALTIME_MODEL, data.inputAudioTokens, data.outputAudioTokens);
+    const textCost = computeCost("gpt-realtime-text", data.inputTextTokens, data.outputTextTokens);
+    const total = audioCost + textCost;
+    const totalIn = data.inputAudioTokens + data.inputTextTokens;
+    const totalOut = data.outputAudioTokens + data.outputTextTokens;
+    if (totalIn + totalOut === 0) return { ok: true, cost_usd: 0 };
+    try {
+      await context.supabase.from("usage_events").insert({
+        user_id: context.userId,
+        kind: "voice_turn",
+        model: REALTIME_MODEL,
+        input_tokens: totalIn,
+        output_tokens: totalOut,
+        cost_usd: total,
+        metadata: {
+          audio_in: data.inputAudioTokens,
+          audio_out: data.outputAudioTokens,
+          text_in: data.inputTextTokens,
+          text_out: data.outputTextTokens,
+          response_id: data.responseId ?? null,
+        } as never,
+      });
+    } catch (err) {
+      console.warn("logVoiceUsage insert failed", err);
+    }
+    return { ok: true, cost_usd: total };
   });
