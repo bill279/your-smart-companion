@@ -502,10 +502,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
             //    Only after sustained voice-level energy do we send
             //    response.cancel to the server, so background noise
             //    doesn't kill legitimate responses.
-            const INSTANT_RMS  = 0.035;     // low: catch first syllable
-            const INSTANT_FRAMES = 2;       // ~32ms
-            const SPEECH_RMS   = 0.07;      // higher gate for real speech
-            const SPEECH_FRAMES = 4;        // ~64ms sustained
+            const INSTANT_RMS  = 0.045;     // low: catch first syllable
+            const INSTANT_FRAMES = 3;       // ~48ms
+            const SPEECH_RMS   = 0.085;      // higher gate for real speech
+            const SPEECH_FRAMES = 8;        // ~128ms sustained
             if (rms > INSTANT_RMS) {
               instantHitCount++;
               if (
@@ -567,7 +567,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
                 // the perceived instant stop, so we don't need "high"
                 // eagerness at the cost of false transcriptions.
                 eagerness: "medium",
-                create_response: false,
+                create_response: true,
                 interrupt_response: true,
               },
                 },
