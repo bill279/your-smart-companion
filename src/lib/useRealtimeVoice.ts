@@ -430,11 +430,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
                   transcription: { model: "whisper-1" },
               turn_detection: {
                 type: "server_vad",
-                // Tuned for fast barge-in: lower threshold picks up speech
-                // sooner, shorter silence lets a real utterance end quickly.
-                threshold: 0.4,
-                prefix_padding_ms: 200,
-                silence_duration_ms: 250,
+                // Tuned for fastest barge-in: low threshold + minimal
+                // prefix/silence so a real utterance interrupts immediately.
+                // A local WebAudio RMS monitor also fires bargeInNow() so
+                // the assistant is muted before this server event even
+                // round-trips back over the data channel.
+                threshold: 0.25,
+                prefix_padding_ms: 100,
+                silence_duration_ms: 150,
                 create_response: false,
                 interrupt_response: true,
               },
