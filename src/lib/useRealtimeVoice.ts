@@ -62,6 +62,13 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   const responseCreatePendingRef = useRef(false);
   const responseCreateInFlightRef = useRef(false);
   const responseInstructionsPendingRef = useRef<string | undefined>(undefined);
+  const micMonitorRef = useRef<{
+    ctx: AudioContext;
+    analyser: AnalyserNode;
+    source: MediaStreamAudioSourceNode;
+    raf: number;
+  } | null>(null);
+  const localBargeInAtRef = useRef(0);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -78,6 +85,12 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     pcRef.current = null;
     try { localStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch (err) { console.warn(err); }
     localStreamRef.current = null;
+    if (micMonitorRef.current) {
+      try { cancelAnimationFrame(micMonitorRef.current.raf); } catch (err) { console.warn(err); }
+      try { micMonitorRef.current.source.disconnect(); } catch (err) { console.warn(err); }
+      try { micMonitorRef.current.ctx.close(); } catch (err) { console.warn(err); }
+      micMonitorRef.current = null;
+    }
     if (audioElRef.current) {
       try { audioElRef.current.srcObject = null; } catch (err) { console.warn(err); }
     }
