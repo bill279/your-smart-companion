@@ -547,7 +547,7 @@ export const Route = createFileRoute("/api/chat")({
           };
         });
         const result = streamText({
-          model: gateway("openai/gpt-5.5"),
+          model: gateway("openai/gpt-5.5-mini"),
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(50),
@@ -1163,10 +1163,10 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             const outTok = usage?.outputTokens ?? 0;
             await logUsage(
               "chat_completion",
-              "openai/gpt-5.5",
+              "openai/gpt-5.5-mini",
               inTok,
               outTok,
-              computeCost("openai/gpt-5.5", inTok, outTok),
+              computeCost("openai/gpt-5.5-mini", inTok, outTok),
               { threadId: body.threadId, steps: collectedActivity.length },
             );
             // Log a flat per-call cost for each tool the model invoked.
