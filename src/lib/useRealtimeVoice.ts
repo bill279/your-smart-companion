@@ -252,26 +252,13 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       //   2. Ask the server to cancel the in-flight response.
       //   3. Clear any audio still queued in the server's output buffer.
       if (type === "input_audio_buffer.speech_started") {
-        const el = audioElRef.current;
-        if (el) {
-          try { el.muted = true; } catch (err) { console.warn(err); }
-          try { el.pause(); } catch (err) { console.warn(err); }
-        }
-        if (activeResponseRef.current) {
-          sendEvent({ type: "response.cancel" });
-        }
-        sendEvent({ type: "output_audio_buffer.clear" });
-        setIsSpeaking(false);
+        bargeInNow();
         return;
       }
       // User's speech ended — re-enable the audio element so the next
       // assistant response is audible again.
       if (type === "input_audio_buffer.speech_stopped") {
-        const el = audioElRef.current;
-        if (el) {
-          try { el.muted = false; } catch (err) { console.warn(err); }
-          if (el.paused) { el.play().catch(() => {}); }
-        }
+        releaseBargeIn();
         return;
       }
 
