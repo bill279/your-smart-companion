@@ -669,7 +669,14 @@ function ThreadView({ threadId }: { threadId: string }) {
   const deepAnswerInFlightRef = useRef<{
     query: string;
     promise: Promise<{ ok?: boolean; error?: string; note?: string }>;
+    abort: AbortController;
   } | null>(null);
+  // Query text of the most recently COMPLETED deep_answer run. If the model
+  // calls deep_answer again with the same query (common: user says "I don't
+  // see it" and the model retries), we short-circuit instead of re-running
+  // the whole /api/chat pipeline and posting a duplicate answer.
+  const lastDeepAnswerQueryRef = useRef<string>("");
+  const lastVoiceUserAtRef = useRef<number>(0);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
