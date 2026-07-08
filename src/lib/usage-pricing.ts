@@ -9,7 +9,8 @@ const PRICES: Record<string, Price> = {
   "openai/gpt-5.4": { input: 2.5, output: 10 },
   "openai/text-embedding-3-small": { input: 0.02, output: 0 },
   "gpt-realtime-mini": { input: 10, output: 20 }, // audio tokens
-  "gpt-realtime": { input: 40, output: 80 },
+  "gpt-realtime": { input: 32, output: 64 }, // audio tokens (per 1M)
+  "gpt-realtime-text": { input: 4, output: 16 }, // text tokens on realtime
 };
 
 export function priceFor(model: string): Price {
