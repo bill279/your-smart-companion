@@ -1160,6 +1160,17 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     url: signed.data.signedUrl,
                     filename: `${safeName}.${extension}`,
                     mimeType,
+                    size: bytes.byteLength,
+                    formatLabel:
+                      extension === "pdf"
+                        ? "PDF"
+                        : extension === "docx"
+                          ? "Word"
+                          : extension === "xlsx"
+                            ? "Excel"
+                            : extension === "csv"
+                              ? "CSV"
+                              : extension.toUpperCase(),
                   };
                 } catch (e) {
                   return { error: e instanceof Error ? e.message : String(e) };
