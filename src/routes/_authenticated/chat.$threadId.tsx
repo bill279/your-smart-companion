@@ -1657,30 +1657,6 @@ function ThreadView({ threadId }: { threadId: string }) {
               )}
             </div>
           )}
-          <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              if (voiceActive) void stopVoice();
-              else void startVoice();
-            }}
-            title={
-              voiceConnecting
-                ? "Connecting…"
-                : voiceActive
-                ? conversation.isSpeaking
-                  ? "Speaking…"
-                  : "Listening… tap to stop"
-                : "Tap to talk"
-            }
-            className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border transition ${
-              voiceActive
-                ? "border-red-500 bg-red-500 text-white hud-pulse shadow-[0_0_0_4px_rgba(239,68,68,0.25)]"
-                : "border-border bg-secondary hover:bg-secondary/80 text-primary"
-            }`}
-          >
-            <Mic size={18} />
-          </button>
           <input
             ref={fileInputRef}
             type="file"
@@ -1689,29 +1665,6 @@ function ThreadView({ threadId }: { threadId: string }) {
             className="hidden"
             onChange={(e) => handleFilesSelected(e.target.files)}
           />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            title="Attach file"
-            className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center border border-border bg-secondary hover:bg-secondary/80 text-primary disabled:opacity-40"
-          >
-            <Paperclip size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setWebSearchOn((v) => !v)}
-            title={webSearchOn ? "Web search is ON for the next message" : "Force web search for the next message"}
-            aria-pressed={webSearchOn}
-            className={`shrink-0 h-10 px-3 rounded-full flex items-center gap-1.5 border text-sm transition ${
-              webSearchOn
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border bg-secondary hover:bg-secondary/80 text-muted-foreground"
-            }`}
-          >
-            <Globe size={14} />
-            <span className="hidden sm:inline">Search web</span>
-          </button>
           <textarea
             autoFocus
             value={input}
@@ -1737,26 +1690,77 @@ function ThreadView({ threadId }: { threadId: string }) {
                   : "Listening… or type"
                 : "Message BPA Bot…"
             }
-            className="flex-1 bg-transparent outline-none px-3 py-2 text-[15px] leading-6 resize-none max-h-[220px] min-h-[40px]"
+            className="w-full bg-transparent outline-none px-1 py-1 text-[15px] leading-6 resize-none max-h-[220px] min-h-[36px]"
           />
-          {addMut.isPending && !isConnected ? (
+          <div className="flex items-center gap-1.5 mt-1">
             <button
               type="button"
-              onClick={stopGenerating}
-              className="px-4 py-2 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 flex items-center gap-2"
-              title="Stop generating"
+              onClick={() => {
+                if (voiceActive) void stopVoice();
+                else void startVoice();
+              }}
+              title={
+                voiceConnecting
+                  ? "Connecting…"
+                  : voiceActive
+                  ? conversation.isSpeaking
+                    ? "Speaking…"
+                    : "Listening… tap to stop"
+                  : "Tap to talk"
+              }
+              className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center border transition ${
+                voiceActive
+                  ? "border-red-500 bg-red-500 text-white hud-pulse shadow-[0_0_0_4px_rgba(239,68,68,0.25)]"
+                  : "border-border bg-secondary hover:bg-secondary/80 text-primary"
+              }`}
             >
-              <Square size={14} /> Stop
+              <Mic size={16} />
             </button>
-          ) : (
             <button
-              type="submit"
-              disabled={(!input.trim() && attachments.length === 0) || uploading}
-              className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-2"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              title="Attach file"
+              className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center border border-border bg-secondary hover:bg-secondary/80 text-primary disabled:opacity-40"
             >
-              <Send size={14} /> Send
+              <Paperclip size={15} />
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => setWebSearchOn((v) => !v)}
+              title={webSearchOn ? "Web search is ON for the next message" : "Force web search for the next message"}
+              aria-pressed={webSearchOn}
+              className={`shrink-0 h-9 rounded-full flex items-center gap-1.5 border text-sm transition ${
+                webSearchOn
+                  ? "border-primary bg-primary/10 text-primary px-3"
+                  : "border-border bg-secondary hover:bg-secondary/80 text-muted-foreground w-9 justify-center sm:w-auto sm:px-3"
+              }`}
+            >
+              <Globe size={14} />
+              <span className={webSearchOn ? "inline" : "hidden sm:inline"}>Search web</span>
+            </button>
+            <div className="flex-1" />
+            {addMut.isPending && !isConnected ? (
+              <button
+                type="button"
+                onClick={stopGenerating}
+                className="h-9 px-3 sm:px-4 rounded-full bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 flex items-center gap-1.5"
+                title="Stop generating"
+              >
+                <Square size={14} />
+                <span className="hidden sm:inline">Stop</span>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={(!input.trim() && attachments.length === 0) || uploading}
+                className="h-9 w-9 sm:w-auto sm:px-4 rounded-full sm:rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center justify-center gap-1.5"
+                title="Send"
+              >
+                <Send size={14} />
+                <span className="hidden sm:inline">Send</span>
+              </button>
+            )}
           </div>
           </div>
         </form>
