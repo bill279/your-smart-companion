@@ -2366,23 +2366,13 @@ function ThreadView({ threadId }: { threadId: string }) {
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-1 pt-1">
               {attachments.map((a) => (
-                <div
+                <ComposerAttachmentPreview
                   key={a.path}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs text-foreground"
-                >
-                  {a.mimeType.startsWith("image/") ? <ImageIcon size={12} /> : <FileText size={12} />}
-                  <span className="max-w-[160px] truncate">{a.name}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAttachments((cur) => cur.filter((x) => x.path !== a.path))
-                    }
-                    className="text-muted-foreground hover:text-destructive ml-1"
-                    aria-label={`Remove ${a.name}`}
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
+                  attachment={a}
+                  onRemove={() =>
+                    setAttachments((cur) => cur.filter((x) => x.path !== a.path))
+                  }
+                />
               ))}
               {uploading && (
                 <span className="text-xs text-muted-foreground self-center">Uploading…</span>
