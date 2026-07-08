@@ -163,11 +163,29 @@ export async function generateDocument(opts: {
 
   if (format === "docx") {
     const cleanTitle = humanizeTitle(title);
-    const skipAutoTitle = markdownStartsWithH1(markdown);
-    const children: (Paragraph | Table)[] = skipAutoTitle
-      ? []
-      : [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(cleanTitle)] })];
-    const lines = markdown.split(/\r?\n/);
+    // Consistency rule (matches PDF template): the branded title block is
+    // ALWAYS drawn. If the body also starts with an H1, strip it so we don't
+    // render the title twice. Collapse 3+ blank lines to a single blank so
+    // spacing is uniform across documents.
+    const bodyMarkdown = markdown
+      .replace(/^\s*#\s+.+\n+/, "")
+      .replace(/\n{3,}/g, "\n\n");
+    const children: (Paragraph | Table)[] = [
+      new Paragraph({
+        heading: HeadingLevel.TITLE,
+        spacing: { after: 60 },
+        children: [new TextRun({ text: cleanTitle, bold: true, color: "0D4763", size: 40 })],
+      }),
+      // Brand rule under title
+      new Paragraph({
+        spacing: { after: 240 },
+        border: {
+          bottom: { style: BorderStyle.SINGLE, size: 12, color: "0D4763", space: 1 },
+        },
+        children: [new TextRun("")],
+      }),
+    ];
+    const lines = bodyMarkdown.split(/\r?\n/);
     let i = 0;
     while (i < lines.length) {
       const line = lines[i] ?? "";
@@ -189,14 +207,13 @@ export async function generateDocument(opts: {
       }
       const m = line.match(/^(#{1,6})\s+(.*)$/);
       if (m) {
+        // Consistency: two tiers only, matching the PDF. H1/H2 = section,
+        // H3+ = subsection. Uniform spacing regardless of how many #s the
+        // model emitted.
         const lvl = m[1].length;
-        const heading =
-          lvl === 1
-            ? HeadingLevel.HEADING_1
-            : lvl === 2
-              ? HeadingLevel.HEADING_2
-              : HeadingLevel.HEADING_3;
-        children.push(new Paragraph({ heading, spacing: { before: lvl <= 2 ? 240 : 160, after: 120 }, children: [new TextRun(stripMarkdown(m[2]))] }));
+        const heading = lvl <= 2 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2;
+        const spaceBefore = lvl <= 2 ? 240 : 160;
+        children.push(new Paragraph({ heading, spacing: { before: spaceBefore, after: 120 }, children: [new TextRun(stripMarkdown(m[2]))] }));
       } else if (/^[-*+]\s+/.test(line.trim())) {
         children.push(new Paragraph({ numbering: { reference: "bullets", level: 0 }, spacing: { after: 80 }, children: [new TextRun(stripMarkdown(line.trim().replace(/^[-*+]\s+/, "")))] }));
       } else if (/^\d+\.\s+/.test(line.trim())) {
