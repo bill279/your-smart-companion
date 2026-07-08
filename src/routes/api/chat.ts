@@ -252,13 +252,37 @@ function isSubstantiveAssistantContent(content: string) {
 
 function titleFromSource(source: string, fallback: string) {
   const h1 = source.match(/^#\s+(.+)$/m)?.[1]?.trim();
-  if (h1) return h1.slice(0, 120);
+  if (h1) return h1.slice(0, 120).replace(/[.!?:;,]+$/g, "");
+  const h2 = source.match(/^##\s+(.+)$/m)?.[1]?.trim();
+  if (h2) return h2.slice(0, 120).replace(/[.!?:;,]+$/g, "");
+  const bold = source.match(/\*\*([^*]{3,80})\*\*/)?.[1]?.trim();
+  if (bold) return bold.replace(/[.!?:;,]+$/g, "");
   if (/\|\s*[-:]{2,}/.test(source)) return "Comparison Table";
-  const firstLine = source
-    .split(/\r?\n/)
-    .map((l) => l.replace(/^#{1,6}\s+/, "").trim())
-    .find((l) => l.length > 12);
-  return (firstLine ? firstLine.slice(0, 80) : fallback).replace(/[.!?:;,]+$/g, "");
+  return fallback;
+}
+
+// Derive a clean topical title from the user's own prompt that triggered
+// the source content — much better than slicing the first sentence of a
+// long answer (which produces filenames like
+// "Short_direct_pick_first_for_most_robotics_AR_3D_mapping_projects_pick_the").
+function titleFromUserPrompt(text: string): string | null {
+  const t = (text || "")
+    .replace(/^\s*(?:please|pls|hey|hi|ok(?:ay)?|cool|thanks?|thx)[,!\s]+/i, "")
+    .replace(/\b(?:convert|turn|make|generate|create|export|save|build|give\s+me|show\s+me|pull\s+me|find\s+me|write\s+me)\b[\s\S]*?\b(?:this|that|it|the\s+above|the\s+previous|the\s+last|the\s+chat|the\s+table|the\s+list|the\s+answer|the\s+response|the\s+reply)\b[\s\S]*?(?:(?:in)?to\s+(?:a\s+)?(?:pdf|docx|word(?:\s*doc(?:ument)?)?|xlsx|excel|csv))?/i, "")
+    .replace(/\b(?:pdf|docx|word(?:\s*doc(?:ument)?)?|xlsx|excel|csv|spreadsheet|doc(?:ument)?|file)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .replace(/[?.!,;:]+$/g, "")
+    .trim();
+  if (t.length < 3) return null;
+  // Title-case the trimmed phrase
+  const cased = t
+    .split(" ")
+    .map((w, i) =>
+      i === 0 || w.length > 3 ? w.charAt(0).toUpperCase() + w.slice(1) : w,
+    )
+    .join(" ")
+    .slice(0, 80);
+  return cased || null;
 }
 
 function cleanFilenameBase(raw: string) {
@@ -287,19 +311,48 @@ function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow
   const format = requestedFormat(userText);
   if (!format || !DOCUMENT_FORMAT_RE.test(userText) || !EXISTING_CONTENT_DOC_RE.test(userText)) return null;
 
-  const priorAssistant = rows
-    .slice(0, -1)
-    .filter((r) => r.role === "assistant" && isSubstantiveAssistantContent(r.content))
-    .map((r) => stripPersistedMarkers(r.content));
-  if (priorAssistant.length === 0) return null;
+  // Walk history in reverse to find the last substantive assistant message
+  // AND the user prompt that triggered it (the user turn immediately before).
+  const priorRows = rows.slice(0, -1);
+  let sourceIdx = -1;
+  for (let i = priorRows.length - 1; i >= 0; i--) {
+    const r = priorRows[i];
+    if (r.role === "assistant" && isSubstantiveAssistantContent(r.content)) {
+      sourceIdx = i;
+      break;
+    }
+  }
+  if (sourceIdx === -1) return null;
 
   const wantsAll = /\b(all|everything|entire|whole|chat)\b/i.test(userText);
   const wantsTable = /\btable\b/i.test(userText);
-  const tableSource = wantsTable ? [...priorAssistant].reverse().find((c) => /\|\s*[-:]{2,}/.test(c)) : undefined;
+
+  const priorAssistant = priorRows
+    .filter((r) => r.role === "assistant" && isSubstantiveAssistantContent(r.content))
+    .map((r) => stripPersistedMarkers(r.content));
+
+  const tableSource = wantsTable
+    ? [...priorAssistant].reverse().find((c) => /\|\s*[-:]{2,}/.test(c))
+    : undefined;
   const source = wantsAll
     ? priorAssistant.slice(-8).join("\n\n---\n\n")
-    : tableSource ?? priorAssistant[priorAssistant.length - 1];
-  const title = titleFromSource(source, format === "pdf" ? "Chat Export" : "Generated Document");
+    : tableSource ?? stripPersistedMarkers(priorRows[sourceIdx].content);
+
+  // Prefer the user's own prompt (the one that triggered the source answer)
+  // for the title — that's the actual topic. Fall back to headings, then a
+  // generic label. This keeps filenames and PDF titles clean (e.g.
+  // "Best Stereoscopic Cameras" instead of a truncated first sentence).
+  let triggeringUserPrompt: string | null = null;
+  for (let i = sourceIdx - 1; i >= 0; i--) {
+    if (priorRows[i].role === "user") {
+      triggeringUserPrompt = priorRows[i].content;
+      break;
+    }
+  }
+  const promptTitle = triggeringUserPrompt ? titleFromUserPrompt(triggeringUserPrompt) : null;
+  const fallback = format === "pdf" ? "Chat Export" : "Generated Document";
+  const title = promptTitle ?? titleFromSource(source, fallback);
+
   const markdown = /^\s*#\s+\S/m.test(source) ? source : `# ${title}\n\n${source}`;
   return { format, title, filename: cleanFilenameBase(title), markdown };
 }
