@@ -128,9 +128,11 @@ export async function generateDocument(opts: {
 
   if (format === "docx") {
     const tables = parseMarkdownTables(markdown);
-    const children: (Paragraph | Table)[] = [
-      new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(title)] }),
-    ];
+    const cleanTitle = humanizeTitle(title);
+    const skipAutoTitle = markdownStartsWithH1(markdown);
+    const children: (Paragraph | Table)[] = skipAutoTitle
+      ? []
+      : [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(cleanTitle)] })];
     const tableSet = new Set(tables.flat().map((r) => r.join("|")));
     const lines = markdown.split(/\r?\n/);
     let inTable = false;
@@ -187,9 +189,10 @@ export async function generateDocument(opts: {
                         : {}),
                       children: [
                         new Paragraph({
+                          spacing: { before: 40, after: 40 },
                           children: [
                             new TextRun({
-                              text: row[colIdx] ?? "",
+                              text: stripMarkdown(row[colIdx] ?? ""),
                               bold: rowIdx === 0,
                               color: rowIdx === 0 ? "FFFFFF" : undefined,
                             }),
