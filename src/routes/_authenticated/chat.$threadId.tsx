@@ -2570,7 +2570,12 @@ function AttachmentPreview({
         className="block rounded-lg overflow-hidden border border-border bg-background/40 max-w-[260px]"
         title={attachment.name}
         onClick={(e) => {
-          if (!url) e.preventDefault();
+          if (!url) {
+            e.preventDefault();
+            return;
+          }
+          e.preventDefault();
+          window.open(url, "_blank", "noopener,noreferrer");
         }}
       >
         {url ? (
@@ -2610,7 +2615,12 @@ function AttachmentPreview({
       rel="noopener noreferrer"
       className={cardClass}
       onClick={(e) => {
-        if (!url) e.preventDefault();
+        if (!url) {
+          e.preventDefault();
+          return;
+        }
+        e.preventDefault();
+        window.open(url, "_blank", "noopener,noreferrer");
       }}
       title={`Open ${attachment.name}`}
     >
