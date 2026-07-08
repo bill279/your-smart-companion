@@ -2753,6 +2753,7 @@ function Bubble({
       artifactIds.push(id);
       return "";
     })
+    .replace(/(^|\n)\s*\|[^\n]*\|\s*\n\s*\|[\s\-:|]+\|\s*(?=\n\s*(?:\|[\s\-:|]*\|\s*)*$|\s*$)/g, "")
     .trim();
   if (isUser) {
     return (
