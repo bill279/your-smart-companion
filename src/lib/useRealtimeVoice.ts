@@ -200,6 +200,38 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         setIsSpeaking(true);
         return;
       }
+
+      // BARGE-IN: the user started talking while the assistant was speaking.
+      // Cut the assistant off IMMEDIATELY at every layer:
+      //   1. Mute the local <audio> element so the user stops hearing it now
+      //      (WebRTC audio already buffered client-side would otherwise keep
+      //      playing for up to a second after the server stops sending).
+      //   2. Ask the server to cancel the in-flight response.
+      //   3. Clear any audio still queued in the server's output buffer.
+      if (type === "input_audio_buffer.speech_started") {
+        const el = audioElRef.current;
+        if (el) {
+          try { el.muted = true; } catch (err) { console.warn(err); }
+          try { el.pause(); } catch (err) { console.warn(err); }
+        }
+        if (activeResponseRef.current) {
+          sendEvent({ type: "response.cancel" });
+        }
+        sendEvent({ type: "output_audio_buffer.clear" });
+        setIsSpeaking(false);
+        return;
+      }
+      // User's speech ended — re-enable the audio element so the next
+      // assistant response is audible again.
+      if (type === "input_audio_buffer.speech_stopped") {
+        const el = audioElRef.current;
+        if (el) {
+          try { el.muted = false; } catch (err) { console.warn(err); }
+          if (el.paused) { el.play().catch(() => {}); }
+        }
+        return;
+      }
+
       if (
         type === "output_audio_buffer.stopped" ||
         type === "response.output_audio.done" ||
@@ -323,14 +355,16 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               audio: {
                 input: {
                   transcription: { model: "whisper-1" },
-                  turn_detection: {
-                    type: "server_vad",
-                    threshold: 0.5,
-                    prefix_padding_ms: 300,
-                    silence_duration_ms: 500,
-                    create_response: false,
-                    interrupt_response: true,
-                  },
+              turn_detection: {
+                type: "server_vad",
+                // Tuned for fast barge-in: lower threshold picks up speech
+                // sooner, shorter silence lets a real utterance end quickly.
+                threshold: 0.4,
+                prefix_padding_ms: 200,
+                silence_duration_ms: 250,
+                create_response: false,
+                interrupt_response: true,
+              },
                 },
               },
               tools,
