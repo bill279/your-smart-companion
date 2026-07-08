@@ -2508,6 +2508,93 @@ function ExportMenu({ onPrint, onMarkdown, onEmail, onPdf, onDocx, onXlsx, onCsv
   );
 }
 
+type AttachmentMeta = { path: string; name: string; mimeType: string; size?: number };
+
+const signedUrlCache = new Map<string, { url: string; expires: number }>();
+
+async function getAttachmentSignedUrl(path: string): Promise<string | null> {
+  const cached = signedUrlCache.get(path);
+  const now = Date.now();
+  if (cached && cached.expires > now + 60_000) return cached.url;
+  const { data, error } = await supabase.storage
+    .from("chat-uploads")
+    .createSignedUrl(path, 60 * 60);
+  if (error || !data?.signedUrl) return null;
+  signedUrlCache.set(path, { url: data.signedUrl, expires: now + 60 * 60 * 1000 });
+  return data.signedUrl;
+}
+
+function AttachmentPreview({
+  attachment,
+  tone,
+}: {
+  attachment: AttachmentMeta;
+  tone: "user" | "assistant";
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getAttachmentSignedUrl(attachment.path).then((u) => {
+      if (!alive) return;
+      if (u) setUrl(u);
+      else setFailed(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [attachment.path]);
+  const isImage = attachment.mimeType.startsWith("image/");
+  if (isImage) {
+    return (
+      <a
+        href={url ?? "#"}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block rounded-lg overflow-hidden border border-border bg-background/40 max-w-[260px]"
+        title={attachment.name}
+        onClick={(e) => {
+          if (!url) e.preventDefault();
+        }}
+      >
+        {url ? (
+          <img
+            src={url}
+            alt={attachment.name}
+            className="max-h-64 w-auto object-contain"
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <div className="h-32 w-40 flex items-center justify-center text-xs text-muted-foreground">
+            {failed ? "Preview unavailable" : "Loading…"}
+          </div>
+        )}
+      </a>
+    );
+  }
+  const chipClass =
+    tone === "user"
+      ? "flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs bg-primary-foreground/15 text-primary-foreground hover:bg-primary-foreground/25 transition"
+      : "flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs bg-secondary text-foreground border border-border hover:bg-secondary/80 transition";
+  return (
+    <a
+      href={url ?? "#"}
+      target="_blank"
+      rel="noopener noreferrer"
+      download={attachment.name}
+      className={chipClass}
+      onClick={(e) => {
+        if (!url) e.preventDefault();
+      }}
+      title={attachment.name}
+    >
+      <FileText size={14} className="shrink-0" />
+      <span className="max-w-[200px] truncate">{attachment.name}</span>
+      {url && <Download size={12} className="opacity-70" />}
+    </a>
+  );
+}
+
 function Bubble({
   role,
   content,
