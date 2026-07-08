@@ -1050,7 +1050,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 }
               },
             }),
-          } : undefined,
+          },
           onFinish: async ({ text, usage }) => {
             const marker = encodeToolActivityMarker(collectedActivity);
             await supabase.from("messages").insert({
