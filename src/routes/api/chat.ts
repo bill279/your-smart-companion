@@ -378,10 +378,10 @@ export const Route = createFileRoute("/api/chat")({
           }
         });
 
-        // Load recent history + facts in parallel. Cap history at the last 40
+        // Load recent history + facts in parallel. Cap history at the last 16
         // turns — anything older is rarely useful and just inflates latency
         // and token cost. Durable context lives in user_facts.
-        const HISTORY_LIMIT = 40;
+        const HISTORY_LIMIT = 16;
         const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes] = await Promise.all([
           supabase
             .from("messages")
@@ -547,12 +547,12 @@ export const Route = createFileRoute("/api/chat")({
           };
         });
         const result = streamText({
-          model: gateway("openai/gpt-5.5-mini"),
+          model: gateway("openai/gpt-5-mini"),
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(50),
           // Push the model toward richer, more thorough answers instead of
-          // the terse default it tends to give. GPT-5.4 exposes both
+          // the terse default it tends to give. GPT-5 exposes both
           // reasoning-effort and text-verbosity knobs.
           providerOptions: {
             openai: {
@@ -563,7 +563,7 @@ export const Route = createFileRoute("/api/chat")({
               reasoningEffort: "low",
               textVerbosity: "medium",
             },
-            // Fast mode: OpenAI priority serving tier for gpt-5.5 —
+            // Fast mode: OpenAI priority serving tier for gpt-5-mini —
             // lower latency at a small premium, no quality change.
             lovable: {
               service_tier: "priority",
@@ -1163,10 +1163,10 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             const outTok = usage?.outputTokens ?? 0;
             await logUsage(
               "chat_completion",
-              "openai/gpt-5.5-mini",
+              "openai/gpt-5-mini",
               inTok,
               outTok,
-              computeCost("openai/gpt-5.5-mini", inTok, outTok),
+              computeCost("openai/gpt-5-mini", inTok, outTok),
               { threadId: body.threadId, steps: collectedActivity.length },
             );
             // Log a flat per-call cost for each tool the model invoked.
