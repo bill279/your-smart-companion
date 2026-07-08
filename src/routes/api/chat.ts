@@ -563,6 +563,13 @@ export const Route = createFileRoute("/api/chat")({
               reasoningEffort: "low",
               textVerbosity: "medium",
             },
+            // Lovable AI Gateway priority tier — routes to OpenAI's
+            // priority serving lane for lower latency. Billed at the
+            // priority rate when served on that tier; falls back to
+            // standard rate + latency if capacity is unavailable.
+            lovable: {
+              service_tier: "priority",
+            },
           },
           tools: {
             web_search: tool({
