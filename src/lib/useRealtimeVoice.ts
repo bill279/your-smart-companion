@@ -1,5 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// Filter out spurious transcripts produced by the realtime transcriber picking
+// up breaths, keyboard clicks, TV in the background, etc. These come through
+// as very short utterances ("Job", "Carefully."), non-English filler ("嗯",
+// "啊"), or pure punctuation. If we don't drop them here, they get persisted
+// as fake user messages in the chat history.
+function isLikelyNoiseTranscript(raw: string): boolean {
+  const text = raw.trim();
+  if (!text) return true;
+  // Strip punctuation/whitespace for length + character checks.
+  const stripped = text.replace(/[\s\p{P}\p{S}]/gu, "");
+  if (stripped.length === 0) return true;
+  // Any CJK / Hiragana / Katakana / Hangul character → likely a hallucinated
+  // filler token from the transcriber (user is speaking English).
+  if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(text)) return true;
+  // Very short single-word utterances with no context are almost always noise.
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length <= 1 && stripped.length < 6) return true;
+  // Common single-token filler words the transcriber emits on breaths/hums.
+  if (words.length === 1 && /^(uh|um|hmm+|mm+|mhm+|ah|oh|ok|okay|yeah|yep|nope|hi|hello|bye|thanks|thank you|the|a|and|so|you|i|it)[.!?,]*$/i.test(text)) return true;
+  return false;
+}
+
 // ------- Types -------
 
 type ToolResult = string | Record<string, unknown>;
@@ -283,7 +305,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         const itemId = String(msg.item_id ?? "");
         const text = String(msg.transcript ?? "").trim();
         if (itemId) userTranscriptAccumRef.current.delete(itemId);
-        if (text) {
+        if (text && !isLikelyNoiseTranscript(text)) {
           opts.onMessage?.({ source: "user", message: text, event_id: itemId, isFinal: true });
         }
         return;
@@ -556,7 +578,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               instructions: opts.instructions ?? "",
               audio: {
                 input: {
-                  transcription: { model: "gpt-4o-transcribe" },
+                  transcription: { model: "gpt-4o-transcribe", language: "en" },
               // Semantic VAD uses a model to decide when the user is
               // actually speaking vs. making noise (breathing, throat
               // clearing, keyboard, background hum). "high" eagerness
