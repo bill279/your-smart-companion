@@ -483,6 +483,27 @@ function latestGeneratedDocFromHistory(
   return null;
 }
 
+function latestGeneratedDocsFromHistory(
+  rows: ChatHistoryRow[],
+  preferredFormats: GeneratedDocFormat[],
+): NonNullable<ToolActivity["docFile"]>[] {
+  const wanted = preferredFormats.length > 0 ? preferredFormats : ["pdf"];
+  const found = new Map<GeneratedDocFormat, NonNullable<ToolActivity["docFile"]>>();
+  for (const row of [...rows].reverse()) {
+    if (row.role !== "assistant") continue;
+    const { activities } = extractToolActivity(row.content);
+    for (const activity of [...activities].reverse()) {
+      const doc = activity.docFile;
+      if (!doc?.url || !doc.filename) continue;
+      const ext = doc.filename.toLowerCase().split(".").pop() as GeneratedDocFormat | undefined;
+      if (!ext || !wanted.includes(ext) || found.has(ext)) continue;
+      found.set(ext, doc);
+      if (found.size === wanted.length) return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
+    }
+  }
+  return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
+}
+
 export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
