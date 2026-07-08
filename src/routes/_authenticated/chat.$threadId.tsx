@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
@@ -99,7 +99,7 @@ Forbidden answer shapes (spoken OR in show_in_chat):
 Clean Markdown. ## headings for multi-part answers. Short paragraphs (2–4 lines). **Bold** for key terms. Bullets only when they aid scanning. Full GitHub-Flavored Markdown tables using pipes for any comparison/schedule/spec/tabular content. Fenced code blocks with a language tag for code. Never wrap the whole reply in a code block. Never dump raw JSON.
 
 # 5. Tools (call them; don't narrate)
-- deep_answer — YOUR PRIMARY TOOL for any research, comparison, ranking, list, "best X", "top N", "options for Y", how-to, explain, recommend, or long-draft question. Delegates to the full chat brain (stronger reasoning model + live web_search + web_scrape + product_search + knowledge base) which posts the full researched answer (with citations, sources, complete table when relevant) directly into the chat. YOU DO NOT compose these answers yourself. Call deep_answer with no arguments — it uses the user's most recent message. After it returns, say ONE short spoken sentence pointing to the chat ("I've put the full breakdown in the chat — top pick is X.", "The comparison's up in the chat."). Never re-read the content aloud. Never say "let me search…" — just call it.
+- deep_answer — YOUR PRIMARY TOOL for any research, comparison, ranking, list, "best X", "top N", "options for Y", how-to, explain, recommend, or long-draft question. Delegates to the full chat brain (stronger reasoning model + live web_search + web_scrape + product_search + knowledge base) which posts the full researched answer (with citations, sources, complete table when relevant) directly into the chat. YOU DO NOT compose these answers yourself. Call deep_answer with no arguments — it uses the user's most recent message. CRITICAL ORDERING: (1) call deep_answer FIRST, in silence — do NOT speak beforehand, do NOT say "let me search", "one sec", "I'll put it in the chat", or anything else before calling. (2) WAIT for the tool to return. (3) ONLY THEN speak ONE short sentence pointing to the chat ("The full breakdown's up in the chat — top pick is X.", "It's in the chat."). Never announce that something is in the chat before the tool has returned. Never re-read the content aloud.
 - show_in_chat — ONLY for short structured content you're composing yourself: a draft email you wrote from the user's dictation, a code snippet, or a simple table with data you already have in the conversation. NOT for research or "best X" answers — use deep_answer for those. After it returns, one short spoken summary sentence.
 - web_search / web_scrape / product_search / search_knowledge_base — you almost never need these directly, because deep_answer runs them inside the chat brain. Use them only for a quick spoken fact-check (a single price, a phone number, an address) where a full deep_answer would be overkill.
 - send_email — send from the user's Outlook. NEVER on the first request. Confirm the recipient's exact address out loud ("Just to confirm, send this to john@example.com?"), then draft, then wait for explicit approval, then send. Body = clean human message with greeting, 1–3 short paragraphs, sign-off. No raw URLs. To attach a document you just generated, call with attach_last_document=true. Approval is ANY affirmative reply — "send", "yes", "yep", "sure", "ok", "cool", "go ahead", "do it", "send it", "looks good", "lgtm" — interpret liberally and call the tool immediately. Do NOT re-confirm.
@@ -662,6 +662,14 @@ function ThreadView({ threadId }: { threadId: string }) {
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
+  // Speculative deep-research prefetch: kicks off the /api/chat pipeline the
+  // moment the user's spoken transcript arrives if it looks research-y, so
+  // that by the time the voice model decides to call deep_answer the work
+  // is already streaming (or done). Massive perceived-latency win.
+  const deepAnswerInFlightRef = useRef<{
+    query: string;
+    promise: Promise<{ ok?: boolean; error?: string; note?: string }>;
+  } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -688,6 +696,99 @@ function ThreadView({ threadId }: { threadId: string }) {
   useEffect(() => {
     scrollToLatest();
   }, [messages.length, pendingAssistant, pendingUser]);
+
+  // Kick off the full deep-research pipeline. Streams into the pending
+  // assistant bubble immediately so the user sees "Researching…" and live
+  // progress rather than silence. Returns a serialisable result for the
+  // realtime tool call.
+  const startDeepAnswer = useCallback(
+    async (query: string): Promise<{ ok?: boolean; error?: string; note?: string }> => {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) return { error: "not signed in" };
+      try {
+        setPendingActivity([]);
+        setPendingAssistant("Researching…");
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ threadId, content: query, skipUserInsert: true }),
+        });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          setPendingAssistant("");
+          setPendingActivity([]);
+          return { error: `deep answer failed: ${errText.slice(0, 200)}` };
+        }
+        const reader = res.body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          let acc = "";
+          let buf = "";
+          let inCtrl = false;
+          let activity: ToolActivity[] = [];
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            while (true) {
+              const idx = buf.indexOf(TOOL_FRAME_DELIM);
+              if (idx === -1) break;
+              const chunk = buf.slice(0, idx);
+              buf = buf.slice(idx + 1);
+              if (!inCtrl) {
+                if (chunk) acc += chunk;
+              } else {
+                try {
+                  const ev = JSON.parse(chunk) as ToolEvent;
+                  activity = foldToolEvent(activity, ev);
+                  setPendingActivity(activity);
+                } catch {
+                  // ignore malformed frame
+                }
+              }
+              inCtrl = !inCtrl;
+            }
+            if (!inCtrl && buf) {
+              acc += buf;
+              buf = "";
+            }
+            setPendingAssistant(cleanAssistantText(acc));
+          }
+        }
+        await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+        await qc.invalidateQueries({ queryKey: ["threads"] });
+        setPendingAssistant("");
+        setPendingActivity([]);
+        return {
+          ok: true,
+          note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
+        };
+      } catch (err) {
+        setPendingAssistant("");
+        setPendingActivity([]);
+        const msg = err instanceof Error ? err.message : "deep answer failed";
+        return { error: msg };
+      }
+    },
+    [threadId, qc],
+  );
+
+  // Heuristic: does this spoken turn deserve the full research pipeline?
+  // Keep it broad — false positives just do extra work quietly in the
+  // background, while false negatives are what the user is complaining
+  // about (voice claims "in chat", nothing there for 10s).
+  const RESEARCH_QUERY_RE =
+    /\b(best|top|compare|comparison|vs\.?|versus|options?|recommend|recommendation|which|what('?s| is)|find|list|show me|research|deep dive|breakdown|guide|how to|how do i|near|nearby|around|in|outside|cheapest|highest[- ]rated|top[- ]rated|reviews?|price|pricing|cost)\b/i;
+  function looksLikeResearchQuery(text: string): boolean {
+    const t = text.trim();
+    if (t.length < 12) return false;
+    return RESEARCH_QUERY_RE.test(t);
+  }
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -740,83 +841,19 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     clientTools: {
       deep_answer: async () => {
-        // Delegate to the same /api/chat pipeline the text UI uses — full
-        // gpt-5-mini + live web_search / web_scrape / product_search /
-        // knowledge base loop. Use the latest spoken transcript directly
-        // instead of regenerate=true so we don't delete the prior assistant
-        // message or race the realtime response lifecycle.
-        const { data: sess } = await supabase.auth.getSession();
-        const token = sess.session?.access_token;
-        if (!token) return { error: "not signed in" };
-        const latestUserMessage = lastVoiceUserTextRef.current || [...(messagesQ.data ?? [])].reverse().find((m) => m.role === "user")?.content?.trim() || "";
+        const latestUserMessage =
+          lastVoiceUserTextRef.current ||
+          [...(messagesQ.data ?? [])].reverse().find((m) => m.role === "user")?.content?.trim() ||
+          "";
         if (!latestUserMessage) return { error: "no user message available" };
-        try {
-          const res = await fetch("/api/chat", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ threadId, content: latestUserMessage, skipUserInsert: true }),
-          });
-          if (!res.ok) {
-            const errText = await res.text().catch(() => "");
-            return { error: `deep answer failed: ${errText.slice(0, 200)}` };
-          }
-          // Stream the deep chat answer into the UI immediately, while still
-          // draining the response so server-side onFinish saves the final
-          // assistant message.
-          const reader = res.body?.getReader();
-          if (reader) {
-            const decoder = new TextDecoder();
-            let acc = "";
-            let buf = "";
-            let inCtrl = false;
-            let activity: ToolActivity[] = [];
-            setPendingActivity([]);
-            setPendingAssistant("Researching…");
-            // eslint-disable-next-line no-constant-condition
-            while (true) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              buf += decoder.decode(value, { stream: true });
-              while (true) {
-                const idx = buf.indexOf(TOOL_FRAME_DELIM);
-                if (idx === -1) break;
-                const chunk = buf.slice(0, idx);
-                buf = buf.slice(idx + 1);
-                if (!inCtrl) {
-                  if (chunk) acc += chunk;
-                } else {
-                  try {
-                    const ev = JSON.parse(chunk) as ToolEvent;
-                    activity = foldToolEvent(activity, ev);
-                    setPendingActivity(activity);
-                  } catch {
-                    // ignore malformed frame
-                  }
-                }
-                inCtrl = !inCtrl;
-              }
-              if (!inCtrl && buf) {
-                acc += buf;
-                buf = "";
-              }
-              setPendingAssistant(cleanAssistantText(acc));
-            }
-          }
-          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          await qc.invalidateQueries({ queryKey: ["threads"] });
-          setPendingAssistant("");
-          setPendingActivity([]);
-          return {
-            ok: true,
-            note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "deep answer failed";
-          return { error: msg };
+        // Reuse the speculative prefetch if it matches — this is the whole
+        // point: by the time the model calls deep_answer, the answer is
+        // usually already streaming into the chat.
+        const inflight = deepAnswerInFlightRef.current;
+        if (inflight && inflight.query === latestUserMessage) {
+          return await inflight.promise;
         }
+        return await startDeepAnswer(latestUserMessage);
       },
       show_in_chat: async (params) => {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
@@ -1208,6 +1245,25 @@ function ThreadView({ threadId }: { threadId: string }) {
           await add({ data: { threadId, role: "user", content: text } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingUser(null);
+          // Speculative prefetch: if this looks like a research/list/compare
+          // question, start the full deep-answer pipeline NOW in parallel
+          // with the realtime model's tool-calling decision. When the model
+          // then calls deep_answer, it awaits this same promise instead of
+          // firing a second request — eliminating the 10–20s of dead air
+          // between "I put the full breakdown in chat" and the chat actually
+          // getting the breakdown.
+          if (looksLikeResearchQuery(text) && !deepAnswerInFlightRef.current) {
+            const promise = startDeepAnswer(text).finally(() => {
+              // Keep the resolved result around briefly so a late
+              // deep_answer tool call can still reuse it, then clear.
+              window.setTimeout(() => {
+                if (deepAnswerInFlightRef.current?.query === text) {
+                  deepAnswerInFlightRef.current = null;
+                }
+              }, 2000);
+            });
+            deepAnswerInFlightRef.current = { query: text, promise: promise as Promise<{ ok?: boolean; error?: string; note?: string }> };
+          }
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
           // Live update: show assistant turn the moment the transcript arrives.
