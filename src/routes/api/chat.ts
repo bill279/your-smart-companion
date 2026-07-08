@@ -1161,28 +1161,28 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               .from("threads")
               .update({ updated_at: new Date().toISOString() })
               .eq("id", body.threadId!);
-            // Fire-and-forget all non-visible tail work so the stream can close
-            // as soon as the answer is persisted.
+            // Keep usage logging awaited so the spend tracker/cap stays reliable.
+            const inTok = usage?.inputTokens ?? 0;
+            const outTok = usage?.outputTokens ?? 0;
+            await logUsage(
+              "chat_completion",
+              CHAT_MODEL,
+              inTok,
+              outTok,
+              computeCost(CHAT_MODEL, inTok, outTok),
+              { threadId: body.threadId, steps: collectedActivity.length },
+            );
+            for (const ev of collectedActivity) {
+              const flat = TOOL_FLAT_COST_USD[ev.name];
+              if (flat === undefined) continue;
+              await logUsage("tool_call", null, 0, 0, flat, {
+                tool: ev.name,
+                threadId: body.threadId,
+              });
+            }
+            // Fire-and-forget non-visible cleanup so the stream can close sooner.
             void (async () => {
               try {
-                const inTok = usage?.inputTokens ?? 0;
-                const outTok = usage?.outputTokens ?? 0;
-                await logUsage(
-                  "chat_completion",
-                  CHAT_MODEL,
-                  inTok,
-                  outTok,
-                  computeCost(CHAT_MODEL, inTok, outTok),
-                  { threadId: body.threadId, steps: collectedActivity.length },
-                );
-                for (const ev of collectedActivity) {
-                  const flat = TOOL_FLAT_COST_USD[ev.name];
-                  if (flat === undefined) continue;
-                  await logUsage("tool_call", null, 0, 0, flat, {
-                    tool: ev.name,
-                    threadId: body.threadId,
-                  });
-                }
                 const { data: t } = await supabase
                   .from("threads")
                   .select("title")
