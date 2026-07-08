@@ -658,6 +658,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const lastUserSpeechAtRef = useRef<number>(0);
+  const lastVoiceUserTextRef = useRef<string>("");
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
@@ -741,18 +742,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       deep_answer: async () => {
         // Delegate to the same /api/chat pipeline the text UI uses — full
         // gpt-5-mini + live web_search / web_scrape / product_search /
-        // knowledge base loop. Reuses the user's most recent turn (the
-        // spoken transcript we just persisted) via regenerate=true, so the
-        // researched answer is saved to this same thread as an assistant
-        // message. Voice then speaks a one-sentence summary.
-        try {
-          conversationRef.current?.cancelResponse();
-        } catch (err) {
-          console.warn("cancelResponse before deep_answer failed", err);
-        }
+        // knowledge base loop. Use the latest spoken transcript directly
+        // instead of regenerate=true so we don't delete the prior assistant
+        // message or race the realtime response lifecycle.
         const { data: sess } = await supabase.auth.getSession();
         const token = sess.session?.access_token;
         if (!token) return { error: "not signed in" };
+        const latestUserMessage = lastVoiceUserTextRef.current || [...(messagesQ.data ?? [])].reverse().find((m) => m.role === "user")?.content?.trim() || "";
+        if (!latestUserMessage) return { error: "no user message available" };
         try {
           const res = await fetch("/api/chat", {
             method: "POST",
@@ -760,24 +757,58 @@ function ThreadView({ threadId }: { threadId: string }) {
               "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ threadId, regenerate: true }),
+            body: JSON.stringify({ threadId, content: latestUserMessage, skipUserInsert: true }),
           });
           if (!res.ok) {
             const errText = await res.text().catch(() => "");
             return { error: `deep answer failed: ${errText.slice(0, 200)}` };
           }
-          // Drain the stream so the server-side onFinish (which inserts
-          // the assistant message) runs to completion before we return.
+          // Stream the deep chat answer into the UI immediately, while still
+          // draining the response so server-side onFinish saves the final
+          // assistant message.
           const reader = res.body?.getReader();
           if (reader) {
+            const decoder = new TextDecoder();
+            let acc = "";
+            let buf = "";
+            let inCtrl = false;
+            let activity: ToolActivity[] = [];
+            setPendingActivity([]);
+            setPendingAssistant("Researching…");
             // eslint-disable-next-line no-constant-condition
             while (true) {
-              const { done } = await reader.read();
+              const { value, done } = await reader.read();
               if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              while (true) {
+                const idx = buf.indexOf(TOOL_FRAME_DELIM);
+                if (idx === -1) break;
+                const chunk = buf.slice(0, idx);
+                buf = buf.slice(idx + 1);
+                if (!inCtrl) {
+                  if (chunk) acc += chunk;
+                } else {
+                  try {
+                    const ev = JSON.parse(chunk) as ToolEvent;
+                    activity = foldToolEvent(activity, ev);
+                    setPendingActivity(activity);
+                  } catch {
+                    // ignore malformed frame
+                  }
+                }
+                inCtrl = !inCtrl;
+              }
+              if (!inCtrl && buf) {
+                acc += buf;
+                buf = "";
+              }
+              setPendingAssistant(cleanAssistantText(acc));
             }
           }
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           await qc.invalidateQueries({ queryKey: ["threads"] });
+          setPendingAssistant("");
+          setPendingActivity([]);
           return {
             ok: true,
             note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
@@ -1162,6 +1193,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           lastUserSpeechAtRef.current = Date.now();
+          lastVoiceUserTextRef.current = text;
           // Reset 90s idle auto-stop on every user utterance.
           if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
           idleTimerRef.current = window.setTimeout(() => {
@@ -1335,6 +1367,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       // If voice is connected, route through the realtime voice channel instead.
       if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
+        lastVoiceUserTextRef.current = content;
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
         conversation.sendUserMessage(content);
@@ -1612,7 +1645,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function signOut() {
     await supabase.auth.signOut();
-    navigate({ to: "/auth", search: {} });
+    navigate({ to: "/auth", search: { next: undefined } });
   }
 
   const voiceActive = voiceUiState === "connected" || voiceUiState === "starting";

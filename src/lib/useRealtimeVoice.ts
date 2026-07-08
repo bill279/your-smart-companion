@@ -59,6 +59,8 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const assistantAccumRef = useRef<Map<string, string>>(new Map());
   const activeResponseRef = useRef(false);
+  const responseCreatePendingRef = useRef(false);
+  const responseCreateInFlightRef = useRef(false);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -79,6 +81,9 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       try { audioElRef.current.srcObject = null; } catch (err) { console.warn(err); }
     }
     assistantAccumRef.current.clear();
+    activeResponseRef.current = false;
+    responseCreatePendingRef.current = false;
+    responseCreateInFlightRef.current = false;
     setIsSpeaking(false);
   }, []);
 
@@ -94,6 +99,18 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     }
   }, []);
 
+  const requestResponseCreate = useCallback(() => {
+    if (activeResponseRef.current || responseCreateInFlightRef.current) {
+      responseCreatePendingRef.current = true;
+      return;
+    }
+    responseCreatePendingRef.current = false;
+    responseCreateInFlightRef.current = true;
+    if (!sendEvent({ type: "response.create" })) {
+      responseCreateInFlightRef.current = false;
+    }
+  }, [sendEvent]);
+
   const handleServerEvent = useCallback(
     async (msg: Record<string, unknown>) => {
       const type = msg?.type as string | undefined;
@@ -106,6 +123,17 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         // when the user (or our code) issues response.cancel between turns.
         if (/no active response/i.test(err) || /cancellation failed/i.test(err)) {
           activeResponseRef.current = false;
+          responseCreateInFlightRef.current = false;
+          if (responseCreatePendingRef.current) window.setTimeout(requestResponseCreate, 0);
+          return;
+        }
+        // Realtime only allows one response at a time. If a create raced the
+        // prior turn finishing, queue it for the next response.done instead of
+        // surfacing the scary provider error to the user.
+        if (/active response in progress|already has an active response/i.test(err)) {
+          activeResponseRef.current = true;
+          responseCreateInFlightRef.current = false;
+          responseCreatePendingRef.current = true;
           return;
         }
         opts.onError?.(err);
@@ -114,6 +142,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
 
       if (type === "response.created") {
         activeResponseRef.current = true;
+        responseCreateInFlightRef.current = false;
         return;
       }
 
@@ -169,6 +198,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         setIsSpeaking(false);
         if (type === "response.done") {
           activeResponseRef.current = false;
+          responseCreateInFlightRef.current = false;
           // Extract token usage for spend tracking.
           const response = msg.response as
             | {
@@ -201,6 +231,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               console.warn("onUsage handler failed", err);
             }
           }
+          if (responseCreatePendingRef.current) {
+            responseCreatePendingRef.current = false;
+            window.setTimeout(requestResponseCreate, 0);
+          }
         }
         return;
       }
@@ -229,18 +263,18 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
             type: "conversation.item.create",
             item: { type: "function_call_output", call_id: callId, output },
           });
-          if (shouldCreateResponse) sendEvent({ type: "response.create" });
+          if (shouldCreateResponse) requestResponseCreate();
           return;
         }
         sendEvent({
           type: "conversation.item.create",
           item: { type: "function_call_output", call_id: callId, output },
         });
-        sendEvent({ type: "response.create" });
+        requestResponseCreate();
         return;
       }
     },
-    [sendEvent],
+    [requestResponseCreate, sendEvent],
   );
 
   const startSession = useCallback(
@@ -355,8 +389,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     (text: string) => {
       // If a prior response is still generating, cancel it so the new
       // user message doesn't collide with "active response in progress".
-      if (activeResponseRef.current) {
-        activeResponseRef.current = false;
+      if (activeResponseRef.current || responseCreateInFlightRef.current) {
         sendEvent({ type: "response.cancel" });
       }
       sendEvent({
@@ -367,14 +400,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           content: [{ type: "input_text", text }],
         },
       });
-      sendEvent({ type: "response.create" });
+      requestResponseCreate();
     },
-    [sendEvent],
+    [requestResponseCreate, sendEvent],
   );
 
   const cancelResponse = useCallback(() => {
-    if (!activeResponseRef.current) return;
-    activeResponseRef.current = false;
+    responseCreatePendingRef.current = false;
+    if (!activeResponseRef.current && !responseCreateInFlightRef.current) return;
     sendEvent({ type: "response.cancel" });
   }, [sendEvent]);
 
