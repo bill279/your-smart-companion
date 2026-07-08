@@ -330,10 +330,14 @@ function buildDocxTable(rows: string[][]): Table {
 // ---------------- PDF rendering ----------------
 
 function renderPdf(title: string, markdown: string): ArrayBuffer {
-  const wideTable = parseMarkdownTables(markdown).some(
-    (table) => Math.max(0, ...table.map((row) => row.length)) > 6,
-  );
-  const pdf = new jsPDF({ unit: "pt", format: "letter", orientation: wideTable ? "landscape" : "portrait" });
+  // Consistency rule: always portrait unless a table genuinely can't fit at
+  // a readable minimum column width (48pt/col). This stops the entire
+  // document orientation from flipping just because the model happened to
+  // emit a 7-column table.
+  const tables = parseMarkdownTables(markdown);
+  const maxCols = tables.reduce((m, t) => Math.max(m, ...t.map((r) => r.length)), 0);
+  const needsLandscape = maxCols >= 8;
+  const pdf = new jsPDF({ unit: "pt", format: "letter", orientation: needsLandscape ? "landscape" : "portrait" });
   const margin = 56;
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -369,27 +373,32 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
     if (y + h > pageHeight - margin - 24) newPage();
   };
 
-  // ---- Title block ----
-  const skipAutoTitle = markdownStartsWithH1(markdown);
-  if (!skipAutoTitle) {
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(22);
-    pdf.setTextColor(...brand);
-    const titleLines = pdf.splitTextToSize(humanizeTitle(title), contentWidth) as string[];
-    for (const l of titleLines) {
-      ensure(28);
-      pdf.text(l, margin, y + 18);
-      y += 26;
-    }
-    pdf.setDrawColor(...brand);
-    pdf.setLineWidth(1.5);
-    pdf.line(margin, y + 2, margin + 60, y + 2);
-    y += 18;
-    pdf.setTextColor(0, 0, 0);
+  // ---- Title block (ALWAYS drawn, consistent template) ----
+  // If the body also starts with an H1 we strip it below so the title isn't
+  // rendered twice.
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(22);
+  pdf.setTextColor(...brand);
+  const titleLines = pdf.splitTextToSize(humanizeTitle(title), contentWidth) as string[];
+  for (const l of titleLines) {
+    ensure(28);
+    pdf.text(l, margin, y + 18);
+    y += 26;
   }
+  pdf.setDrawColor(...brand);
+  pdf.setLineWidth(1.5);
+  pdf.line(margin, y + 2, margin + 60, y + 2);
+  y += 18;
+  pdf.setTextColor(0, 0, 0);
 
   // ---- Walk markdown ----
-  const lines = markdown.split(/\r?\n/);
+  // Strip a leading H1 (any variant) so the branded title block is the only
+  // title on the page. Also collapse 3+ blank lines to a single blank so
+  // spacing is uniform across documents.
+  const bodyMarkdown = markdown
+    .replace(/^\s*#\s+.+\n+/, "")
+    .replace(/\n{3,}/g, "\n\n");
+  const lines = bodyMarkdown.split(/\r?\n/);
   let i = 0;
   while (i < lines.length) {
     const raw = lines[i];
@@ -419,10 +428,12 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
     // Heading
     const hm = trimmed.match(/^(#{1,6})\s+(.*)$/);
     if (hm) {
+      // Consistency: only two heading tiers rendered — H1/H2 = section (15pt),
+      // H3+ = subsection (12pt). Uniform spacing.
       const lvl = hm[1].length;
-      const sizes = [0, 18, 15, 13, 12, 11, 11];
-      const size = sizes[lvl] ?? 12;
-      y += lvl <= 2 ? 10 : 6;
+      const size = lvl <= 2 ? 15 : 12;
+      const spaceBefore = lvl <= 2 ? 12 : 6;
+      y += spaceBefore;
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(size);
       pdf.setTextColor(...brand);
@@ -495,7 +506,8 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
     if (rows.length === 0) return;
     const cols = Math.max(...rows.map((r) => r.length));
     const colWidth = contentWidth / cols;
-    const tableFontSize = cols > 8 ? 7.5 : cols > 6 ? 8.5 : 10;
+    // Fixed 3-tier scale — no more per-doc "sometimes 10pt, sometimes 8.5pt".
+    const tableFontSize = cols >= 8 ? 8 : cols >= 6 ? 9 : 10;
     const lineHeight = tableFontSize + 3;
     pdf.setFontSize(tableFontSize);
 
