@@ -53,6 +53,34 @@ function stripMarkdown(md: string): string {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 }
 
+// Turn a possibly filename-like title ("stereoscopic_cameras_for_mining.pdf")
+// into a clean human title ("Stereoscopic Cameras For Mining").
+function humanizeTitle(raw: string): string {
+  let t = (raw ?? "").trim();
+  // strip trailing extension if user passed one
+  t = t.replace(/\.(pdf|docx|xlsx|csv|txt)$/i, "");
+  // replace separators with spaces
+  t = t.replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return "Document";
+  // if it's all lowercase, title-case it
+  if (t === t.toLowerCase()) {
+    t = t
+      .split(" ")
+      .map((w, i) =>
+        i === 0 || w.length > 3 ? w.charAt(0).toUpperCase() + w.slice(1) : w,
+      )
+      .join(" ");
+  }
+  return t;
+}
+
+// True if the markdown body already starts with an H1 — we should let the
+// document's own heading own the title rather than stamping our own on top.
+function markdownStartsWithH1(md: string): boolean {
+  const firstLine = (md ?? "").split(/\r?\n/).find((l) => l.trim().length > 0);
+  return !!firstLine && /^#\s+\S/.test(firstLine.trim());
+}
+
 export async function generateDocument(opts: {
   format: DocFormat;
   title: string;
