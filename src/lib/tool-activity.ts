@@ -52,6 +52,13 @@ export type ToolActivity = {
     snippet?: string;
   }>;
   citations?: Array<{ title?: string; url?: string }>;
+  docFile?: {
+    url: string;
+    filename: string;
+    formatLabel?: string;
+    mimeType?: string;
+    size?: number;
+  };
   error?: string;
 };
 
@@ -140,6 +147,19 @@ export function foldToolEvent(
     } else if (ev.name === "deep_research") {
       const dr = ev.output as { citations?: Array<{ title?: string; url?: string }> } | null;
       base.citations = dr?.citations ?? [];
+    } else if (ev.name === "generate_document") {
+      const doc = ev.output as
+        | { ok?: boolean; url?: string; filename?: string; formatLabel?: string; mimeType?: string; size?: number }
+        | null;
+      if (doc?.url && doc?.filename) {
+        base.docFile = {
+          url: doc.url,
+          filename: doc.filename,
+          formatLabel: doc.formatLabel,
+          mimeType: doc.mimeType,
+          size: doc.size,
+        };
+      }
     }
   }
   const next = prev.slice();
