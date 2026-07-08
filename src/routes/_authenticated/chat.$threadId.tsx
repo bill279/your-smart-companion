@@ -2366,23 +2366,13 @@ function ThreadView({ threadId }: { threadId: string }) {
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-1 pt-1">
               {attachments.map((a) => (
-                <div
+                <ComposerAttachmentPreview
                   key={a.path}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs text-foreground"
-                >
-                  {a.mimeType.startsWith("image/") ? <ImageIcon size={12} /> : <FileText size={12} />}
-                  <span className="max-w-[160px] truncate">{a.name}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAttachments((cur) => cur.filter((x) => x.path !== a.path))
-                    }
-                    className="text-muted-foreground hover:text-destructive ml-1"
-                    aria-label={`Remove ${a.name}`}
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
+                  attachment={a}
+                  onRemove={() =>
+                    setAttachments((cur) => cur.filter((x) => x.path !== a.path))
+                  }
+                />
               ))}
               {uploading && (
                 <span className="text-xs text-muted-foreground self-center">Uploading…</span>
@@ -2563,6 +2553,82 @@ async function getAttachmentSignedUrl(path: string): Promise<string | null> {
 }
 
 function AttachmentPreview({
+  attachment,
+  tone,
+}: {
+  attachment: AttachmentMeta;
+  tone: "user" | "assistant";
+}) {
+  return AttachmentPreviewInner({ attachment, tone });
+}
+
+// Composer chip — clickable thumbnail preview BEFORE sending, so users can
+// verify they've picked the right image/PDF (ChatGPT-style).
+function ComposerAttachmentPreview({
+  attachment,
+  onRemove,
+}: {
+  attachment: AttachmentMeta;
+  onRemove: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getAttachmentSignedUrl(attachment.path).then((u) => {
+      if (alive && u) setUrl(u);
+    });
+    return () => { alive = false; };
+  }, [attachment.path]);
+  const isImage = attachment.mimeType.startsWith("image/");
+  const ext = attachment.name.split(".").pop()?.toUpperCase() || "";
+  const isPdf = attachment.mimeType === "application/pdf" || ext === "PDF";
+  const open = () => { if (url) window.open(url, "_blank", "noopener,noreferrer"); };
+  return (
+    <div className="relative group/chip">
+      {isImage ? (
+        <button
+          type="button"
+          onClick={open}
+          className="block h-14 w-14 rounded-lg overflow-hidden border border-border bg-secondary/60 hover:opacity-90 transition"
+          title={`Preview ${attachment.name}`}
+        >
+          {url ? (
+            <img src={url} alt={attachment.name} className="h-full w-full object-cover" />
+          ) : (
+            <div className="h-full w-full flex items-center justify-center text-muted-foreground">
+              <ImageIcon size={16} />
+            </div>
+          )}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={open}
+          className="flex items-center gap-2 h-14 pl-2 pr-3 rounded-lg border border-border bg-secondary/60 hover:bg-secondary transition max-w-[220px]"
+          title={`Preview ${attachment.name}`}
+        >
+          <div className={`flex items-center justify-center h-9 w-9 rounded-md shrink-0 ${isPdf ? "bg-[#ff5a5f] text-white" : "bg-primary/80 text-primary-foreground"}`}>
+            <FileText size={16} />
+          </div>
+          <div className="min-w-0 text-left">
+            <div className="text-xs font-medium truncate leading-tight">{attachment.name}</div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{isPdf ? "PDF" : ext || "FILE"}</div>
+          </div>
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${attachment.name}`}
+        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-foreground text-background flex items-center justify-center shadow opacity-0 group-hover/chip:opacity-100 transition"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
+function AttachmentPreviewInner({
   attachment,
   tone,
 }: {
@@ -2991,7 +3057,27 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
       } else if (ext === "docx") {
         const buf = await blob.arrayBuffer();
         const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });
-        setPreviewHtml(value || "<p><em>Document is empty.</em></p>");
+        // Match the branded DOCX template so the preview visually mirrors
+        // the downloaded file (title colour, heading colour, spacing, rule).
+        const brand = "#0D4763";
+        const stripped = (value || "").replace(/^\s*<h1[^>]*>[^<]*<\/h1>/i, "");
+        const titleHtml = `<h1 style="font-size:26px;font-weight:700;color:${brand};margin:0 0 4px">${art.filename.replace(/\.[^.]+$/, "")}</h1><div style="height:2px;background:${brand};width:64px;margin:0 0 20px"></div>`;
+        setPreviewHtml(
+          `<style>
+            .docx-preview{font-family:Arial,sans-serif;color:#1f2937;font-size:14px;line-height:1.55}
+            .docx-preview h1,.docx-preview h2,.docx-preview h3{color:${brand};font-weight:700;margin:18px 0 8px}
+            .docx-preview h1{font-size:20px}
+            .docx-preview h2{font-size:16px}
+            .docx-preview h3{font-size:14px}
+            .docx-preview p{margin:0 0 10px}
+            .docx-preview ul,.docx-preview ol{margin:0 0 12px 22px}
+            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+            .docx-preview th{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left}
+            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px}
+            .docx-preview tr:nth-child(even) td{background:#F8FAFC}
+          </style>
+          <div class="docx-preview">${titleHtml}${stripped || "<p><em>Document is empty.</em></p>"}</div>`,
+        );
       } else if (ext === "csv" || ext === "txt" || ext === "md") {
         setPreviewText(await blob.text());
       } else if (ext === "xlsx" || ext === "xls") {
