@@ -124,7 +124,11 @@ export async function generateDocument(opts: {
   const markdown = normalizeDocumentMarkdown(title, opts.markdown);
 
   if (format === "txt") {
-    const bytes = new TextEncoder().encode(stripMarkdown(markdown));
+    // Consistency: always prepend the branded title + rule so plain-text
+    // exports open with context, matching the PDF/DOCX template.
+    const body = stripMarkdown(markdown.replace(/^\s*#\s+.+\n+/, ""));
+    const header = `${title}\n${"=".repeat(Math.min(title.length, 60))}\n\n`;
+    const bytes = new TextEncoder().encode(header + body);
     return { bytes, mimeType: "text/plain", extension: "txt" };
   }
 
