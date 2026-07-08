@@ -242,7 +242,10 @@ export async function generateDocument(opts: {
 // ---------------- PDF rendering ----------------
 
 function renderPdf(title: string, markdown: string): ArrayBuffer {
-  const pdf = new jsPDF({ unit: "pt", format: "letter" });
+  const wideTable = parseMarkdownTables(markdown).some(
+    (table) => Math.max(0, ...table.map((row) => row.length)) > 6,
+  );
+  const pdf = new jsPDF({ unit: "pt", format: "letter", orientation: wideTable ? "landscape" : "portrait" });
   const margin = 56;
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -404,15 +407,17 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
     if (rows.length === 0) return;
     const cols = Math.max(...rows.map((r) => r.length));
     const colWidth = contentWidth / cols;
-    pdf.setFontSize(10);
+    const tableFontSize = cols > 8 ? 7.5 : cols > 6 ? 8.5 : 10;
+    const lineHeight = tableFontSize + 3;
+    pdf.setFontSize(tableFontSize);
 
     const rowHeights = rows.map((row, idx) => {
       pdf.setFont("helvetica", idx === 0 ? "bold" : "normal");
       let max = 0;
       for (let c = 0; c < cols; c++) {
         const cell = stripInline(row[c] ?? "");
-        const wrapped = pdf.splitTextToSize(cell, colWidth - 12) as string[];
-        max = Math.max(max, wrapped.length * 13 + 10);
+        const wrapped = pdf.splitTextToSize(cell, colWidth - 10) as string[];
+        max = Math.max(max, wrapped.length * lineHeight + 10);
       }
       return max;
     });
@@ -442,15 +447,16 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
 
       // text
       pdf.setFont("helvetica", r === 0 ? "bold" : "normal");
+      pdf.setFontSize(tableFontSize);
       pdf.setTextColor(r === 0 ? brand[0] : 30, r === 0 ? brand[1] : 30, r === 0 ? brand[2] : 30);
       for (let c = 0; c < cols; c++) {
         const cell = stripInline(rows[r][c] ?? "");
-        const wrapped = pdf.splitTextToSize(cell, colWidth - 12) as string[];
+        const wrapped = pdf.splitTextToSize(cell, colWidth - 10) as string[];
         const x = margin + colWidth * c + 6;
-        let ty = y + 12;
+        let ty = y + tableFontSize + 3;
         for (const l of wrapped) {
           pdf.text(l, x, ty);
-          ty += 13;
+          ty += lineHeight;
         }
       }
       y += h;

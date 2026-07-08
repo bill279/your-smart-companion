@@ -221,6 +221,100 @@ function cleanAssistantText(text: string) {
     .trim();
 }
 
+type ChatHistoryRow = { role: string; content: string };
+
+const DOCUMENT_FORMAT_RE = /\b(pdf|docx|word\s*doc|word|xlsx|excel|csv|spreadsheet)\b/i;
+const EXISTING_CONTENT_DOC_RE = /\b(convert|turn|make|generate|create|export|save)\b[\s\S]{0,80}\b(this|that|it|all|everything|above|previous|last|table|list|answer|response|reply|chat)\b/i;
+const DOCUMENT_META_RE = /(here(?:'|’)s the\s+(?:pdf|word|document)|preview or download|attached to this chat|downloadable preview card|draft email — please review|reply\s+["“]send["”]|attachment failed|could not fetch attachment|generated the word document|generated the pdf)/i;
+
+function requestedFormat(text: string): "pdf" | "docx" | "xlsx" | "csv" | null {
+  if (/\b(pdf)\b/i.test(text)) return "pdf";
+  if (/\b(docx|word\s*doc|word)\b/i.test(text)) return "docx";
+  if (/\b(xlsx|excel|spreadsheet)\b/i.test(text)) return "xlsx";
+  if (/\b(csv)\b/i.test(text)) return "csv";
+  return null;
+}
+
+function stripPersistedMarkers(content: string) {
+  return cleanAssistantText(content)
+    .replace(/<!--tool-activity:[A-Za-z0-9+/=]+-->\s*/g, "")
+    .replace(/\[\[artifact:[a-z0-9_]+\]\]/gi, "")
+    .trim();
+}
+
+function isSubstantiveAssistantContent(content: string) {
+  const clean = stripPersistedMarkers(content);
+  if (clean.length < 80) return false;
+  if (DOCUMENT_META_RE.test(clean)) return false;
+  return true;
+}
+
+function titleFromSource(source: string, fallback: string) {
+  const h1 = source.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  if (h1) return h1.slice(0, 120);
+  if (/\|\s*[-:]{2,}/.test(source)) return "Comparison Table";
+  const firstLine = source
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^#{1,6}\s+/, "").trim())
+    .find((l) => l.length > 12);
+  return (firstLine ? firstLine.slice(0, 80) : fallback).replace(/[.!?:;,]+$/g, "");
+}
+
+function cleanFilenameBase(raw: string) {
+  return (raw || "Document")
+    .replace(/\.(pdf|docx|xlsx|csv)$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-zA-Z0-9 .-]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "Document";
+}
+
+function formatLabelFor(extension: string) {
+  return extension === "pdf"
+    ? "PDF"
+    : extension === "docx"
+      ? "Word"
+      : extension === "xlsx"
+        ? "Excel"
+        : extension === "csv"
+          ? "CSV"
+          : extension.toUpperCase();
+}
+
+function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow[]) {
+  const format = requestedFormat(userText);
+  if (!format || !DOCUMENT_FORMAT_RE.test(userText) || !EXISTING_CONTENT_DOC_RE.test(userText)) return null;
+
+  const priorAssistant = rows
+    .slice(0, -1)
+    .filter((r) => r.role === "assistant" && isSubstantiveAssistantContent(r.content))
+    .map((r) => stripPersistedMarkers(r.content));
+  if (priorAssistant.length === 0) return null;
+
+  const wantsAll = /\b(all|everything|entire|whole|chat)\b/i.test(userText);
+  const wantsTable = /\btable\b/i.test(userText);
+  const tableSource = wantsTable ? [...priorAssistant].reverse().find((c) => /\|\s*[-:]{2,}/.test(c)) : undefined;
+  const source = wantsAll
+    ? priorAssistant.slice(-8).join("\n\n---\n\n")
+    : tableSource ?? priorAssistant[priorAssistant.length - 1];
+  const title = titleFromSource(source, format === "pdf" ? "Chat Export" : "Generated Document");
+  const markdown = /^\s*#\s+\S/m.test(source) ? source : `# ${title}\n\n${source}`;
+  return { format, title, filename: cleanFilenameBase(title), markdown };
+}
+
+function storagePathFromSignedUrl(url: string) {
+  try {
+    const u = new URL(url);
+    const marker = "/object/sign/chat-uploads/";
+    const idx = u.pathname.indexOf(marker);
+    if (idx === -1) return null;
+    return decodeURIComponent(u.pathname.slice(idx + marker.length));
+  } catch {
+    return null;
+  }
+}
+
 export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
@@ -429,6 +523,65 @@ export const Route = createFileRoute("/api/chat")({
           const last = rows[rows.length - 1];
           if (!last || last.role !== "user" || last.content.trim() !== userText) {
             rows = [...rows, { role: "user", content: userText }];
+          }
+        }
+        const directDoc = getDirectExistingDocumentRequest(userText, rows);
+        if (directDoc) {
+          try {
+            const { generateDocument } = await import("@/lib/document-generator.server");
+            const { bytes, mimeType, extension } = await generateDocument({
+              format: directDoc.format,
+              title: directDoc.title,
+              markdown: directDoc.markdown,
+            });
+            const safeName = directDoc.filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "Document";
+            const path = `generated/${userId}/${Date.now().toString(36)}/${safeName}.${extension}`;
+            const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+            const up = await supabaseAdmin.storage
+              .from("chat-uploads")
+              .upload(path, bytes, { contentType: mimeType, upsert: false });
+            if (up.error) throw new Error(up.error.message);
+            const signed = await supabaseAdmin.storage
+              .from("chat-uploads")
+              .createSignedUrl(path, 60 * 60 * 24 * 7);
+            if (signed.error) throw new Error(signed.error.message);
+
+            const filename = `${safeName}.${extension}`;
+            const formatLabel = formatLabelFor(extension);
+            const activity: ToolActivity[] = [
+              {
+                id: `direct_${Date.now().toString(36)}`,
+                name: "generate_document",
+                label: directDoc.title,
+                docFile: { url: signed.data.signedUrl, filename, formatLabel, mimeType, size: bytes.byteLength },
+              },
+            ];
+            const responseText = `Here's the ${formatLabel} — preview or download it above.`;
+            const content = `${encodeToolActivityMarker(activity)}${responseText}`;
+            await supabase.from("messages").insert({
+              thread_id: body.threadId!,
+              user_id: userId,
+              role: "assistant",
+              content,
+            });
+            await supabase.from("threads").update({ updated_at: new Date().toISOString() }).eq("id", body.threadId!);
+            await logAction("generate_document", `Generated ${extension.toUpperCase()} "${safeName}"`, {
+              format: directDoc.format,
+              filename,
+              path: "direct-existing-content",
+            });
+            return new Response(responseText, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "document generation failed";
+            await logAction("generate_document", `Failed to generate ${directDoc.format.toUpperCase()} from existing chat content`, { error: msg }, "error");
+            const content = `I couldn't generate the ${directDoc.format.toUpperCase()} because: ${msg}`;
+            await supabase.from("messages").insert({
+              thread_id: body.threadId!,
+              user_id: userId,
+              role: "assistant",
+              content,
+            });
+            return new Response(content, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
           }
         }
         const factRows = factsRes.data;
@@ -757,9 +910,19 @@ export const Route = createFileRoute("/api/chat")({
                 if (attach_file_url) {
                   try {
                     const r = await fetch(attach_file_url);
-                    if (!r.ok) return { error: `Could not fetch attachment (${r.status})` };
-                    const mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
-                    const buf = new Uint8Array(await r.arrayBuffer());
+                    let mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
+                    let buf: Uint8Array | null = null;
+                    if (r.ok) {
+                      buf = new Uint8Array(await r.arrayBuffer());
+                    } else {
+                      const storagePath = storagePathFromSignedUrl(attach_file_url);
+                      if (!storagePath) return { error: `Could not fetch attachment (${r.status})` };
+                      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+                      const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
+                      if (dl.error || !dl.data) return { error: `Could not fetch attachment (${r.status})` };
+                      mimeType = dl.data.type || mimeType;
+                      buf = new Uint8Array(await dl.data.arrayBuffer());
+                    }
                     if (buf.byteLength > 15 * 1024 * 1024) return { error: "Attachment too large (max 15MB)" };
                     let bin = "";
                     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
