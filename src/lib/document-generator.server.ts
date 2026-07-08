@@ -279,20 +279,23 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
   };
 
   // ---- Title block ----
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(22);
-  pdf.setTextColor(...brand);
-  const titleLines = pdf.splitTextToSize(title, contentWidth) as string[];
-  for (const l of titleLines) {
-    ensure(28);
-    pdf.text(l, margin, y + 18);
-    y += 26;
+  const skipAutoTitle = markdownStartsWithH1(markdown);
+  if (!skipAutoTitle) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(22);
+    pdf.setTextColor(...brand);
+    const titleLines = pdf.splitTextToSize(humanizeTitle(title), contentWidth) as string[];
+    for (const l of titleLines) {
+      ensure(28);
+      pdf.text(l, margin, y + 18);
+      y += 26;
+    }
+    pdf.setDrawColor(...brand);
+    pdf.setLineWidth(1.5);
+    pdf.line(margin, y + 2, margin + 60, y + 2);
+    y += 18;
+    pdf.setTextColor(0, 0, 0);
   }
-  pdf.setDrawColor(...brand);
-  pdf.setLineWidth(1.5);
-  pdf.line(margin, y + 2, margin + 60, y + 2);
-  y += 18;
-  pdf.setTextColor(0, 0, 0);
 
   // ---- Walk markdown ----
   const lines = markdown.split(/\r?\n/);
