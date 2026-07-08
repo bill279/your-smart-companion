@@ -874,7 +874,23 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (inflight && inflight.query === latestUserMessage) {
           return await inflight.promise;
         }
-        return await startDeepAnswer(latestUserMessage);
+        // Dedupe: if this exact query was JUST completed (e.g. the model
+        // heard "I don't see it" and is retrying), don't run the whole
+        // pipeline again — the answer is already in chat.
+        if (lastDeepAnswerQueryRef.current === latestUserMessage) {
+          return {
+            ok: true,
+            note: "The researched answer for this exact question is already in the chat from a moment ago — do NOT run again. Just point the user to it in one short sentence.",
+          };
+        }
+        const abort = new AbortController();
+        const promise = startDeepAnswer(latestUserMessage, abort.signal);
+        deepAnswerInFlightRef.current = { query: latestUserMessage, promise, abort };
+        const result = await promise;
+        if (deepAnswerInFlightRef.current?.query === latestUserMessage) {
+          deepAnswerInFlightRef.current = null;
+        }
+        return result;
       },
       show_in_chat: async (params) => {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
