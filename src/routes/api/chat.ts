@@ -1094,12 +1094,22 @@ export const Route = createFileRoute("/api/chat")({
             }),
             send_email: tool({
               description:
-                "Send an email from the user's connected Outlook account. Use when the user asks to email someone, send a message, or email themselves. To attach a file you just generated with generate_document, pass its returned `url` as `attach_file_url` (and its `filename` as `attach_file_name`) — do NOT paste the raw URL into the body.",
+                "Send an email from the user's connected Outlook account. Use when the user asks to email someone, send a message, or email themselves. To attach generated files, pass `attachments` with every generated document. For one file, legacy `attach_file_url` and `attach_file_name` also work. If the user asked for PDF and Word, attach both files in one email — do NOT send two emails and do NOT paste raw URLs into the body.",
               inputSchema: z.object({
                 to: z.string().email().describe("Recipient email address"),
                 subject: z.string().min(1).max(200),
                 body: z.string().min(1).max(20000),
                 cc: z.string().email().optional(),
+                attachments: z
+                  .array(
+                    z.object({
+                      url: z.string().url(),
+                      filename: z.string().min(1).max(160),
+                    }),
+                  )
+                  .max(10)
+                  .optional()
+                  .describe("All generated files to attach. Use this for multiple files like PDF + Word."),
                 attach_file_url: z
                   .string()
                   .url()
@@ -1112,34 +1122,42 @@ export const Route = createFileRoute("/api/chat")({
                   .optional()
                   .describe("Filename to use for the attachment (e.g. 'Report.docx'). Required when attach_file_url is set."),
               }),
-              execute: async ({ to, subject, body: emailBody, cc, attach_file_url, attach_file_name }) => {
+              execute: async ({ to, subject, body: emailBody, cc, attachments, attach_file_url, attach_file_name }) => {
                 if (looksLikeCalendarInviteText(`${subject}\n${emailBody}\n${attach_file_name ?? ""}`)) {
                   return {
                     error:
                       "This looks like a calendar/Teams invite. Use create_calendar_event so Outlook sends a real invite with accept/decline and a Teams link.",
                   };
                 }
-                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const { marked } = await import("marked");
-                // Optionally fetch the file bytes for attachment.
-                let attachment: { filename: string; mimeType: string; base64: string } | null = null;
-                let effectiveAttachUrl = attach_file_url;
-                let effectiveAttachName = attach_file_name;
+                type PendingAttachment = { url: string; filename: string };
+                type EmailAttachment = { filename: string; mimeType: string; base64: string; size: number };
+                const pendingAttachments: PendingAttachment[] = [...(attachments ?? [])];
+                if (attach_file_url) {
+                  pendingAttachments.push({ url: attach_file_url, filename: attach_file_name || "attachment" });
+                }
                 const mustAttach = emailNeedsGeneratedAttachment(userText, subject, emailBody);
-                if (!effectiveAttachUrl && mustAttach) {
-                  const doc = latestGeneratedDocFromHistory(rows, requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`));
-                  if (!doc) {
+                if (pendingAttachments.length === 0 && mustAttach) {
+                  const requested = requestedFormats(`${subject}\n${emailBody}\n${userText}`);
+                  const docs = latestGeneratedDocsFromHistory(rows, requested.length ? requested : [requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`) ?? "pdf"]);
+                  if (docs.length === 0) {
                     return {
                       error:
                         "No generated document was found to attach. Generate the PDF/Word document first, then send the email.",
                     };
                   }
-                  effectiveAttachUrl = doc.url;
-                  effectiveAttachName = doc.filename;
+                  if (requested.length > 0 && docs.length < requested.length) {
+                    return {
+                      error: `I found ${docs.length} generated attachment(s), but the email asks for ${requested.length}. Generate the missing file format before sending.`,
+                    };
+                  }
+                  pendingAttachments.push(...docs.map((doc) => ({ url: doc.url, filename: doc.filename })));
                 }
-                if (effectiveAttachUrl) {
+
+                const emailAttachments: EmailAttachment[] = [];
+                for (const file of pendingAttachments) {
                   try {
-                    let r = await fetch(effectiveAttachUrl);
+                    const r = await fetch(file.url);
                     let mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
                     let buf: Uint8Array | null = null;
                     // HTML/JSON coming back from Supabase means the signed URL
@@ -1150,7 +1168,7 @@ export const Route = createFileRoute("/api/chat")({
                     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
                     if (!buf) {
                       // 1) Try to recover by re-signing the same storage path.
-                      const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
+                      const storagePath = storagePathFromSignedUrl(file.url);
                       if (storagePath) {
                         const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
                         if (!dl.error && dl.data) {
@@ -1162,9 +1180,13 @@ export const Route = createFileRoute("/api/chat")({
                     if (!buf) {
                       // 2) Last resort: look up the most recent generated doc
                       // of the requested format in this thread and use it.
+                      const fileExt = file.filename.toLowerCase().split(".").pop();
+                      const preferred = fileExt === "pdf" || fileExt === "docx" || fileExt === "xlsx" || fileExt === "csv"
+                        ? fileExt
+                        : requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`);
                       const fallbackDoc = latestGeneratedDocFromHistory(
                         rows,
-                        requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`),
+                        preferred,
                       );
                       if (fallbackDoc?.url) {
                         const fallbackPath = storagePathFromSignedUrl(fallbackDoc.url);
@@ -1173,7 +1195,7 @@ export const Route = createFileRoute("/api/chat")({
                           if (!dl.error && dl.data) {
                             mimeType = dl.data.type || mimeType;
                             buf = new Uint8Array(await dl.data.arrayBuffer());
-                            effectiveAttachName = effectiveAttachName || fallbackDoc.filename;
+                            file.filename = file.filename || fallbackDoc.filename;
                           }
                         }
                       }
@@ -1182,15 +1204,18 @@ export const Route = createFileRoute("/api/chat")({
                     if (buf.byteLength > 15 * 1024 * 1024) return { error: "Attachment too large (max 15MB)" };
                     let bin = "";
                     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-                    attachment = {
-                      filename: (effectiveAttachName || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
+                    emailAttachments.push({
+                      filename: (file.filename || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
                       mimeType,
                       base64: Buffer.from(bin, "binary").toString("base64"),
-                    };
+                      size: buf.byteLength,
+                    });
                   } catch (e) {
                     return { error: `Attachment fetch failed: ${e instanceof Error ? e.message : String(e)}` };
                   }
                 }
+                const totalAttachmentBytes = emailAttachments.reduce((sum, a) => sum + a.size, 0);
+                if (totalAttachmentBytes > 15 * 1024 * 1024) return { error: "Combined attachments too large (max 15MB)" };
                 const renderHtml = (md: string) => {
                   const inner = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
                   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -1219,16 +1244,14 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                            ...(cc
                              ? { ccRecipients: [{ emailAddress: { address: cc } }] }
                              : {}),
-                            ...(attachment
+                             ...(emailAttachments.length > 0
                               ? {
-                                  attachments: [
-                                    {
+                                   attachments: emailAttachments.map((attachment) => ({
                                       "@odata.type": "#microsoft.graph.fileAttachment",
                                       name: attachment.filename,
                                       contentType: attachment.mimeType,
                                       contentBytes: attachment.base64,
-                                    },
-                                  ],
+                                     })),
                                 }
                               : {}),
                          },
@@ -1241,8 +1264,8 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                      await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
                      return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
                    }
-                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attached: attachment?.filename ?? null });
-                   return { ok: true, provider: "outlook", to, subject, attached: attachment?.filename ?? null };
+                    await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attached: emailAttachments.map((a) => a.filename) });
+                    return { ok: true, provider: "outlook", to, subject, attached: emailAttachments.map((a) => a.filename) };
                  }
               },
             }),
