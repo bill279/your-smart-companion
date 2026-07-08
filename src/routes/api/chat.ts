@@ -1200,7 +1200,33 @@ export const Route = createFileRoute("/api/chat")({
                 const mustAttach = emailNeedsGeneratedAttachment(userText, subject, emailBody);
                 if (pendingAttachments.length === 0 && mustAttach) {
                   const requested = requestedFormats(`${subject}\n${emailBody}\n${userText}`);
-                  const docs = latestGeneratedDocsFromHistory(rows, requested.length ? requested : [requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`) ?? "pdf"], collectedActivity);
+                  // Guard against attaching the WRONG previously-generated file
+                  // when the user references a specific one ("email me the
+                  // cameras PDF"). If more than one generated doc of the same
+                  // format exists in history and none was generated this turn,
+                  // force the model to pick explicitly instead of grabbing the
+                  // most recent one.
+                  const wantedFormats: GeneratedDocFormat[] =
+                    requested.length > 0
+                      ? requested
+                      : [requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`) ?? "pdf"];
+                  const sameTurnDocs = collectedActivity
+                    .map((a) => a.docFile)
+                    .filter((d): d is NonNullable<ToolActivity["docFile"]> => !!d?.url && !!d?.filename);
+                  if (sameTurnDocs.length === 0) {
+                    const ledger = listAllGeneratedDocs(rows);
+                    const ambiguous = wantedFormats.some(
+                      (fmt) => ledger.filter((d) => d.format === fmt).length > 1,
+                    );
+                    if (ambiguous) {
+                      return {
+                        error:
+                          "Multiple previously-generated documents match this format. Pass the exact url + filename you want in the `attachments` array — see the 'Generated documents in this thread' ledger in your system prompt and match by topic/label. Do NOT regenerate; pick the right existing file.",
+                        available: ledger,
+                      };
+                    }
+                  }
+                  const docs = latestGeneratedDocsFromHistory(rows, wantedFormats, collectedActivity);
                   if (docs.length === 0) {
                     return {
                       error:
