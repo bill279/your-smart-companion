@@ -59,6 +59,8 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const assistantAccumRef = useRef<Map<string, string>>(new Map());
   const activeResponseRef = useRef(false);
+  const assistantAudibleRef = useRef(false);
+  const localSpeechActiveRef = useRef(false);
   const responseCreatePendingRef = useRef(false);
   const responseCreateInFlightRef = useRef(false);
   const responseInstructionsPendingRef = useRef<string | undefined>(undefined);
@@ -96,6 +98,8 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     }
     assistantAccumRef.current.clear();
     activeResponseRef.current = false;
+    assistantAudibleRef.current = false;
+    localSpeechActiveRef.current = false;
     responseCreatePendingRef.current = false;
     responseCreateInFlightRef.current = false;
     responseInstructionsPendingRef.current = undefined;
@@ -129,12 +133,21 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       try { el.pause(); } catch (err) { console.warn(err); }
       try { el.volume = 0; } catch (err) { console.warn(err); }
     }
-    if (activeResponseRef.current) {
-      sendEvent({ type: "response.cancel" });
-    }
+    sendEvent({ type: "response.cancel" });
     sendEvent({ type: "output_audio_buffer.clear" });
     setIsSpeaking(false);
   }, [sendEvent]);
+
+  const markLocalSpeechStarted = useCallback(() => {
+    if (localSpeechActiveRef.current) return;
+    localSpeechActiveRef.current = true;
+    // Do not wait for the remote VAD/transcription round-trip. As soon as the
+    // user's mic has speech-level energy while the assistant is audible, cut
+    // playback locally and tell the realtime session the user is speaking.
+    if (assistantAudibleRef.current || activeResponseRef.current) {
+      bargeInNow();
+    }
+  }, [bargeInNow]);
 
   const releaseBargeIn = useCallback(() => {
     const el = audioElRef.current;
@@ -199,6 +212,17 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         return;
       }
 
+      if (
+        type === "conversation.item.input_audio_transcription.delta" ||
+        type === "conversation.item.input_audio_transcription.updated"
+      ) {
+        const text = String((msg.delta ?? msg.transcript ?? "")).trim();
+        if (text) {
+          opts.onMessage?.({ source: "user", message: text, event_id: String(msg.item_id ?? "") });
+        }
+        return;
+      }
+
       // User speech transcription complete.
       if (
         type === "conversation.item.input_audio_transcription.completed" ||
@@ -221,6 +245,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         const cur = assistantAccumRef.current.get(responseId) ?? "";
         const kind: "start" | "delta" = cur === "" ? "start" : "delta";
         assistantAccumRef.current.set(responseId, cur + delta);
+        assistantAudibleRef.current = true;
         setIsSpeaking(true);
         opts.onAssistantDelta?.({ text: delta, kind, event_id: responseId });
         return;
@@ -240,6 +265,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       }
 
       if (type === "output_audio_buffer.started" || type === "response.output_audio.delta") {
+        assistantAudibleRef.current = true;
         setIsSpeaking(true);
         return;
       }
@@ -252,12 +278,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       //   2. Ask the server to cancel the in-flight response.
       //   3. Clear any audio still queued in the server's output buffer.
       if (type === "input_audio_buffer.speech_started") {
+        localSpeechActiveRef.current = true;
         bargeInNow();
         return;
       }
       // User's speech ended — re-enable the audio element so the next
       // assistant response is audible again.
       if (type === "input_audio_buffer.speech_stopped") {
+        localSpeechActiveRef.current = false;
         releaseBargeIn();
         return;
       }
@@ -267,6 +295,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         type === "response.output_audio.done" ||
         type === "response.done"
       ) {
+        assistantAudibleRef.current = false;
         setIsSpeaking(false);
         if (type === "response.done") {
           activeResponseRef.current = false;
@@ -346,7 +375,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         return;
       }
     },
-    [requestResponseCreate, sendEvent],
+    [bargeInNow, releaseBargeIn, requestResponseCreate, sendEvent],
   );
 
   const startSession = useCallback(
@@ -368,7 +397,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           if (audioEl && e.streams[0]) audioEl.srcObject = e.streams[0];
         };
 
-        const stream = opts.microphoneStream ?? await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = opts.microphoneStream ?? await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
         localStreamRef.current = stream;
         stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
@@ -383,11 +419,11 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           const ctx = new AudioCtx();
           const source = ctx.createMediaStreamSource(stream);
           const analyser = ctx.createAnalyser();
-          analyser.fftSize = 512;
-          analyser.smoothingTimeConstant = 0.2;
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0;
           source.connect(analyser);
           const buf = new Uint8Array(analyser.fftSize);
-          let aboveCount = 0;
+          let quietCount = 0;
           const tick = () => {
             if (!micMonitorRef.current) return;
             analyser.getByteTimeDomainData(buf);
@@ -398,14 +434,17 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               sum += v * v;
             }
             const rms = Math.sqrt(sum / buf.length);
-            // Only interrupt when the assistant is actively speaking.
-            if (rms > 0.04) {
-              aboveCount++;
-              if (aboveCount >= 2 && activeResponseRef.current) {
-                bargeInNow();
+            // Immediate barge-in: a single speech-level mic frame is enough.
+            // Keep the threshold low because browser echo cancellation and
+            // laptop mics often suppress the start of a user's interruption.
+            if (rms > 0.018) {
+              quietCount = 0;
+              if (assistantAudibleRef.current || activeResponseRef.current) {
+                markLocalSpeechStarted();
               }
             } else {
-              aboveCount = 0;
+              quietCount++;
+              if (quietCount > 12) localSpeechActiveRef.current = false;
             }
             micMonitorRef.current.raf = requestAnimationFrame(tick);
           };
@@ -427,7 +466,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               instructions: opts.instructions ?? "",
               audio: {
                 input: {
-                  transcription: { model: "whisper-1" },
+                  transcription: { model: "gpt-4o-transcribe" },
               turn_detection: {
                 type: "server_vad",
                 // Tuned for fastest barge-in: low threshold + minimal
@@ -435,9 +474,9 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
                 // A local WebAudio RMS monitor also fires bargeInNow() so
                 // the assistant is muted before this server event even
                 // round-trips back over the data channel.
-                threshold: 0.25,
-                prefix_padding_ms: 100,
-                silence_duration_ms: 150,
+                threshold: 0.15,
+                prefix_padding_ms: 50,
+                silence_duration_ms: 120,
                 create_response: false,
                 interrupt_response: true,
               },
