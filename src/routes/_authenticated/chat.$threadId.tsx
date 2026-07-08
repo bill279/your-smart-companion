@@ -110,7 +110,8 @@ Clean Markdown. ## headings for multi-part answers. Short paragraphs (2–4 line
   - TIMEZONE IS MANDATORY. Every meeting draft must explicitly state the timezone (e.g. "2:00 PM Mountain Time"). If unknown, ASK before drafting. Once told, silently remember_fact it so you don't ask again.
   - CALENDAR MANAGEMENT: for "what meetings do I have", availability, cancelling, accepting, tentatively accepting, or declining, use the calendar tools. If cancel/respond is ambiguous, list events first and confirm which one.
   - If create_calendar_event fails, report the specific error — do NOT fall back to send_email with a fake invite.
-- generate_document — real PDF / DOCX / XLSX / CSV files. Use whenever the user asks to create, generate, export, download, save, or convert to a file. Default to PDF. The tool shows the file as a preview card in the chat — it does NOT auto-download. Say "I've put the document in the chat — you can preview it, download it, or ask me to email it." Never say "downloading now", never say you cannot generate a file, never tell the user to copy into Word or Google Docs. Choose a short sensible filename. Does NOT apply to calendar/meeting invites.
+- generate_document — real PDF / DOCX / XLSX / CSV files. Use whenever the user asks to create, generate, export, download, save, or convert to a file (including "convert this to PDF/Word/Excel", "make it a Word doc", "save as PDF"). Default to PDF. CRITICAL: when the user asks to convert the previous chat content to a document, CALL generate_document — do NOT re-post the same markdown into the chat and claim a file was created. The tool shows the file as a preview card. Say "I've put the document in the chat — you can preview it, download it, or ask me to email it." Never say "downloading now", never say you cannot generate a file, never tell the user to copy into Word or Google Docs, never claim a PDF/document is in the chat unless generate_document actually returned successfully. Choose a short sensible filename.
+- HONESTY RULE (critical): NEVER claim you've put something in the chat, sent an email, created a document, or booked a meeting unless the corresponding tool has actually returned successfully in this turn. No pre-announcements. No "I've put it in the chat" before the tool completes. If a tool errors, say so plainly and try again or ask for guidance — do not paper over the failure with a confident summary.
 - recall_facts (call once at conversation start when personal context might help) / remember_fact (silently save stable facts like name, role, company, boss, CRM, timezone, sign-off, preferences — don't announce) / forget_fact (when the user says forget/correct) / save_lesson (silently record corrections/preferences to apply forever).
 
 # 6. Autonomy & no-repetition
@@ -669,7 +670,14 @@ function ThreadView({ threadId }: { threadId: string }) {
   const deepAnswerInFlightRef = useRef<{
     query: string;
     promise: Promise<{ ok?: boolean; error?: string; note?: string }>;
+    abort: AbortController;
   } | null>(null);
+  // Query text of the most recently COMPLETED deep_answer run. If the model
+  // calls deep_answer again with the same query (common: user says "I don't
+  // see it" and the model retries), we short-circuit instead of re-running
+  // the whole /api/chat pipeline and posting a duplicate answer.
+  const lastDeepAnswerQueryRef = useRef<string>("");
+  const lastVoiceUserAtRef = useRef<number>(0);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -702,13 +710,16 @@ function ThreadView({ threadId }: { threadId: string }) {
   // progress rather than silence. Returns a serialisable result for the
   // realtime tool call.
   const startDeepAnswer = useCallback(
-    async (query: string): Promise<{ ok?: boolean; error?: string; note?: string }> => {
+    async (
+      query: string,
+      signal?: AbortSignal,
+    ): Promise<{ ok?: boolean; error?: string; note?: string }> => {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) return { error: "not signed in" };
       try {
         setPendingActivity([]);
-        setPendingAssistant("Researching…");
+        setPendingAssistant("🔍 Researching your question — pulling live sources and building the full answer. This usually takes 15–30 seconds…");
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: {
@@ -716,6 +727,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ threadId, content: query, skipUserInsert: true }),
+          signal,
         });
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
@@ -732,6 +744,12 @@ function ThreadView({ threadId }: { threadId: string }) {
           let activity: ToolActivity[] = [];
           // eslint-disable-next-line no-constant-condition
           while (true) {
+            if (signal?.aborted) {
+              try { await reader.cancel(); } catch { /* noop */ }
+              setPendingAssistant("");
+              setPendingActivity([]);
+              return { error: "cancelled by newer user turn" };
+            }
             const { value, done } = await reader.read();
             if (done) break;
             buf += decoder.decode(value, { stream: true });
@@ -764,6 +782,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         await qc.invalidateQueries({ queryKey: ["threads"] });
         setPendingAssistant("");
         setPendingActivity([]);
+        lastDeepAnswerQueryRef.current = query;
         return {
           ok: true,
           note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
@@ -771,6 +790,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       } catch (err) {
         setPendingAssistant("");
         setPendingActivity([]);
+        if (err instanceof Error && err.name === "AbortError") {
+          return { error: "cancelled by newer user turn" };
+        }
         const msg = err instanceof Error ? err.message : "deep answer failed";
         return { error: msg };
       }
@@ -853,7 +875,23 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (inflight && inflight.query === latestUserMessage) {
           return await inflight.promise;
         }
-        return await startDeepAnswer(latestUserMessage);
+        // Dedupe: if this exact query was JUST completed (e.g. the model
+        // heard "I don't see it" and is retrying), don't run the whole
+        // pipeline again — the answer is already in chat.
+        if (lastDeepAnswerQueryRef.current === latestUserMessage) {
+          return {
+            ok: true,
+            note: "The researched answer for this exact question is already in the chat from a moment ago — do NOT run again. Just point the user to it in one short sentence.",
+          };
+        }
+        const abort = new AbortController();
+        const promise = startDeepAnswer(latestUserMessage, abort.signal);
+        deepAnswerInFlightRef.current = { query: latestUserMessage, promise, abort };
+        const result = await promise;
+        if (deepAnswerInFlightRef.current?.query === latestUserMessage) {
+          deepAnswerInFlightRef.current = null;
+        }
+        return result;
       },
       show_in_chat: async (params) => {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
@@ -1230,6 +1268,26 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           lastUserSpeechAtRef.current = Date.now();
+          // STT ghost filter: bare single-word farewells/greetings
+          // ("Bye.", "Hi.", "OK.", "Thanks.") that arrive within 3s of
+          // another user turn are almost always STT hallucinations from
+          // non-speech audio. Drop them so the model doesn't reply
+          // "Bye — reach out anytime" in the middle of a real question.
+          const now = Date.now();
+          const trimmed = text.trim();
+          const isBareFiller = /^(bye|hi|hey|ok|okay|thanks|thank you|yes|no|uh|um|mm|hm+)[.!?]?$/i.test(trimmed);
+          const veryClose = now - lastVoiceUserAtRef.current < 3000;
+          if (isBareFiller && veryClose) {
+            return;
+          }
+          lastVoiceUserAtRef.current = now;
+          // Any new user turn cancels an in-flight prefetch — the user
+          // changed topics, so posting the stale answer would be worse
+          // than nothing.
+          if (deepAnswerInFlightRef.current) {
+            try { deepAnswerInFlightRef.current.abort.abort(); } catch { /* noop */ }
+            deepAnswerInFlightRef.current = null;
+          }
           lastVoiceUserTextRef.current = text;
           // Reset 90s idle auto-stop on every user utterance.
           if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
@@ -1249,20 +1307,18 @@ function ThreadView({ threadId }: { threadId: string }) {
           // question, start the full deep-answer pipeline NOW in parallel
           // with the realtime model's tool-calling decision. When the model
           // then calls deep_answer, it awaits this same promise instead of
-          // firing a second request — eliminating the 10–20s of dead air
-          // between "I put the full breakdown in chat" and the chat actually
-          // getting the breakdown.
+          // firing a second request.
           if (looksLikeResearchQuery(text) && !deepAnswerInFlightRef.current) {
-            const promise = startDeepAnswer(text).finally(() => {
-              // Keep the resolved result around briefly so a late
-              // deep_answer tool call can still reuse it, then clear.
+            const abort = new AbortController();
+            const promise = startDeepAnswer(text, abort.signal);
+            deepAnswerInFlightRef.current = { query: text, promise, abort };
+            promise.finally(() => {
               window.setTimeout(() => {
                 if (deepAnswerInFlightRef.current?.query === text) {
                   deepAnswerInFlightRef.current = null;
                 }
               }, 2000);
             });
-            deepAnswerInFlightRef.current = { query: text, promise: promise as Promise<{ ok?: boolean; error?: string; note?: string }> };
           }
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
