@@ -1,8 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, DollarSign } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { getUsageSummary } from "@/lib/usage.functions";
+import { getSpendStatus, setSpendCap } from "@/lib/spend-cap.functions";
 
 export const Route = createFileRoute("/_authenticated/usage")({
   ssr: false,
@@ -18,7 +21,21 @@ function fmt(n: number): string {
 
 function UsagePage() {
   const load = useServerFn(getUsageSummary);
+  const loadCap = useServerFn(getSpendStatus);
+  const saveCap = useServerFn(setSpendCap);
+  const qc = useQueryClient();
   const q = useQuery({ queryKey: ["usage-summary"], queryFn: () => load({}) });
+  const capQ = useQuery({ queryKey: ["spend-cap"], queryFn: () => loadCap({}) });
+  const [capInput, setCapInput] = useState<string>("");
+  const capMut = useMutation({
+    mutationFn: (capUsd: number) => saveCap({ data: { capUsd } }),
+    onSuccess: () => {
+      toast.success("Monthly cap updated");
+      qc.invalidateQueries({ queryKey: ["spend-cap"] });
+      setCapInput("");
+    },
+    onError: (e: Error) => toast.error(e.message || "Failed to update cap"),
+  });
 
   const data = q.data;
   const maxDay = Math.max(0.0001, ...(data?.byDay.map((d) => d.costUsd) ?? [0]));
@@ -34,6 +51,52 @@ function UsagePage() {
         </h1>
       </header>
       <main className="max-w-5xl mx-auto p-4 space-y-6">
+        {capQ.data && (
+          <section className={`rounded-lg border p-4 ${capQ.data.blocked ? "border-destructive bg-destructive/10" : "border-border bg-card"}`}>
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <div className="text-sm font-semibold">Monthly spend cap</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {fmt(capQ.data.monthUsd)} used of {fmt(capQ.data.capUsd)} this month
+                  {capQ.data.blocked && " — AI is paused until you raise the cap."}
+                </div>
+                <div className="mt-2 h-1.5 w-64 max-w-full rounded bg-secondary overflow-hidden">
+                  <div
+                    className={`h-full ${capQ.data.blocked ? "bg-destructive" : "bg-primary"}`}
+                    style={{ width: `${Math.min(100, (capQ.data.monthUsd / Math.max(0.0001, capQ.data.capUsd)) * 100).toFixed(1)}%` }}
+                  />
+                </div>
+              </div>
+              <form
+                className="flex items-center gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const n = Number(capInput);
+                  if (!Number.isFinite(n) || n < 0) { toast.error("Enter a valid amount"); return; }
+                  capMut.mutate(n);
+                }}
+              >
+                <span className="text-xs text-muted-foreground">New cap $</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder={String(capQ.data.capUsd)}
+                  value={capInput}
+                  onChange={(e) => setCapInput(e.target.value)}
+                  className="w-24 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                />
+                <button
+                  type="submit"
+                  disabled={capMut.isPending || !capInput}
+                  className="rounded-md bg-primary text-primary-foreground text-xs font-medium px-3 py-1.5 disabled:opacity-50"
+                >
+                  {capMut.isPending ? "Saving…" : "Update"}
+                </button>
+              </form>
+            </div>
+          </section>
+        )}
         {q.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
         {q.error && <p className="text-sm text-destructive">Failed to load: {(q.error as Error).message}</p>}
         {data && (
