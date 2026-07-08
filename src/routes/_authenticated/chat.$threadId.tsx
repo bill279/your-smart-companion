@@ -923,6 +923,64 @@ function ThreadView({ threadId }: { threadId: string }) {
           return JSON.stringify({ error: err instanceof Error ? err.message : "generate failed" });
         }
       },
+      web_scrape: async (params) => {
+        const p = params as { url?: string };
+        if (!p.url) return JSON.stringify({ error: "url required" });
+        try {
+          const r = await vScrape({ data: { url: p.url } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "scrape failed" });
+        }
+      },
+      product_search: async (params) => {
+        const p = params as { query?: string; limit?: number };
+        if (!p.query) return JSON.stringify({ error: "query required" });
+        try {
+          const r = await vProducts({ data: { query: p.query, limit: p.limit } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "product search failed" });
+        }
+      },
+      search_knowledge_base: async (params) => {
+        const p = params as { query?: string; limit?: number };
+        if (!p.query) return JSON.stringify({ error: "query required" });
+        try {
+          const r = await vKb({ data: { query: p.query, limit: p.limit } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "kb search failed" });
+        }
+      },
+      recall_facts: async () => {
+        try {
+          const r = await vRecall({});
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "recall failed" });
+        }
+      },
+      remember_fact: async (params) => {
+        const p = params as { key?: string; value?: string };
+        if (!p.key || !p.value) return JSON.stringify({ error: "key and value required" });
+        try {
+          const r = await vRemember({ data: { key: p.key, value: p.value } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "remember failed" });
+        }
+      },
+      save_lesson: async (params) => {
+        const p = params as { lesson?: string; context?: string };
+        if (!p.lesson) return JSON.stringify({ error: "lesson required" });
+        try {
+          const r = await vLesson({ data: { lesson: p.lesson, context: p.context } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "lesson failed" });
+        }
+      },
     },
     onAssistantDelta: (part) => {
       // Stream assistant transcript in real time as OpenAI Realtime generates it.
