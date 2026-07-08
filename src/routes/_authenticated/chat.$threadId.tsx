@@ -99,11 +99,9 @@ Forbidden answer shapes (spoken OR in show_in_chat):
 Clean Markdown. ## headings for multi-part answers. Short paragraphs (2–4 lines). **Bold** for key terms. Bullets only when they aid scanning. Full GitHub-Flavored Markdown tables using pipes for any comparison/schedule/spec/tabular content. Fenced code blocks with a language tag for code. Never wrap the whole reply in a code block. Never dump raw JSON.
 
 # 5. Tools (call them; don't narrate)
-- show_in_chat — for ANY table, comparison, list, code, email draft, or long structured content. Do NOT read the content aloud. After it returns, say ONE short spoken sentence ("Here's the table.", "I've put the draft in the chat.").
-- web_search — verify current facts, prices, news, specific vendor URLs. Not a substitute for your own expertise. Use FIRST for anything time-sensitive about real companies, people, prices, addresses, or news.
-- web_scrape — pull the readable markdown of a specific URL when you need real detail off a page.
-- product_search — real shoppable products. Returns product cards the UI renders as a carousel. Use INSTEAD of web_search when the user wants to buy/compare/recommend a product. After it returns, put a full expert analysis (350–700+ words: each option's strengths/weaknesses, specs that matter, use-case fit, ranked pick) into show_in_chat; speak a one-sentence summary. Do NOT re-list the cards' prices/titles in prose.
-- search_knowledge_base — semantic search over the user's uploaded company docs. Use FIRST for anything internal/company-specific. Cite the document name.
+- deep_answer — YOUR PRIMARY TOOL for any research, comparison, ranking, list, "best X", "top N", "options for Y", how-to, explain, recommend, or long-draft question. Delegates to the full chat brain (stronger reasoning model + live web_search + web_scrape + product_search + knowledge base) which posts the full researched answer (with citations, sources, complete table when relevant) directly into the chat. YOU DO NOT compose these answers yourself. Call deep_answer with no arguments — it uses the user's most recent message. After it returns, say ONE short spoken sentence pointing to the chat ("I've put the full breakdown in the chat — top pick is X.", "The comparison's up in the chat."). Never re-read the content aloud. Never say "let me search…" — just call it.
+- show_in_chat — ONLY for short structured content you're composing yourself: a draft email you wrote from the user's dictation, a code snippet, or a simple table with data you already have in the conversation. NOT for research or "best X" answers — use deep_answer for those. After it returns, one short spoken summary sentence.
+- web_search / web_scrape / product_search / search_knowledge_base — you almost never need these directly, because deep_answer runs them inside the chat brain. Use them only for a quick spoken fact-check (a single price, a phone number, an address) where a full deep_answer would be overkill.
 - send_email — send from the user's Outlook. NEVER on the first request. Confirm the recipient's exact address out loud ("Just to confirm, send this to john@example.com?"), then draft, then wait for explicit approval, then send. Body = clean human message with greeting, 1–3 short paragraphs, sign-off. No raw URLs. To attach a document you just generated, call with attach_last_document=true. Approval is ANY affirmative reply — "send", "yes", "yep", "sure", "ok", "cool", "go ahead", "do it", "send it", "looks good", "lgtm" — interpret liberally and call the tool immediately. Do NOT re-confirm.
 - list_contacts / save_contact — call list_contacts before asking for an email when the user names a person like "Bill" or "Sarah". Never invent an address. Saved contact names are valid attendees for calendar events; the server resolves them.
 - Calendar (Outlook + Teams): list_calendar_events, create_calendar_event, cancel_calendar_event, respond_calendar_event.
@@ -171,9 +169,16 @@ function voiceStartMessage(error: unknown) {
 const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
   {
     type: "function",
+    name: "deep_answer",
+    description:
+      "PREFERRED for any research, comparison, list, ranking, 'best X', 'top N', 'options for Y', how-to, explain, recommend, draft, or any question that needs live web search or a substantive expert answer. Delegates to the full chat brain (stronger model + live web_search + web_scrape + product_search + knowledge base), which posts the researched answer (with citations, sources, and a full markdown table when relevant) directly into the chat. Do NOT compose the answer yourself with show_in_chat when deep_answer applies. After it returns, say ONE short spoken sentence pointing to the chat (e.g. \"I've put the full breakdown in the chat.\"). No arguments needed — it uses the user's most recent message in this thread.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
     name: "show_in_chat",
     description:
-      "Render rich markdown (tables, lists, code, long drafts, email drafts) directly in the chat WITHOUT speaking it. Use this whenever the user asks for a table, list, code, or any long content. Then say a brief one-sentence spoken summary — never read the content aloud.",
+      "Render rich markdown directly in the chat WITHOUT speaking it. Use this ONLY for short structured content you're composing yourself — a draft email you've written from the user's dictation, a code snippet, or a simple table with data you already have. For any research/list/comparison/'best X'/how-to/recommend question, call deep_answer instead — do NOT compose those answers yourself. After show_in_chat returns, say ONE short spoken summary sentence — never read the content aloud.",
     parameters: {
       type: "object",
       properties: {
@@ -733,6 +738,55 @@ function ThreadView({ threadId }: { threadId: string }) {
       logUsage({ data: u }).catch((err) => console.warn("logVoiceUsage failed", err));
     },
     clientTools: {
+      deep_answer: async () => {
+        // Delegate to the same /api/chat pipeline the text UI uses — full
+        // gpt-5-mini + live web_search / web_scrape / product_search /
+        // knowledge base loop. Reuses the user's most recent turn (the
+        // spoken transcript we just persisted) via regenerate=true, so the
+        // researched answer is saved to this same thread as an assistant
+        // message. Voice then speaks a one-sentence summary.
+        try {
+          conversationRef.current?.cancelResponse();
+        } catch (err) {
+          console.warn("cancelResponse before deep_answer failed", err);
+        }
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return { error: "not signed in" };
+        try {
+          const res = await fetch("/api/chat", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ threadId, regenerate: true }),
+          });
+          if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            return { error: `deep answer failed: ${errText.slice(0, 200)}` };
+          }
+          // Drain the stream so the server-side onFinish (which inserts
+          // the assistant message) runs to completion before we return.
+          const reader = res.body?.getReader();
+          if (reader) {
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+              const { done } = await reader.read();
+              if (done) break;
+            }
+          }
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          await qc.invalidateQueries({ queryKey: ["threads"] });
+          return {
+            ok: true,
+            note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
+          };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "deep answer failed";
+          return { error: msg };
+        }
+      },
       show_in_chat: async (params) => {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
         if (!md) return JSON.stringify({ error: "markdown required" });
