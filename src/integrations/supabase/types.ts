@@ -54,6 +54,7 @@ export type Database = {
           interaction_mode: string
           max_voice_seconds: number
           model_provider: string
+          monthly_cap_usd: number
           require_approval: boolean
           require_citations: boolean
           updated_at: string
@@ -66,6 +67,7 @@ export type Database = {
           interaction_mode?: string
           max_voice_seconds?: number
           model_provider?: string
+          monthly_cap_usd?: number
           require_approval?: boolean
           require_citations?: boolean
           updated_at?: string
@@ -78,6 +80,7 @@ export type Database = {
           interaction_mode?: string
           max_voice_seconds?: number
           model_provider?: string
+          monthly_cap_usd?: number
           require_approval?: boolean
           require_citations?: boolean
           updated_at?: string

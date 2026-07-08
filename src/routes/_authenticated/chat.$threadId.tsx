@@ -4,6 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
 import { createRealtimeSession } from "@/lib/realtime-voice.functions";
+import {
+  voiceWebScrape,
+  voiceProductSearch,
+  voiceKnowledgeSearch,
+  voiceRecallFacts,
+  voiceRememberFact,
+  voiceSaveLesson,
+} from "@/lib/voice-tools.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mic, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Globe, ShoppingBag, ExternalLink, DollarSign } from "lucide-react";
@@ -244,6 +252,79 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
       required: ["format", "title", "content"],
     },
   },
+  {
+    type: "function",
+    name: "web_scrape",
+    description: "Fetch the readable markdown of a specific URL when you need real detail off a page.",
+    parameters: {
+      type: "object",
+      properties: { url: { type: "string" } },
+      required: ["url"],
+    },
+  },
+  {
+    type: "function",
+    name: "product_search",
+    description:
+      "Search the web for real shoppable products (gadgets, gear, tools, appliances, software). Use INSTEAD of web_search when the user wants to buy/compare/recommend a specific product. Then briefly summarize aloud.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number", description: "Max products, default 5" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "search_knowledge_base",
+    description:
+      "Semantic search over the user's uploaded company docs. Use FIRST for anything internal/company-specific. Cite the document name.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "recall_facts",
+    description:
+      "Load durable facts the user has asked you to remember (boss, company, timezone, preferences). Call once early in the conversation when personal context might help.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
+    name: "remember_fact",
+    description:
+      "Silently save a durable fact about the user (name, role, company, timezone, sign-off, preference). Do not announce it aloud.",
+    parameters: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Short snake_case slug, e.g. 'timezone' or 'boss'." },
+        value: { type: "string" },
+      },
+      required: ["key", "value"],
+    },
+  },
+  {
+    type: "function",
+    name: "save_lesson",
+    description:
+      "Silently record a durable lesson to apply in every future conversation (a user correction or standing preference). Do not announce it.",
+    parameters: {
+      type: "object",
+      properties: {
+        lesson: { type: "string" },
+        context: { type: "string" },
+      },
+      required: ["lesson"],
+    },
+  },
 ];
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
@@ -448,6 +529,12 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const createSession = useServerFn(createRealtimeSession);
+  const vScrape = useServerFn(voiceWebScrape);
+  const vProducts = useServerFn(voiceProductSearch);
+  const vKb = useServerFn(voiceKnowledgeSearch);
+  const vRecall = useServerFn(voiceRecallFacts);
+  const vRemember = useServerFn(voiceRememberFact);
+  const vLesson = useServerFn(voiceSaveLesson);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -836,6 +923,64 @@ function ThreadView({ threadId }: { threadId: string }) {
           return JSON.stringify({ error: err instanceof Error ? err.message : "generate failed" });
         }
       },
+      web_scrape: async (params) => {
+        const p = params as { url?: string };
+        if (!p.url) return JSON.stringify({ error: "url required" });
+        try {
+          const r = await vScrape({ data: { url: p.url } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "scrape failed" });
+        }
+      },
+      product_search: async (params) => {
+        const p = params as { query?: string; limit?: number };
+        if (!p.query) return JSON.stringify({ error: "query required" });
+        try {
+          const r = await vProducts({ data: { query: p.query, limit: p.limit } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "product search failed" });
+        }
+      },
+      search_knowledge_base: async (params) => {
+        const p = params as { query?: string; limit?: number };
+        if (!p.query) return JSON.stringify({ error: "query required" });
+        try {
+          const r = await vKb({ data: { query: p.query, limit: p.limit } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "kb search failed" });
+        }
+      },
+      recall_facts: async () => {
+        try {
+          const r = await vRecall({});
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "recall failed" });
+        }
+      },
+      remember_fact: async (params) => {
+        const p = params as { key?: string; value?: string };
+        if (!p.key || !p.value) return JSON.stringify({ error: "key and value required" });
+        try {
+          const r = await vRemember({ data: { key: p.key, value: p.value } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "remember failed" });
+        }
+      },
+      save_lesson: async (params) => {
+        const p = params as { lesson?: string; context?: string };
+        if (!p.lesson) return JSON.stringify({ error: "lesson required" });
+        try {
+          const r = await vLesson({ data: { lesson: p.lesson, context: p.context } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "lesson failed" });
+        }
+      },
     },
     onAssistantDelta: (part) => {
       // Stream assistant transcript in real time as OpenAI Realtime generates it.
@@ -1110,8 +1255,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
 
       if (!res.ok || !res.body) {
-        const msg = await res.text().catch(() => "Request failed");
-        toast.error(msg || "BPA Bot is unavailable");
+        const raw = await res.text().catch(() => "");
+        let msg = raw || "BPA Bot is unavailable";
+        try {
+          const j = JSON.parse(raw);
+          if (j?.error) msg = j.error;
+          if (j?.code === "SPEND_CAP_REACHED") msg = `${j.error} Head to Spend tracker to raise it.`;
+        } catch { /* not JSON */ }
+        toast.error(msg);
         setPendingUser(null);
         return;
       }
