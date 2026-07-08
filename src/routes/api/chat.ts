@@ -122,7 +122,7 @@ Research / web
 - \`search_knowledge_base\` — semantic search over the user's uploaded company docs. Use FIRST for anything that sounds internal/company-specific. Cite the document name.
 
 Email
-- \`send_email\` — send from the user's Outlook. NEVER on the first request. Flow: confirm recipient → draft preview → wait for explicit approval → send. To attach files made with \`generate_document\`, pass \`attachments\` with every file URL/name, or pass \`attach_file_url\`/\`attach_file_name\` for one file. If the user asked for both PDF and Word, attach BOTH files in the same email. Never paste the URL in the email body.
+- \`send_email\` — send from the user's Outlook. NEVER on the first request. Flow: confirm recipient → draft preview → wait for explicit approval → send. To attach files, ALWAYS pass an explicit \`attachments\` array with each file's exact \`url\` and \`filename\` — copied verbatim from the "Generated documents in this thread" ledger in your system prompt (or from the tool result you JUST got this turn). If the user references a specific prior file ("email the cameras PDF", "send the barbershop doc"), find that entry in the ledger by matching its label/topic and use ITS url — do NOT rely on "the most recent one" and do NOT regenerate. If the user asked for both PDF and Word, attach BOTH files in the same email. Never paste the URL in the email body.
 
 Contacts
 - \`list_contacts\` / \`save_contact\` — call \`list_contacts\` before asking for an email when the user names a person. Never invent an address.
@@ -142,7 +142,7 @@ Memory
 - \`save_lesson\` — silently record corrections/preferences to apply forever. Don't announce.
 
 Files
-- \`generate_document\` — real PDF/DOCX/XLSX/CSV downloads. Use whenever the user asks for a file/report/export/attachment. Default to PDF. The chat AUTOMATICALLY renders a preview + download card from the tool result — do NOT paste the URL or a Markdown link into the reply. Never claim you can't create files.
+- \`generate_document\` — real PDF/DOCX/XLSX/CSV downloads. Use whenever the user asks for a NEW file/report/export/attachment. Default to PDF. The chat AUTOMATICALLY renders a preview + download card from the tool result — do NOT paste the URL or a Markdown link into the reply. Never claim you can't create files. **Do NOT regenerate a document that already exists in the "Generated documents" ledger** — if the user wants to email/resend an existing file, look up its url in the ledger and pass it to \`send_email\` directly. Only call \`generate_document\` when there is no matching existing file, when the user explicitly asks for a new version, or when they asked for a different format (e.g. Word of an existing PDF).
 - **"Convert this / that / your last reply / the above to a PDF"** → the \`markdown\` argument must contain ONLY the document body from your most recent substantive assistant message in this thread. No greeting, no "here's the document", no approval text, no user message text, no transcript fragments, no raw tool URLs. Keep the prior assistant answer complete — not a re-summary, not a shortened table, not a new paragraph. If you're unsure which message they mean and there's only one long recent answer, use that one — do NOT ask to clarify, do NOT regenerate a shorter version. Only ask which message when there are multiple long answers of similar size.
 - Call \`generate_document\` exactly ONCE per requested file format. If the user asks for both PDF and Word, call it once for PDF and once for DOCX from the SAME markdown/title. Never emit a chat summary before the tool call(s) — go straight to the tool(s), then a single short line like "Here are the PDF and Word files — preview or download them above." Do NOT include URLs, filenames in brackets, or Markdown links; the cards handle that.
 - **filename**: short, professional, human — e.g. \`Stereoscopic Cameras Comparison\`, \`Q3 Sales Report\`. NO underscores, NO snake_case, NO date stamps, NO file extension. The system slugifies it for the URL; keep the label clean.
@@ -523,6 +523,38 @@ function latestGeneratedDocsFromHistory(
     }
   }
   return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
+}
+
+// Full ordered list (oldest → newest) of every generated document in this
+// thread, with the tool-call label (title/subject) so the model can reference
+// the right file by topic and pass its exact URL to `send_email`.
+type GeneratedDocLedgerEntry = {
+  label: string;
+  filename: string;
+  url: string;
+  format: string;
+};
+function listAllGeneratedDocs(rows: ChatHistoryRow[]): GeneratedDocLedgerEntry[] {
+  const out: GeneratedDocLedgerEntry[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (row.role !== "assistant") continue;
+    const { activities } = extractToolActivity(row.content);
+    for (const activity of activities) {
+      const doc = activity.docFile;
+      if (!doc?.url || !doc.filename) continue;
+      if (seen.has(doc.url)) continue;
+      seen.add(doc.url);
+      const ext = doc.filename.toLowerCase().split(".").pop() ?? "";
+      out.push({
+        label: activity.label ?? doc.filename,
+        filename: doc.filename,
+        url: doc.url,
+        format: ext,
+      });
+    }
+  }
+  return out;
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -906,6 +938,16 @@ export const Route = createFileRoute("/api/chat")({
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
         const runtimeBlock = `\n\n# Current date/time\nCurrent server time is ${new Date().toISOString()}. Use this for relative calendar dates like "tomorrow" and "next Tuesday".`;
+        const priorDocs = listAllGeneratedDocs(rows ?? []);
+        const docsLedgerBlock =
+          priorDocs.length > 0
+            ? `\n\n# 📄 Generated documents in this thread (ledger)\nEach line is a real file already created earlier. When the user says "email/resend/attach the <X> PDF/Word", MATCH by topic/label and pass that file's exact url + filename in \`send_email\`'s \`attachments\` array. Do NOT call \`generate_document\` again for a file that already exists — regenerating creates a NEW file and the wrong one will be attached.\n${priorDocs
+                .map(
+                  (d, i) =>
+                    `${i + 1}. [${d.format.toUpperCase()}] "${d.label}" — filename: ${d.filename} — url: ${d.url}`,
+                )
+                .join("\n")}`
+            : "";
         const contactsBlock =
           contactRows.length > 0
             ? `\n\n# Saved contacts\nUse these for named recipients/attendees. Do not ask for an email when exactly one saved contact matches the name.\n${contactRows
@@ -921,7 +963,7 @@ export const Route = createFileRoute("/api/chat")({
                 .map((a) => `- ${a.name} (${a.mimeType})`)
                 .join("\n")}\n\nThe file bytes are inlined in the user message below (as image/file parts). READ THEM NOW and respond about them by default — do NOT wait for the user to explicitly ask "what's in this file". If the user typed a question, answer it using the attachment. If the user typed nothing (or just "here" / "look at this" / etc.), open the file, read every page/section, and give a substantive summary and take on it: what it is, the key points, notable numbers/tables/quotes, and — if it's a product spec sheet, comparison, or report — your recommendation. Cite the filename. Never say "I can't access the file" or "please share the file" — the bytes are already attached.`
             : "";
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${attachmentsBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${docsLedgerBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${attachmentsBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
@@ -1158,7 +1200,33 @@ export const Route = createFileRoute("/api/chat")({
                 const mustAttach = emailNeedsGeneratedAttachment(userText, subject, emailBody);
                 if (pendingAttachments.length === 0 && mustAttach) {
                   const requested = requestedFormats(`${subject}\n${emailBody}\n${userText}`);
-                  const docs = latestGeneratedDocsFromHistory(rows, requested.length ? requested : [requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`) ?? "pdf"], collectedActivity);
+                  // Guard against attaching the WRONG previously-generated file
+                  // when the user references a specific one ("email me the
+                  // cameras PDF"). If more than one generated doc of the same
+                  // format exists in history and none was generated this turn,
+                  // force the model to pick explicitly instead of grabbing the
+                  // most recent one.
+                  const wantedFormats: GeneratedDocFormat[] =
+                    requested.length > 0
+                      ? requested
+                      : [requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`) ?? "pdf"];
+                  const sameTurnDocs = collectedActivity
+                    .map((a) => a.docFile)
+                    .filter((d): d is NonNullable<ToolActivity["docFile"]> => !!d?.url && !!d?.filename);
+                  if (sameTurnDocs.length === 0) {
+                    const ledger = listAllGeneratedDocs(rows);
+                    const ambiguous = wantedFormats.some(
+                      (fmt) => ledger.filter((d) => d.format === fmt).length > 1,
+                    );
+                    if (ambiguous) {
+                      return {
+                        error:
+                          "Multiple previously-generated documents match this format. Pass the exact url + filename you want in the `attachments` array — see the 'Generated documents in this thread' ledger in your system prompt and match by topic/label. Do NOT regenerate; pick the right existing file.",
+                        available: ledger,
+                      };
+                    }
+                  }
+                  const docs = latestGeneratedDocsFromHistory(rows, wantedFormats, collectedActivity);
                   if (docs.length === 0) {
                     return {
                       error:
