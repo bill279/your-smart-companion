@@ -434,6 +434,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           source.connect(analyser);
           const buf = new Uint8Array(analyser.fftSize);
           let quietCount = 0;
+          let loudCount = 0;
           const tick = () => {
             if (!micMonitorRef.current) return;
             analyser.getByteTimeDomainData(buf);
@@ -444,15 +445,25 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               sum += v * v;
             }
             const rms = Math.sqrt(sum / buf.length);
-            // Immediate barge-in: a single speech-level mic frame is enough.
-            // Keep the threshold low because browser echo cancellation and
-            // laptop mics often suppress the start of a user's interruption.
-            if (rms > 0.018) {
+            // Noise-gated barge-in. Breathing / throat-clears / keyboard
+            // clicks are short, low-energy pops — a single loud frame is
+            // NOT enough. Require sustained voice-level energy across
+            // several consecutive frames before we call it speech. Frame
+            // cadence is ~16ms, so 3 frames ≈ 50ms — still snappy for
+            // interrupting the assistant, but immune to a single pop.
+            const SPEECH_RMS = 0.06;        // higher gate → ignores breath/hum
+            const SPEECH_FRAMES = 3;        // consecutive frames required
+            if (rms > SPEECH_RMS) {
+              loudCount++;
               quietCount = 0;
-              if (assistantAudibleRef.current || activeResponseRef.current) {
+              if (
+                loudCount >= SPEECH_FRAMES &&
+                (assistantAudibleRef.current || activeResponseRef.current)
+              ) {
                 markLocalSpeechStarted();
               }
             } else {
+              loudCount = 0;
               quietCount++;
               if (quietCount > 12) localSpeechActiveRef.current = false;
             }
@@ -477,16 +488,15 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               audio: {
                 input: {
                   transcription: { model: "gpt-4o-transcribe" },
+              // Semantic VAD uses a model to decide when the user is
+              // actually speaking vs. making noise (breathing, throat
+              // clearing, keyboard, background hum). "high" eagerness
+              // reacts quickly to real speech while still rejecting
+              // non-speech energy — much better than raw energy-threshold
+              // server_vad, which trips on any sound above the level.
               turn_detection: {
-                type: "server_vad",
-                // Tuned for fastest barge-in: low threshold + minimal
-                // prefix/silence so a real utterance interrupts immediately.
-                // A local WebAudio RMS monitor also fires bargeInNow() so
-                // the assistant is muted before this server event even
-                // round-trips back over the data channel.
-                threshold: 0.15,
-                prefix_padding_ms: 50,
-                silence_duration_ms: 120,
+                type: "semantic_vad",
+                eagerness: "high",
                 create_response: false,
                 interrupt_response: true,
               },
