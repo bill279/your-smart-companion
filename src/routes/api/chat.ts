@@ -192,6 +192,9 @@ You are BPA Bot. Never call yourself JARVIS or anything else. Don't greet again 
 # 9. Voice mode
 Voice has its own separate system prompt for spoken brevity. In text chat, don't shorten for voice. Just: don't read URLs aloud; summarize sources by name if the answer is likely spoken.`;
 
+const CHAT_MODEL = "openai/gpt-5-mini";
+const CHAT_HISTORY_LIMIT = 18;
+
 const AUTONOMOUS_MODE = "";
 const SEARCH_DISCIPLINE = "";
 const DEPTH_MANDATE = "";
@@ -378,17 +381,15 @@ export const Route = createFileRoute("/api/chat")({
           }
         });
 
-        // Load recent history + facts in parallel. Cap history at the last 40
-        // turns — anything older is rarely useful and just inflates latency
-        // and token cost. Durable context lives in user_facts.
-        const HISTORY_LIMIT = 40;
+        // Load recent history + facts in parallel. Cap history tightly for speed;
+        // durable context lives in user_facts / lessons, not the full transcript.
         const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes] = await Promise.all([
           supabase
             .from("messages")
             .select("role,content")
             .eq("thread_id", body.threadId)
             .order("created_at", { ascending: false })
-            .limit(HISTORY_LIMIT),
+            .limit(CHAT_HISTORY_LIMIT),
           supabase
             .from("user_facts")
             .select("key,value")
@@ -409,7 +410,7 @@ export const Route = createFileRoute("/api/chat")({
             .from("contacts")
             .select("name,email,notes")
             .order("name", { ascending: true })
-            .limit(100),
+            .limit(40),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         const rows = (histRes.data ?? []).slice().reverse();
@@ -547,7 +548,7 @@ export const Route = createFileRoute("/api/chat")({
           };
         });
         const result = streamText({
-          model: gateway("openai/gpt-5.5"),
+          model: gateway(CHAT_MODEL),
           system: systemWithUser,
           messages: baseMessages,
           stopWhen: stepCountIs(50),
@@ -555,19 +556,19 @@ export const Route = createFileRoute("/api/chat")({
           // the terse default it tends to give. GPT-5.4 exposes both
           // reasoning-effort and text-verbosity knobs.
           providerOptions: {
-            openai: {
+            // Provider name is "lovable"; putting these under "openai" is
+            // silently dropped by the OpenAI-compatible AI SDK adapter.
+            lovable: {
               // Lower reasoning effort dramatically improves first-token
               // latency (from ~5–10s down to ~1–2s) with minimal quality
               // hit for chat-style prompts. Keep verbosity medium so
               // answers stay substantive.
               reasoningEffort: "low",
               textVerbosity: "medium",
-            },
-            // Lovable AI Gateway priority tier — routes to OpenAI's
-            // priority serving lane for lower latency. Billed at the
-            // priority rate when served on that tier; falls back to
-            // standard rate + latency if capacity is unavailable.
-            lovable: {
+              // Lovable AI Gateway priority tier — routes to OpenAI's
+              // priority serving lane for lower latency. Billed at the
+              // priority rate when served on that tier; falls back to
+              // standard rate + latency if capacity is unavailable.
               service_tier: "priority",
             },
           },
@@ -1160,18 +1161,17 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               .from("threads")
               .update({ updated_at: new Date().toISOString() })
               .eq("id", body.threadId!);
-            // Log the chat completion spend (whole multi-step run).
+            // Keep usage logging awaited so the spend tracker/cap stays reliable.
             const inTok = usage?.inputTokens ?? 0;
             const outTok = usage?.outputTokens ?? 0;
             await logUsage(
               "chat_completion",
-              "openai/gpt-5.5",
+              CHAT_MODEL,
               inTok,
               outTok,
-              computeCost("openai/gpt-5.5", inTok, outTok),
+              computeCost(CHAT_MODEL, inTok, outTok),
               { threadId: body.threadId, steps: collectedActivity.length },
             );
-            // Log a flat per-call cost for each tool the model invoked.
             for (const ev of collectedActivity) {
               const flat = TOOL_FLAT_COST_USD[ev.name];
               if (flat === undefined) continue;
@@ -1180,21 +1180,19 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 threadId: body.threadId,
               });
             }
-            // Auto-name new threads on first reply
-            const { data: t } = await supabase
-              .from("threads")
-              .select("title")
-              .eq("id", body.threadId!)
-              .single();
-            if (t?.title === "New conversation") {
-              const firstUser = (rows ?? []).find((r) => r.role === "user")?.content ?? body.content!;
-              const title = firstUser.slice(0, 48).replace(/\s+/g, " ").trim();
-              await supabase.from("threads").update({ title }).eq("id", body.threadId!);
-            }
-            // Fire-and-forget: quietly review this thread for durable lessons.
-            // The reviewer has its own threshold/cooldown checks and swallows errors.
+            // Fire-and-forget non-visible cleanup so the stream can close sooner.
             void (async () => {
               try {
+                const { data: t } = await supabase
+                  .from("threads")
+                  .select("title")
+                  .eq("id", body.threadId!)
+                  .single();
+                if (t?.title === "New conversation") {
+                  const firstUser = (rows ?? []).find((r) => r.role === "user")?.content ?? body.content!;
+                  const title = firstUser.slice(0, 48).replace(/\s+/g, " ").trim();
+                  await supabase.from("threads").update({ title }).eq("id", body.threadId!);
+                }
                 const { reviewThreadForLessons } = await import("@/lib/self-improvement.server");
                 await reviewThreadForLessons(body.threadId!, userId);
               } catch {

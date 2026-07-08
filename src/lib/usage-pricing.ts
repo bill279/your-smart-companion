@@ -5,6 +5,7 @@ type Price = { input: number; output: number };
 
 const PRICES: Record<string, Price> = {
   "openai/gpt-5.5": { input: 1.25, output: 10 },
+  "openai/gpt-5-mini": { input: 0.25, output: 2 },
   "openai/gpt-5.5-mini": { input: 0.25, output: 2 },
   "openai/gpt-5.4": { input: 2.5, output: 10 },
   "openai/text-embedding-3-small": { input: 0.02, output: 0 },
