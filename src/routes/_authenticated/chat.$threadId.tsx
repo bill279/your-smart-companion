@@ -2662,6 +2662,12 @@ function labelFor(a: ToolActivity, pending: boolean): string {
   return (
     <div className="mb-3 flex flex-col gap-1.5">
       {items.map((a, idx) => {
+        // Server-side generate_document (chat mode) returns a signed URL
+        // instead of a client artifact. Render a full doc card in place of
+        // the tool-activity chip so the user gets Preview + Download + Email.
+        if (a.name === "generate_document" && a.docFile?.url) {
+          return <RemoteDocCard key={a.id} doc={a.docFile} />;
+        }
         const isLast = idx === items.length - 1;
         const pending =
           streaming && isLast && !a.results && !a.scraped && !a.products && !a.citations && !a.error;
