@@ -124,13 +124,26 @@ export async function generateDocument(opts: {
   const markdown = normalizeDocumentMarkdown(title, opts.markdown);
 
   if (format === "txt") {
-    const bytes = new TextEncoder().encode(stripMarkdown(markdown));
+    // Consistency: always prepend the branded title + rule so plain-text
+    // exports open with context, matching the PDF/DOCX template.
+    const body = stripMarkdown(markdown.replace(/^\s*#\s+.+\n+/, ""));
+    const header = `${title}\n${"=".repeat(Math.min(title.length, 60))}\n\n`;
+    const bytes = new TextEncoder().encode(header + body);
     return { bytes, mimeType: "text/plain", extension: "txt" };
   }
 
   if (format === "csv") {
     const tables = parseMarkdownTables(markdown);
-    const rows = tables[0] ?? [[stripMarkdown(markdown)]];
+    // Consistency: if the markdown has a table, export it verbatim. Otherwise
+    // export a two-column key/value dump with the title as the first row so
+    // the file always opens with context, never a raw paragraph blob.
+    const rows: string[][] = tables[0]
+      ? tables[0]
+      : [["Title", title], ...stripMarkdown(markdown)
+          .split(/\n{2,}/)
+          .map((p) => p.trim())
+          .filter(Boolean)
+          .map((p, idx) => [`Section ${idx + 1}`, p])];
     const csv = rows
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
       .join("\n");
@@ -145,11 +158,19 @@ export async function generateDocument(opts: {
     const tables = parseMarkdownTables(markdown);
     const wb = XLSX.utils.book_new();
     if (tables.length === 0) {
-      const ws = XLSX.utils.aoa_to_sheet([[title], [stripMarkdown(markdown)]]);
-      XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+      const sections = stripMarkdown(markdown)
+        .split(/\n{2,}/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const aoa: string[][] = [[title], [""], ...sections.map((s) => [s])];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      XLSX.utils.book_append_sheet(wb, ws, "Document");
     } else {
       tables.forEach((t, idx) => {
-        const ws = XLSX.utils.aoa_to_sheet(t);
+        // Prepend a title row so every sheet opens with context.
+        const aoa: string[][] =
+          idx === 0 ? [[title], [""], ...t] : t;
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
         XLSX.utils.book_append_sheet(wb, ws, `Sheet${idx + 1}`);
       });
     }
@@ -163,11 +184,29 @@ export async function generateDocument(opts: {
 
   if (format === "docx") {
     const cleanTitle = humanizeTitle(title);
-    const skipAutoTitle = markdownStartsWithH1(markdown);
-    const children: (Paragraph | Table)[] = skipAutoTitle
-      ? []
-      : [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(cleanTitle)] })];
-    const lines = markdown.split(/\r?\n/);
+    // Consistency rule (matches PDF template): the branded title block is
+    // ALWAYS drawn. If the body also starts with an H1, strip it so we don't
+    // render the title twice. Collapse 3+ blank lines to a single blank so
+    // spacing is uniform across documents.
+    const bodyMarkdown = markdown
+      .replace(/^\s*#\s+.+\n+/, "")
+      .replace(/\n{3,}/g, "\n\n");
+    const children: (Paragraph | Table)[] = [
+      new Paragraph({
+        heading: HeadingLevel.TITLE,
+        spacing: { after: 60 },
+        children: [new TextRun({ text: cleanTitle, bold: true, color: "0D4763", size: 40 })],
+      }),
+      // Brand rule under title
+      new Paragraph({
+        spacing: { after: 240 },
+        border: {
+          bottom: { style: BorderStyle.SINGLE, size: 12, color: "0D4763", space: 1 },
+        },
+        children: [new TextRun("")],
+      }),
+    ];
+    const lines = bodyMarkdown.split(/\r?\n/);
     let i = 0;
     while (i < lines.length) {
       const line = lines[i] ?? "";
@@ -189,14 +228,13 @@ export async function generateDocument(opts: {
       }
       const m = line.match(/^(#{1,6})\s+(.*)$/);
       if (m) {
+        // Consistency: two tiers only, matching the PDF. H1/H2 = section,
+        // H3+ = subsection. Uniform spacing regardless of how many #s the
+        // model emitted.
         const lvl = m[1].length;
-        const heading =
-          lvl === 1
-            ? HeadingLevel.HEADING_1
-            : lvl === 2
-              ? HeadingLevel.HEADING_2
-              : HeadingLevel.HEADING_3;
-        children.push(new Paragraph({ heading, spacing: { before: lvl <= 2 ? 240 : 160, after: 120 }, children: [new TextRun(stripMarkdown(m[2]))] }));
+        const heading = lvl <= 2 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2;
+        const spaceBefore = lvl <= 2 ? 240 : 160;
+        children.push(new Paragraph({ heading, spacing: { before: spaceBefore, after: 120 }, children: [new TextRun(stripMarkdown(m[2]))] }));
       } else if (/^[-*+]\s+/.test(line.trim())) {
         children.push(new Paragraph({ numbering: { reference: "bullets", level: 0 }, spacing: { after: 80 }, children: [new TextRun(stripMarkdown(line.trim().replace(/^[-*+]\s+/, "")))] }));
       } else if (/^\d+\.\s+/.test(line.trim())) {
@@ -212,13 +250,22 @@ export async function generateDocument(opts: {
         default: { document: { run: { font: "Arial", size: 22 } } },
         paragraphStyles: [
           {
+            id: "Title",
+            name: "Title",
+            basedOn: "Normal",
+            next: "Normal",
+            quickFormat: true,
+            run: { size: 40, bold: true, font: "Arial", color: "0D4763" },
+            paragraph: { spacing: { before: 0, after: 60 } },
+          },
+          {
             id: "Heading1",
             name: "Heading 1",
             basedOn: "Normal",
             next: "Normal",
             quickFormat: true,
-            run: { size: 32, bold: true, font: "Arial", color: "0B2545" },
-            paragraph: { spacing: { before: 240, after: 180 }, outlineLevel: 0 },
+            run: { size: 30, bold: true, font: "Arial", color: "0D4763" },
+            paragraph: { spacing: { before: 240, after: 120 }, outlineLevel: 0 },
           },
           {
             id: "Heading2",
@@ -226,17 +273,8 @@ export async function generateDocument(opts: {
             basedOn: "Normal",
             next: "Normal",
             quickFormat: true,
-            run: { size: 26, bold: true, font: "Arial", color: "0B2545" },
-            paragraph: { spacing: { before: 220, after: 140 }, outlineLevel: 1 },
-          },
-          {
-            id: "Heading3",
-            name: "Heading 3",
-            basedOn: "Normal",
-            next: "Normal",
-            quickFormat: true,
-            run: { size: 23, bold: true, font: "Arial", color: "0B2545" },
-            paragraph: { spacing: { before: 180, after: 100 }, outlineLevel: 2 },
+            run: { size: 24, bold: true, font: "Arial", color: "0D4763" },
+            paragraph: { spacing: { before: 160, after: 100 }, outlineLevel: 1 },
           },
         ],
       },
