@@ -53,6 +53,34 @@ function stripMarkdown(md: string): string {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 }
 
+// Turn a possibly filename-like title ("stereoscopic_cameras_for_mining.pdf")
+// into a clean human title ("Stereoscopic Cameras For Mining").
+function humanizeTitle(raw: string): string {
+  let t = (raw ?? "").trim();
+  // strip trailing extension if user passed one
+  t = t.replace(/\.(pdf|docx|xlsx|csv|txt)$/i, "");
+  // replace separators with spaces
+  t = t.replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return "Document";
+  // if it's all lowercase, title-case it
+  if (t === t.toLowerCase()) {
+    t = t
+      .split(" ")
+      .map((w, i) =>
+        i === 0 || w.length > 3 ? w.charAt(0).toUpperCase() + w.slice(1) : w,
+      )
+      .join(" ");
+  }
+  return t;
+}
+
+// True if the markdown body already starts with an H1 — we should let the
+// document's own heading own the title rather than stamping our own on top.
+function markdownStartsWithH1(md: string): boolean {
+  const firstLine = (md ?? "").split(/\r?\n/).find((l) => l.trim().length > 0);
+  return !!firstLine && /^#\s+\S/.test(firstLine.trim());
+}
+
 export async function generateDocument(opts: {
   format: DocFormat;
   title: string;
@@ -100,9 +128,11 @@ export async function generateDocument(opts: {
 
   if (format === "docx") {
     const tables = parseMarkdownTables(markdown);
-    const children: (Paragraph | Table)[] = [
-      new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(title)] }),
-    ];
+    const cleanTitle = humanizeTitle(title);
+    const skipAutoTitle = markdownStartsWithH1(markdown);
+    const children: (Paragraph | Table)[] = skipAutoTitle
+      ? []
+      : [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(cleanTitle)] })];
     const tableSet = new Set(tables.flat().map((r) => r.join("|")));
     const lines = markdown.split(/\r?\n/);
     let inTable = false;
@@ -159,9 +189,10 @@ export async function generateDocument(opts: {
                         : {}),
                       children: [
                         new Paragraph({
+                          spacing: { before: 40, after: 40 },
                           children: [
                             new TextRun({
-                              text: row[colIdx] ?? "",
+                              text: stripMarkdown(row[colIdx] ?? ""),
                               bold: rowIdx === 0,
                               color: rowIdx === 0 ? "FFFFFF" : undefined,
                             }),
@@ -248,20 +279,23 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
   };
 
   // ---- Title block ----
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(22);
-  pdf.setTextColor(...brand);
-  const titleLines = pdf.splitTextToSize(title, contentWidth) as string[];
-  for (const l of titleLines) {
-    ensure(28);
-    pdf.text(l, margin, y + 18);
-    y += 26;
+  const skipAutoTitle = markdownStartsWithH1(markdown);
+  if (!skipAutoTitle) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(22);
+    pdf.setTextColor(...brand);
+    const titleLines = pdf.splitTextToSize(humanizeTitle(title), contentWidth) as string[];
+    for (const l of titleLines) {
+      ensure(28);
+      pdf.text(l, margin, y + 18);
+      y += 26;
+    }
+    pdf.setDrawColor(...brand);
+    pdf.setLineWidth(1.5);
+    pdf.line(margin, y + 2, margin + 60, y + 2);
+    y += 18;
+    pdf.setTextColor(0, 0, 0);
   }
-  pdf.setDrawColor(...brand);
-  pdf.setLineWidth(1.5);
-  pdf.line(margin, y + 2, margin + 60, y + 2);
-  y += 18;
-  pdf.setTextColor(0, 0, 0);
 
   // ---- Walk markdown ----
   const lines = markdown.split(/\r?\n/);
