@@ -529,6 +529,12 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const createSession = useServerFn(createRealtimeSession);
+  const vScrape = useServerFn(voiceWebScrape);
+  const vProducts = useServerFn(voiceProductSearch);
+  const vKb = useServerFn(voiceKnowledgeSearch);
+  const vRecall = useServerFn(voiceRecallFacts);
+  const vRemember = useServerFn(voiceRememberFact);
+  const vLesson = useServerFn(voiceSaveLesson);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
