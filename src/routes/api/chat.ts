@@ -563,6 +563,11 @@ export const Route = createFileRoute("/api/chat")({
               reasoningEffort: "low",
               textVerbosity: "medium",
             },
+            // Fast mode: OpenAI priority serving tier for gpt-5.5 —
+            // lower latency at a small premium, no quality change.
+            lovable: {
+              service_tier: "priority",
+            },
           },
           tools: {
             web_search: tool({
