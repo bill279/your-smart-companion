@@ -662,6 +662,14 @@ function ThreadView({ threadId }: { threadId: string }) {
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
+  // Speculative deep-research prefetch: kicks off the /api/chat pipeline the
+  // moment the user's spoken transcript arrives if it looks research-y, so
+  // that by the time the voice model decides to call deep_answer the work
+  // is already streaming (or done). Massive perceived-latency win.
+  const deepAnswerInFlightRef = useRef<{
+    query: string;
+    promise: Promise<{ ok?: boolean; error?: string; note?: string }>;
+  } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
