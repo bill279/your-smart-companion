@@ -432,7 +432,7 @@ function voiceFollowupInstructions(result: { ok?: boolean; error?: string; note?
     ].join(" ");
   }
   return [
-    `The background chat answer did not complete successfully: ${result.error ?? "unknown error"}.",
+    `The background chat answer did not complete successfully: ${result.error ?? "unknown error"}.`,
     "Apologize briefly and say you're retrying or ask for one short clarification if needed.",
     "Do not claim anything is in the chat.",
   ].join(" ");
