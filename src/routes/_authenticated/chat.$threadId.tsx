@@ -2572,25 +2572,39 @@ function AttachmentPreview({
       </a>
     );
   }
-  const chipClass =
+  // ChatGPT-style file card: red PDF (or generic) icon tile + filename + type label.
+  const ext = attachment.name.split(".").pop()?.toUpperCase() || "";
+  const isPdf = attachment.mimeType === "application/pdf" || ext === "PDF";
+  const typeLabel = isPdf
+    ? "PDF"
+    : ext && ext.length <= 5
+      ? ext
+      : attachment.mimeType.split("/").pop()?.toUpperCase() || "FILE";
+  const cardClass =
     tone === "user"
-      ? "flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs bg-primary-foreground/15 text-primary-foreground hover:bg-primary-foreground/25 transition"
-      : "flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs bg-secondary text-foreground border border-border hover:bg-secondary/80 transition";
+      ? "group/att flex items-center gap-3 rounded-2xl p-2.5 pr-4 bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground transition cursor-pointer max-w-[320px]"
+      : "group/att flex items-center gap-3 rounded-2xl p-2.5 pr-4 bg-card hover:bg-secondary/60 border border-border text-foreground transition cursor-pointer max-w-[320px]";
+  const iconTileClass = isPdf
+    ? "flex items-center justify-center h-10 w-10 rounded-xl bg-[#ff5a5f] text-white shrink-0"
+    : "flex items-center justify-center h-10 w-10 rounded-xl bg-primary/80 text-primary-foreground shrink-0";
   return (
     <a
       href={url ?? "#"}
       target="_blank"
       rel="noopener noreferrer"
-      download={attachment.name}
-      className={chipClass}
+      className={cardClass}
       onClick={(e) => {
         if (!url) e.preventDefault();
       }}
-      title={attachment.name}
+      title={`Open ${attachment.name}`}
     >
-      <FileText size={14} className="shrink-0" />
-      <span className="max-w-[200px] truncate">{attachment.name}</span>
-      {url && <Download size={12} className="opacity-70" />}
+      <div className={iconTileClass}>
+        <FileText size={20} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium truncate leading-tight">{attachment.name}</div>
+        <div className="text-xs opacity-70 mt-0.5">{typeLabel}</div>
+      </div>
     </a>
   );
 }
