@@ -1055,10 +1055,10 @@ export const Route = createFileRoute("/api/chat")({
                     if (r.ok && !/^(text\/html|application\/json)/i.test(r.headers.get("content-type") ?? "")) {
                       buf = new Uint8Array(await r.arrayBuffer());
                     }
+                    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
                     if (!buf) {
                       // 1) Try to recover by re-signing the same storage path.
                       const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
-                      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
                       if (storagePath) {
                         const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
                         if (!dl.error && dl.data) {
