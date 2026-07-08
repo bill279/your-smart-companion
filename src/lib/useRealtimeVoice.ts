@@ -283,7 +283,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         const itemId = String(msg.item_id ?? "");
         const text = String(msg.transcript ?? "").trim();
         if (itemId) userTranscriptAccumRef.current.delete(itemId);
-        if (text) {
+        if (text && !isLikelyNoiseTranscript(text)) {
           opts.onMessage?.({ source: "user", message: text, event_id: itemId, isFinal: true });
         }
         return;
