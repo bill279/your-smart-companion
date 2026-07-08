@@ -295,6 +295,45 @@ function cleanFilenameBase(raw: string) {
     .slice(0, 80) || "Document";
 }
 
+// Strip conversational preamble ("Nice — straight answer first:", "Sure!",
+// "Great question — here's...", "Short, direct pick first:", etc.) from the
+// beginning of an assistant answer before we render it into a document.
+// Rule: if there's a real structural element downstream (heading, list, table,
+// or bold "Top picks" section), drop leading prose paragraphs that look
+// conversational; otherwise keep the answer as-is.
+function stripConversationalPreamble(md: string): string {
+  const text = md.replace(/^\s+/, "");
+  const hasStructure = /^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|\|)/m.test(text);
+  if (!hasStructure) {
+    // Only-prose answer — trim just a leading conversational sentence.
+    return text.replace(
+      /^(?:nice|great|sure|awesome|perfect|absolutely|alright|okay|ok|got it|cool|happy to help|of course)[\s\S]{0,220}?[—\-:.!]\s*/i,
+      "",
+    );
+  }
+  const paragraphs = text.split(/\n{2,}/);
+  const conversational =
+    /^(?:nice|great|sure|awesome|perfect|absolutely|alright|okay|ok|got it|cool|happy to help|of course|short[, ]|straight answer|quick take|tl;?dr|here'?s?\b|below\b)/i;
+  const answerFirst = /\b(?:answer first|pick first|take first|tl;?dr)\b/i;
+  let cut = 0;
+  for (const p of paragraphs) {
+    const trimmed = p.trim();
+    if (!trimmed) {
+      cut += p.length + 2;
+      continue;
+    }
+    // Stop as soon as we hit a structural line.
+    if (/^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|\|)/.test(trimmed)) break;
+    if (conversational.test(trimmed) || answerFirst.test(trimmed)) {
+      cut += p.length + 2;
+      continue;
+    }
+    break;
+  }
+  const result = text.slice(cut).replace(/^\s+/, "");
+  return result.length > 40 ? result : text;
+}
+
 function formatLabelFor(extension: string) {
   return extension === "pdf"
     ? "PDF"
@@ -334,9 +373,10 @@ function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow
   const tableSource = wantsTable
     ? [...priorAssistant].reverse().find((c) => /\|\s*[-:]{2,}/.test(c))
     : undefined;
-  const source = wantsAll
+  const rawSource = wantsAll
     ? priorAssistant.slice(-8).join("\n\n---\n\n")
     : tableSource ?? stripPersistedMarkers(priorRows[sourceIdx].content);
+  const source = stripConversationalPreamble(rawSource);
 
   // Prefer the user's own prompt (the one that triggered the source answer)
   // for the title — that's the actual topic. Fall back to headings, then a
@@ -1007,20 +1047,46 @@ export const Route = createFileRoute("/api/chat")({
                 }
                 if (effectiveAttachUrl) {
                   try {
-                    const r = await fetch(effectiveAttachUrl);
+                    let r = await fetch(effectiveAttachUrl);
                     let mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
                     let buf: Uint8Array | null = null;
-                    if (r.ok) {
+                    // HTML/JSON coming back from Supabase means the signed URL
+                    // is stale/invalid even with a 200 — treat as failure.
+                    if (r.ok && !/^(text\/html|application\/json)/i.test(r.headers.get("content-type") ?? "")) {
                       buf = new Uint8Array(await r.arrayBuffer());
-                    } else {
-                      const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
-                      if (!storagePath) return { error: `Could not fetch attachment (${r.status})` };
-                      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-                      const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
-                      if (dl.error || !dl.data) return { error: `Could not fetch attachment (${r.status})` };
-                      mimeType = dl.data.type || mimeType;
-                      buf = new Uint8Array(await dl.data.arrayBuffer());
                     }
+                    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+                    if (!buf) {
+                      // 1) Try to recover by re-signing the same storage path.
+                      const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
+                      if (storagePath) {
+                        const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
+                        if (!dl.error && dl.data) {
+                          mimeType = dl.data.type || mimeType;
+                          buf = new Uint8Array(await dl.data.arrayBuffer());
+                        }
+                      }
+                    }
+                    if (!buf) {
+                      // 2) Last resort: look up the most recent generated doc
+                      // of the requested format in this thread and use it.
+                      const fallbackDoc = latestGeneratedDocFromHistory(
+                        rows,
+                        requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`),
+                      );
+                      if (fallbackDoc?.url) {
+                        const fallbackPath = storagePathFromSignedUrl(fallbackDoc.url);
+                        if (fallbackPath) {
+                          const dl = await supabaseAdmin.storage.from("chat-uploads").download(fallbackPath);
+                          if (!dl.error && dl.data) {
+                            mimeType = dl.data.type || mimeType;
+                            buf = new Uint8Array(await dl.data.arrayBuffer());
+                            effectiveAttachName = effectiveAttachName || fallbackDoc.filename;
+                          }
+                        }
+                      }
+                    }
+                    if (!buf) return { error: `Could not fetch attachment (${r.status})` };
                     if (buf.byteLength > 15 * 1024 * 1024) return { error: "Attachment too large (max 15MB)" };
                     let bin = "";
                     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
