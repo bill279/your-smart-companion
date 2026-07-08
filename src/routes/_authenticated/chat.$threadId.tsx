@@ -1362,7 +1362,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
           const justCompletedDeepAnswer = Date.now() - lastDeepAnswerCompletedAtRef.current < 90_000;
-          if (justCompletedDeepAnswer && isVoiceChatPointer(cleaned)) {
+          if (justCompletedDeepAnswer && (isVoiceChatPointer(cleaned) || cleaned.length < 240)) {
             setPendingAssistant("");
             liveAssistantRef.current = "";
             return;
@@ -1527,7 +1527,27 @@ function ThreadView({ threadId }: { threadId: string }) {
         lastVoiceUserTextRef.current = content;
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
-        conversation.sendUserMessage(content);
+        if (looksLikeResearchQuery(content)) {
+          const textKey = normalizeVoiceQuery(content);
+          const abort = new AbortController();
+          const promise = startDeepAnswer(content, abort.signal);
+          deepAnswerInFlightRef.current = { query: content, key: textKey, promise, abort };
+          conversation.sendUserMessage(content, { createResponse: false });
+          promise.then((result) => {
+            if (lastVoiceUserTextRef.current && normalizeVoiceQuery(lastVoiceUserTextRef.current) !== textKey) return;
+            conversationRef.current?.createResponse(voiceFollowupInstructions(result));
+          }).catch((err) => {
+            conversationRef.current?.createResponse(voiceFollowupInstructions({
+              error: err instanceof Error ? err.message : "background answer failed",
+            }));
+          }).finally(() => {
+            window.setTimeout(() => {
+              if (deepAnswerInFlightRef.current?.key === textKey) deepAnswerInFlightRef.current = null;
+            }, 2000);
+          });
+        } else {
+          conversation.sendUserMessage(content);
+        }
         setPendingUser(null);
         return;
       }
