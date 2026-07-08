@@ -838,10 +838,21 @@ export const Route = createFileRoute("/api/chat")({
         const baseMessages = history.map((r, idx) => {
           const isLastUser = idx === history.length - 1 && r.role === "user";
           if (isLastUser && turnAttachmentBlocks.length > 0) {
+            // If the user didn't type anything (or just said "here" / "look at
+            // this"), replace the stored placeholder ("Sent file: X") with a
+            // strong explicit instruction so the model always analyzes the
+            // attachment on the first turn instead of asking "what would you
+            // like to know about this file?".
+            const stored = (r.content ?? "").trim();
+            const placeholder = /^sent (?:file:|\d+ files)/i.test(stored) || stored.length <= 6;
+            const attachNames = attachments.map((a) => a.name).join(", ");
+            const promptText = placeholder
+              ? `I've attached ${attachments.length === 1 ? "a file" : `${attachments.length} files`} (${attachNames}). Read ${attachments.length === 1 ? "it" : "them"} in full right now and give me a substantive analysis: what it is, the key points, notable numbers/tables/quotes, and your recommendation or takeaway. Cite the filename.`
+              : stored;
             return {
               role: "user" as const,
               content: [
-                ...(r.content ? [{ type: "text" as const, text: r.content }] : []),
+                { type: "text" as const, text: promptText },
                 ...turnAttachmentBlocks,
               ],
             };
