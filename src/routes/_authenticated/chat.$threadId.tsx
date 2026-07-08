@@ -2544,15 +2544,9 @@ function Bubble({
       <div className="group flex flex-col items-end gap-1">
         <div className="max-w-[85%] min-w-0 overflow-x-auto rounded-2xl rounded-tr-md px-4 py-2.5 text-[15px] leading-relaxed bg-primary text-primary-foreground">
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-2">
+            <div className="flex flex-wrap gap-2 mb-2">
               {attachments.map((a) => (
-                <div
-                  key={a.path}
-                  className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs bg-primary-foreground/15 text-primary-foreground"
-                >
-                  {a.mimeType.startsWith("image/") ? "🖼️" : "📎"}
-                  <span className="max-w-[180px] truncate">{a.name}</span>
-                </div>
+                <AttachmentPreview key={a.path} attachment={a} tone="user" />
               ))}
             </div>
           )}
@@ -2571,15 +2565,9 @@ function Bubble({
       </div>
       <div className="flex-1 min-w-0">
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
+          <div className="flex flex-wrap gap-2 mb-2">
             {attachments.map((a) => (
-              <div
-                key={a.path}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs bg-secondary text-foreground border border-border"
-              >
-                {a.mimeType.startsWith("image/") ? "🖼️" : "📎"}
-                <span className="max-w-[180px] truncate">{a.name}</span>
-              </div>
+              <AttachmentPreview key={a.path} attachment={a} tone="assistant" />
             ))}
           </div>
         )}
