@@ -1158,7 +1158,7 @@ export const Route = createFileRoute("/api/chat")({
                 const mustAttach = emailNeedsGeneratedAttachment(userText, subject, emailBody);
                 if (pendingAttachments.length === 0 && mustAttach) {
                   const requested = requestedFormats(`${subject}\n${emailBody}\n${userText}`);
-                  const docs = latestGeneratedDocsFromHistory(rows, requested.length ? requested : [requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`) ?? "pdf"]);
+                  const docs = latestGeneratedDocsFromHistory(rows, requested.length ? requested : [requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`) ?? "pdf"], collectedActivity);
                   if (docs.length === 0) {
                     return {
                       error:
@@ -1181,7 +1181,7 @@ export const Route = createFileRoute("/api/chat")({
                   );
                   const missing = requestedForEmail.filter((fmt) => !present.has(fmt));
                   if (missing.length > 0) {
-                    const docs = latestGeneratedDocsFromHistory(rows, missing);
+                    const docs = latestGeneratedDocsFromHistory(rows, missing, collectedActivity);
                     pendingAttachments.push(...docs.map((doc) => ({ url: doc.url, filename: doc.filename })));
                   }
                 }
@@ -1219,6 +1219,7 @@ export const Route = createFileRoute("/api/chat")({
                       const fallbackDoc = latestGeneratedDocFromHistory(
                         rows,
                         preferred,
+                        collectedActivity,
                       );
                       if (fallbackDoc?.url) {
                         const fallbackPath = storagePathFromSignedUrl(fallbackDoc.url);
