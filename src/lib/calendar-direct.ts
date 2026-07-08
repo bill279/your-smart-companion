@@ -11,8 +11,12 @@ export type DirectCalendarDraft = {
 };
 
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-const APPROVAL_RE = /^(?:yes|yep|yeah|confirm|confirmed|approved|approve|looks good|looks good looks good|send it|send|go ahead|do it|create it|schedule it|book it|proceed|finalize|yup|sure)\b/i;
-const URGENCY_RE = /\b(?:hurry|are you done|actually doing it|just stalling|finalize|finish it)\b/i;
+const APPROVAL_RE = /^(?:yes|yep|yeah|confirm|confirmed|approved|approve|looks good|go ahead|do it|create it|schedule it|book it|proceed|finalize|yup|sure)\b/i;
+const URGENCY_RE = /\b(?:hurry up|actually create it|actually book it|finalize the invite|finish the invite)\b/i;
+// If the user's message is obviously about a document/email/file action, do
+// NOT treat it as calendar approval — otherwise "send it" / "yes" after the
+// bot offers to email a PDF would spuriously trigger a calendar create.
+const NON_CALENDAR_INTENT_RE = /\b(?:email|e-mail|send (?:it |me |the )?(?:pdf|doc|document|word|file|attachment|link)|pdf|word|docx|xlsx|excel|csv|attachment|attach|download|convert|export|report|file)\b/i;
 
 function cleanValue(value: string) {
   return value
@@ -119,13 +123,26 @@ function addMinutesLocal(dateTime: string, minutes: number) {
 
 export function isCalendarApproval(text: string) {
   const normalized = text.trim();
+  if (NON_CALENDAR_INTENT_RE.test(normalized)) return false;
   return APPROVAL_RE.test(normalized) || URGENCY_RE.test(normalized);
 }
 
+// A "recent calendar draft" only counts when the LAST assistant message
+// actually proposed a meeting draft — i.e. it contains calendar keywords
+// AND at least one concrete meeting field (time, date, attendee, or a
+// Title/Time/Attendees label block). This avoids false positives from
+// off-hand mentions of "book", "schedule", or a past Outlook email.
 export function hasRecentCalendarDraft(messages: CalendarMessage[]) {
-  return messages
-    .slice(-16)
-    .some((m) => /\b(calendar invite|meeting invite|teams|outlook|book|schedule|attendees?)\b/i.test(m.content));
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  if (!lastAssistant) return false;
+  const text = lastAssistant.content;
+  const calendarish = /\b(calendar invite|meeting invite|teams meeting|outlook invite|draft (?:meeting|invite)|schedule (?:a )?meeting|book (?:a )?meeting)\b/i.test(text);
+  if (!calendarish) return false;
+  const hasDraftField =
+    /(?:^|\n)\s*(?:[-*]\s*)?(?:\*\*)?(?:Title|Time|When|Date|Attendees?)(?:\*\*)?\s*[:|-]/i.test(text) ||
+    /\b(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.))\b/i.test(text) ||
+    /\b(?:tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(text);
+  return hasDraftField;
 }
 
 export function buildCalendarDraftFromMessages(

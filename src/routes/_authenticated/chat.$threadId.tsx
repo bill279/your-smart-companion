@@ -2662,6 +2662,12 @@ function labelFor(a: ToolActivity, pending: boolean): string {
   return (
     <div className="mb-3 flex flex-col gap-1.5">
       {items.map((a, idx) => {
+        // Server-side generate_document (chat mode) returns a signed URL
+        // instead of a client artifact. Render a full doc card in place of
+        // the tool-activity chip so the user gets Preview + Download + Email.
+        if (a.name === "generate_document" && a.docFile?.url) {
+          return <RemoteDocCard key={a.id} doc={a.docFile} />;
+        }
         const isLast = idx === items.length - 1;
         const pending =
           streaming && isLast && !a.results && !a.scraped && !a.products && !a.citations && !a.error;
@@ -2985,6 +2991,141 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
             >
               <Download size={12} /> Download
             </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function RemoteDocCard({
+  doc,
+}: {
+  doc: { url: string; filename: string; formatLabel?: string; mimeType?: string; size?: number };
+}) {
+  const [sending, setSending] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const ext = doc.filename.toLowerCase().split(".").pop() ?? "";
+  const label = doc.formatLabel ?? ext.toUpperCase();
+  const canPreview = ["pdf", "docx", "csv", "txt", "md", "xlsx", "xls"].includes(ext);
+
+  async function emailToMe() {
+    setSending(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const to = u.user?.email;
+      if (!to) return toast.error("Could not find your email on file.");
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) return toast.error("Sign in again");
+      // Fetch the file bytes so we can attach it via send_email.
+      const fileRes = await fetch(doc.url);
+      if (!fileRes.ok) throw new Error("Could not download the file to attach");
+      const buf = await fileRes.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+      }
+      const base64 = btoa(binary);
+      const res = await fetch("/api/public/jarvis/tools/send_email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          to,
+          subject: doc.filename,
+          body: `Attached: **${doc.filename}** (${label}).`,
+          attachment: {
+            filename: doc.filename,
+            mimeType: doc.mimeType ?? "application/octet-stream",
+            contentBase64: base64,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "send failed");
+        throw new Error(t.slice(0, 200));
+      }
+      toast.success(`Emailed to ${to}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Send failed");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+        <FileText size={18} />
+      </div>
+      <a
+        href={doc.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="min-w-0 flex-1 text-left hover:opacity-80 transition"
+      >
+        <div className="text-sm font-medium truncate">{doc.filename}</div>
+        <div className="text-xs text-muted-foreground">
+          {label}
+          {typeof doc.size === "number" ? ` · ${formatBytes(doc.size)}` : ""}
+        </div>
+      </a>
+      {canPreview && (
+        <button
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+        >
+          <Eye size={12} /> Preview
+        </button>
+      )}
+      <a
+        href={doc.url}
+        download={doc.filename}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+      >
+        <Download size={12} /> Download
+      </a>
+      <button
+        type="button"
+        onClick={emailToMe}
+        disabled={sending}
+        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
+      >
+        <Mail size={12} /> {sending ? "Sending…" : "Email to me"}
+      </button>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="p-4 border-b border-border">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <FileText size={16} /> {doc.filename}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto bg-secondary/30">
+            <iframe
+              src={
+                ext === "pdf"
+                  ? doc.url
+                  : `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(doc.url)}`
+              }
+              title={doc.filename}
+              className="w-full h-full bg-white"
+            />
+          </div>
+          <div className="p-3 border-t border-border flex justify-end gap-2">
+            <a
+              href={doc.url}
+              download={doc.filename}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+            >
+              <Download size={12} /> Download
+            </a>
           </div>
         </DialogContent>
       </Dialog>

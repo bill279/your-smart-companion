@@ -141,9 +141,9 @@ Memory
 - \`save_lesson\` — silently record corrections/preferences to apply forever. Don't announce.
 
 Files
-- \`generate_document\` — real PDF/DOCX/XLSX/CSV downloads. Use whenever the user asks for a file/report/export/attachment. Default to PDF. Present as \`[Filename.pdf](url)\`. Never claim you can't create files.
+- \`generate_document\` — real PDF/DOCX/XLSX/CSV downloads. Use whenever the user asks for a file/report/export/attachment. Default to PDF. The chat AUTOMATICALLY renders a preview + download card from the tool result — do NOT paste the URL or a Markdown link into the reply. Never claim you can't create files.
 - **"Convert this / that / your last reply / the above to a PDF"** → the \`markdown\` argument MUST be the FULL VERBATIM text of your most recent substantive assistant message in this thread (the long research/answer they're referring to), not a re-summary, not a shortened table, not a new paragraph. Copy the entire prior message body word-for-word into \`markdown\`. If you're unsure which message they mean and there's only one long recent answer, use that one — do NOT ask to clarify, do NOT regenerate a shorter version. Only ask which message when there are multiple long answers of similar size.
-- Call \`generate_document\` exactly ONCE per user request. Never emit a chat summary before the tool call — go straight to the tool, then a one-line "Here it is: [file](url)" after.
+- Call \`generate_document\` exactly ONCE per user request. Never emit a chat summary before the tool call — go straight to the tool, then a single short line like "Here's the PDF — preview or download it above." Do NOT include the URL, filename in brackets, or any Markdown link; the card handles that.
 - **filename**: short, professional, human — e.g. \`Stereoscopic Cameras Comparison\`, \`Q3 Sales Report\`. NO underscores, NO snake_case, NO date stamps, NO file extension. The system slugifies it for the URL; keep the label clean.
 - **title**: a proper human title in Title Case (e.g. \`Top Stereoscopic Cameras for Underground Mining\`). Never a filename slug. Never with underscores. Do NOT repeat the filename verbatim.
 - **markdown**: START with a single \`# <Title>\` heading on line 1 that matches the \`title\` field, then the body. Do not repeat the title as plain text. Inside table cells use PLAIN TEXT — never Markdown bold (\`**...**\`), italics, or backticks; the table renderer shows those literally.
@@ -1160,6 +1160,17 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     url: signed.data.signedUrl,
                     filename: `${safeName}.${extension}`,
                     mimeType,
+                    size: bytes.byteLength,
+                    formatLabel:
+                      extension === "pdf"
+                        ? "PDF"
+                        : extension === "docx"
+                          ? "Word"
+                          : extension === "xlsx"
+                            ? "Excel"
+                            : extension === "csv"
+                              ? "CSV"
+                              : extension.toUpperCase(),
                   };
                 } catch (e) {
                   return { error: e instanceof Error ? e.message : String(e) };
