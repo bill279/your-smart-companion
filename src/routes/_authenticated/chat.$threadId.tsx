@@ -4,6 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
 import { createRealtimeSession } from "@/lib/realtime-voice.functions";
+import {
+  voiceWebScrape,
+  voiceProductSearch,
+  voiceKnowledgeSearch,
+  voiceRecallFacts,
+  voiceRememberFact,
+  voiceSaveLesson,
+} from "@/lib/voice-tools.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Mic, Plus, Trash2, LogOut, Send, Menu, X, ArrowDown, Users, Paperclip, FileText, Image as ImageIcon, Search, Square, RotateCcw, Download, Printer, Mail, MoreVertical, Sparkles, BookOpen, FileSpreadsheet, FileType2, Copy, Check, ThumbsUp, ThumbsDown, Globe, ShoppingBag, ExternalLink, DollarSign } from "lucide-react";
