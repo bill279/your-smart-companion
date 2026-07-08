@@ -938,6 +938,16 @@ export const Route = createFileRoute("/api/chat")({
           ? `\n\n# Current user\nThe signed-in user's email address is ${userEmail}. When they say "email me", "send it to me", or otherwise refer to themselves as the recipient, use exactly this address. Never invent or guess an email address — if you don't have one, ask.`
           : `\n\n# Current user\nYou do not know the signed-in user's email address. If they say "email me" without giving an address, ask them for it. Never invent an email address.`;
         const runtimeBlock = `\n\n# Current date/time\nCurrent server time is ${new Date().toISOString()}. Use this for relative calendar dates like "tomorrow" and "next Tuesday".`;
+        const priorDocs = listAllGeneratedDocs(rows ?? []);
+        const docsLedgerBlock =
+          priorDocs.length > 0
+            ? `\n\n# 📄 Generated documents in this thread (ledger)\nEach line is a real file already created earlier. When the user says "email/resend/attach the <X> PDF/Word", MATCH by topic/label and pass that file's exact url + filename in \`send_email\`'s \`attachments\` array. Do NOT call \`generate_document\` again for a file that already exists — regenerating creates a NEW file and the wrong one will be attached.\n${priorDocs
+                .map(
+                  (d, i) =>
+                    `${i + 1}. [${d.format.toUpperCase()}] "${d.label}" — filename: ${d.filename} — url: ${d.url}`,
+                )
+                .join("\n")}`
+            : "";
         const contactsBlock =
           contactRows.length > 0
             ? `\n\n# Saved contacts\nUse these for named recipients/attendees. Do not ask for an email when exactly one saved contact matches the name.\n${contactRows
@@ -953,7 +963,7 @@ export const Route = createFileRoute("/api/chat")({
                 .map((a) => `- ${a.name} (${a.mimeType})`)
                 .join("\n")}\n\nThe file bytes are inlined in the user message below (as image/file parts). READ THEM NOW and respond about them by default — do NOT wait for the user to explicitly ask "what's in this file". If the user typed a question, answer it using the attachment. If the user typed nothing (or just "here" / "look at this" / etc.), open the file, read every page/section, and give a substantive summary and take on it: what it is, the key points, notable numbers/tables/quotes, and — if it's a product spec sheet, comparison, or report — your recommendation. Cite the filename. Never say "I can't access the file" or "please share the file" — the bytes are already attached.`
             : "";
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${attachmentsBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${docsLedgerBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${attachmentsBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
