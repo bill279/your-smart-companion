@@ -525,6 +525,38 @@ function latestGeneratedDocsFromHistory(
   return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
 }
 
+// Full ordered list (oldest → newest) of every generated document in this
+// thread, with the tool-call label (title/subject) so the model can reference
+// the right file by topic and pass its exact URL to `send_email`.
+type GeneratedDocLedgerEntry = {
+  label: string;
+  filename: string;
+  url: string;
+  format: string;
+};
+function listAllGeneratedDocs(rows: ChatHistoryRow[]): GeneratedDocLedgerEntry[] {
+  const out: GeneratedDocLedgerEntry[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (row.role !== "assistant") continue;
+    const { activities } = extractToolActivity(row.content);
+    for (const activity of activities) {
+      const doc = activity.docFile;
+      if (!doc?.url || !doc.filename) continue;
+      if (seen.has(doc.url)) continue;
+      seen.add(doc.url);
+      const ext = doc.filename.toLowerCase().split(".").pop() ?? "";
+      out.push({
+        label: activity.label ?? doc.filename,
+        filename: doc.filename,
+        url: doc.url,
+        format: ext,
+      });
+    }
+  }
+  return out;
+}
+
 export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
