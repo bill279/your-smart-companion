@@ -671,13 +671,9 @@ function ThreadView({ threadId }: { threadId: string }) {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
         if (!md) return JSON.stringify({ error: "markdown required" });
         try {
-          setPendingAssistant(md);
-          liveAssistantRef.current = md;
           await add({ data: { threadId, role: "assistant", content: md } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          setPendingAssistant("");
-          liveAssistantRef.current = "";
-          return JSON.stringify({ ok: true });
+          return JSON.stringify({ ok: true, message: "Rendered in chat. Give ONE short spoken sentence — do not read it aloud." });
         } catch (err) {
           console.warn("show_in_chat failed", err);
           return JSON.stringify({ error: "failed to render" });
