@@ -1245,6 +1245,25 @@ function ThreadView({ threadId }: { threadId: string }) {
           await add({ data: { threadId, role: "user", content: text } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingUser(null);
+          // Speculative prefetch: if this looks like a research/list/compare
+          // question, start the full deep-answer pipeline NOW in parallel
+          // with the realtime model's tool-calling decision. When the model
+          // then calls deep_answer, it awaits this same promise instead of
+          // firing a second request — eliminating the 10–20s of dead air
+          // between "I put the full breakdown in chat" and the chat actually
+          // getting the breakdown.
+          if (looksLikeResearchQuery(text) && !deepAnswerInFlightRef.current) {
+            const promise = startDeepAnswer(text).finally(() => {
+              // Keep the resolved result around briefly so a late
+              // deep_answer tool call can still reuse it, then clear.
+              window.setTimeout(() => {
+                if (deepAnswerInFlightRef.current?.query === text) {
+                  deepAnswerInFlightRef.current = null;
+                }
+              }, 2000);
+            });
+            deepAnswerInFlightRef.current = { query: text, promise: promise as Promise<{ ok?: boolean; error?: string; note?: string }> };
+          }
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
           // Live update: show assistant turn the moment the transcript arrives.
