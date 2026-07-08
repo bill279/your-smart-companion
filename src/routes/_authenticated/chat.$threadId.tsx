@@ -2559,6 +2559,82 @@ function AttachmentPreview({
   attachment: AttachmentMeta;
   tone: "user" | "assistant";
 }) {
+  return AttachmentPreviewInner({ attachment, tone });
+}
+
+// Composer chip — clickable thumbnail preview BEFORE sending, so users can
+// verify they've picked the right image/PDF (ChatGPT-style).
+function ComposerAttachmentPreview({
+  attachment,
+  onRemove,
+}: {
+  attachment: AttachmentMeta;
+  onRemove: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getAttachmentSignedUrl(attachment.path).then((u) => {
+      if (alive && u) setUrl(u);
+    });
+    return () => { alive = false; };
+  }, [attachment.path]);
+  const isImage = attachment.mimeType.startsWith("image/");
+  const ext = attachment.name.split(".").pop()?.toUpperCase() || "";
+  const isPdf = attachment.mimeType === "application/pdf" || ext === "PDF";
+  const open = () => { if (url) window.open(url, "_blank", "noopener,noreferrer"); };
+  return (
+    <div className="relative group/chip">
+      {isImage ? (
+        <button
+          type="button"
+          onClick={open}
+          className="block h-14 w-14 rounded-lg overflow-hidden border border-border bg-secondary/60 hover:opacity-90 transition"
+          title={`Preview ${attachment.name}`}
+        >
+          {url ? (
+            <img src={url} alt={attachment.name} className="h-full w-full object-cover" />
+          ) : (
+            <div className="h-full w-full flex items-center justify-center text-muted-foreground">
+              <ImageIcon size={16} />
+            </div>
+          )}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={open}
+          className="flex items-center gap-2 h-14 pl-2 pr-3 rounded-lg border border-border bg-secondary/60 hover:bg-secondary transition max-w-[220px]"
+          title={`Preview ${attachment.name}`}
+        >
+          <div className={`flex items-center justify-center h-9 w-9 rounded-md shrink-0 ${isPdf ? "bg-[#ff5a5f] text-white" : "bg-primary/80 text-primary-foreground"}`}>
+            <FileText size={16} />
+          </div>
+          <div className="min-w-0 text-left">
+            <div className="text-xs font-medium truncate leading-tight">{attachment.name}</div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{isPdf ? "PDF" : ext || "FILE"}</div>
+          </div>
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${attachment.name}`}
+        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-foreground text-background flex items-center justify-center shadow opacity-0 group-hover/chip:opacity-100 transition"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
+function AttachmentPreviewInner({
+  attachment,
+  tone,
+}: {
+  attachment: AttachmentMeta;
+  tone: "user" | "assistant";
+}) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
