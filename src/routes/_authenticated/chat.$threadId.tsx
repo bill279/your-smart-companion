@@ -820,9 +820,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         setPendingActivity([]);
         lastDeepAnswerQueryRef.current = normalizeVoiceQuery(query);
         lastDeepAnswerCompletedAtRef.current = Date.now();
+        lastDeepAnswerTextRef.current = acc;
         return {
           ok: true,
-          note: "The full researched answer is now posted and visible in the chat. Say ONE short spoken sentence only — do NOT re-read the content aloud and do NOT post another chat message.",
+          answer: acc,
+          note: "The full researched answer is now posted and visible in the chat. Read the substance aloud in natural conversational voice (top pick + why, runners-up by name, key numbers/tradeoffs) — do NOT just say 'check the chat', and do NOT post another chat message.",
         };
       } catch (err) {
         setPendingAssistant("");
