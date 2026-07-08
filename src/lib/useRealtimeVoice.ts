@@ -557,7 +557,12 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               // server_vad, which trips on any sound above the level.
               turn_detection: {
                 type: "semantic_vad",
-                eagerness: "high",
+                // "medium" is much less trigger-happy on breath / hums /
+                // background chatter than "high" while still reacting in
+                // well under a second. Local instant-mute already gives
+                // the perceived instant stop, so we don't need "high"
+                // eagerness at the cost of false transcriptions.
+                eagerness: "medium",
                 create_response: false,
                 interrupt_response: true,
               },
