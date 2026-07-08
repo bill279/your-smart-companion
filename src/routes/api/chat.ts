@@ -1047,20 +1047,46 @@ export const Route = createFileRoute("/api/chat")({
                 }
                 if (effectiveAttachUrl) {
                   try {
-                    const r = await fetch(effectiveAttachUrl);
+                    let r = await fetch(effectiveAttachUrl);
                     let mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
                     let buf: Uint8Array | null = null;
-                    if (r.ok) {
+                    // HTML/JSON coming back from Supabase means the signed URL
+                    // is stale/invalid even with a 200 — treat as failure.
+                    if (r.ok && !/^(text\/html|application\/json)/i.test(r.headers.get("content-type") ?? "")) {
                       buf = new Uint8Array(await r.arrayBuffer());
-                    } else {
-                      const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
-                      if (!storagePath) return { error: `Could not fetch attachment (${r.status})` };
-                      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-                      const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
-                      if (dl.error || !dl.data) return { error: `Could not fetch attachment (${r.status})` };
-                      mimeType = dl.data.type || mimeType;
-                      buf = new Uint8Array(await dl.data.arrayBuffer());
                     }
+                    if (!buf) {
+                      // 1) Try to recover by re-signing the same storage path.
+                      const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
+                      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+                      if (storagePath) {
+                        const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
+                        if (!dl.error && dl.data) {
+                          mimeType = dl.data.type || mimeType;
+                          buf = new Uint8Array(await dl.data.arrayBuffer());
+                        }
+                      }
+                    }
+                    if (!buf) {
+                      // 2) Last resort: look up the most recent generated doc
+                      // of the requested format in this thread and use it.
+                      const fallbackDoc = latestGeneratedDocFromHistory(
+                        rows,
+                        requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`),
+                      );
+                      if (fallbackDoc?.url) {
+                        const fallbackPath = storagePathFromSignedUrl(fallbackDoc.url);
+                        if (fallbackPath) {
+                          const dl = await supabaseAdmin.storage.from("chat-uploads").download(fallbackPath);
+                          if (!dl.error && dl.data) {
+                            mimeType = dl.data.type || mimeType;
+                            buf = new Uint8Array(await dl.data.arrayBuffer());
+                            effectiveAttachName = effectiveAttachName || fallbackDoc.filename;
+                          }
+                        }
+                      }
+                    }
+                    if (!buf) return { error: `Could not fetch attachment (${r.status})` };
                     if (buf.byteLength > 15 * 1024 * 1024) return { error: "Attachment too large (max 15MB)" };
                     let bin = "";
                     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
