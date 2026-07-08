@@ -709,13 +709,16 @@ function ThreadView({ threadId }: { threadId: string }) {
   // progress rather than silence. Returns a serialisable result for the
   // realtime tool call.
   const startDeepAnswer = useCallback(
-    async (query: string): Promise<{ ok?: boolean; error?: string; note?: string }> => {
+    async (
+      query: string,
+      signal?: AbortSignal,
+    ): Promise<{ ok?: boolean; error?: string; note?: string }> => {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) return { error: "not signed in" };
       try {
         setPendingActivity([]);
-        setPendingAssistant("Researching…");
+        setPendingAssistant("🔍 Researching your question — pulling live sources and building the full answer. This usually takes 15–30 seconds…");
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: {
@@ -723,6 +726,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ threadId, content: query, skipUserInsert: true }),
+          signal,
         });
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
@@ -739,6 +743,12 @@ function ThreadView({ threadId }: { threadId: string }) {
           let activity: ToolActivity[] = [];
           // eslint-disable-next-line no-constant-condition
           while (true) {
+            if (signal?.aborted) {
+              try { await reader.cancel(); } catch { /* noop */ }
+              setPendingAssistant("");
+              setPendingActivity([]);
+              return { error: "cancelled by newer user turn" };
+            }
             const { value, done } = await reader.read();
             if (done) break;
             buf += decoder.decode(value, { stream: true });
@@ -771,6 +781,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         await qc.invalidateQueries({ queryKey: ["threads"] });
         setPendingAssistant("");
         setPendingActivity([]);
+        lastDeepAnswerQueryRef.current = query;
         return {
           ok: true,
           note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
@@ -778,6 +789,9 @@ function ThreadView({ threadId }: { threadId: string }) {
       } catch (err) {
         setPendingAssistant("");
         setPendingActivity([]);
+        if (err instanceof Error && err.name === "AbortError") {
+          return { error: "cancelled by newer user turn" };
+        }
         const msg = err instanceof Error ? err.message : "deep answer failed";
         return { error: msg };
       }
