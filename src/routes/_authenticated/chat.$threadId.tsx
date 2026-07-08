@@ -748,83 +748,19 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     clientTools: {
       deep_answer: async () => {
-        // Delegate to the same /api/chat pipeline the text UI uses — full
-        // gpt-5-mini + live web_search / web_scrape / product_search /
-        // knowledge base loop. Use the latest spoken transcript directly
-        // instead of regenerate=true so we don't delete the prior assistant
-        // message or race the realtime response lifecycle.
-        const { data: sess } = await supabase.auth.getSession();
-        const token = sess.session?.access_token;
-        if (!token) return { error: "not signed in" };
-        const latestUserMessage = lastVoiceUserTextRef.current || [...(messagesQ.data ?? [])].reverse().find((m) => m.role === "user")?.content?.trim() || "";
+        const latestUserMessage =
+          lastVoiceUserTextRef.current ||
+          [...(messagesQ.data ?? [])].reverse().find((m) => m.role === "user")?.content?.trim() ||
+          "";
         if (!latestUserMessage) return { error: "no user message available" };
-        try {
-          const res = await fetch("/api/chat", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ threadId, content: latestUserMessage, skipUserInsert: true }),
-          });
-          if (!res.ok) {
-            const errText = await res.text().catch(() => "");
-            return { error: `deep answer failed: ${errText.slice(0, 200)}` };
-          }
-          // Stream the deep chat answer into the UI immediately, while still
-          // draining the response so server-side onFinish saves the final
-          // assistant message.
-          const reader = res.body?.getReader();
-          if (reader) {
-            const decoder = new TextDecoder();
-            let acc = "";
-            let buf = "";
-            let inCtrl = false;
-            let activity: ToolActivity[] = [];
-            setPendingActivity([]);
-            setPendingAssistant("Researching…");
-            // eslint-disable-next-line no-constant-condition
-            while (true) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              buf += decoder.decode(value, { stream: true });
-              while (true) {
-                const idx = buf.indexOf(TOOL_FRAME_DELIM);
-                if (idx === -1) break;
-                const chunk = buf.slice(0, idx);
-                buf = buf.slice(idx + 1);
-                if (!inCtrl) {
-                  if (chunk) acc += chunk;
-                } else {
-                  try {
-                    const ev = JSON.parse(chunk) as ToolEvent;
-                    activity = foldToolEvent(activity, ev);
-                    setPendingActivity(activity);
-                  } catch {
-                    // ignore malformed frame
-                  }
-                }
-                inCtrl = !inCtrl;
-              }
-              if (!inCtrl && buf) {
-                acc += buf;
-                buf = "";
-              }
-              setPendingAssistant(cleanAssistantText(acc));
-            }
-          }
-          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
-          await qc.invalidateQueries({ queryKey: ["threads"] });
-          setPendingAssistant("");
-          setPendingActivity([]);
-          return {
-            ok: true,
-            note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "deep answer failed";
-          return { error: msg };
+        // Reuse the speculative prefetch if it matches — this is the whole
+        // point: by the time the model calls deep_answer, the answer is
+        // usually already streaming into the chat.
+        const inflight = deepAnswerInFlightRef.current;
+        if (inflight && inflight.query === latestUserMessage) {
+          return await inflight.promise;
         }
+        return await startDeepAnswer(latestUserMessage);
       },
       show_in_chat: async (params) => {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
