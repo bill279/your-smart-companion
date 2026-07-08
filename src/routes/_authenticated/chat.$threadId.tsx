@@ -1484,6 +1484,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             try { deepAnswerInFlightRef.current.abort.abort(); } catch { /* noop */ }
             deepAnswerInFlightRef.current = null;
           }
+          stopReadAloud();
           lastVoiceUserTextRef.current = text;
           // Reset 90s idle auto-stop on every user utterance.
           if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
@@ -1499,6 +1500,13 @@ function ThreadView({ threadId }: { threadId: string }) {
           await add({ data: { threadId, role: "user", content: text } });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingUser(null);
+          if (looksLikeReadAloudRequest(text) && lastDeepAnswerTextRef.current.trim()) {
+            streamVoiceReadout(lastDeepAnswerTextRef.current).catch((err) => {
+              console.warn("manual read-aloud failed", err);
+              toast.error("Read-aloud failed. I can try again if you ask me to read it.");
+            });
+            return;
+          }
           // Speculative prefetch: if this looks like a research/list/compare
           // question, start the full deep-answer pipeline NOW in parallel
           // with the realtime model's tool-calling decision. When the model
@@ -1511,13 +1519,11 @@ function ThreadView({ threadId }: { threadId: string }) {
             deepAnswerInFlightRef.current = { query: text, key: textKey, promise, abort };
             promise.then((result) => {
               if (lastVoiceUserTextRef.current && normalizeVoiceQuery(lastVoiceUserTextRef.current) !== textKey) return;
-              suppressNextVoiceAssistantRef.current = true;
-              conversationRef.current?.createResponse(voiceFollowupInstructions(result));
+              speakDeepAnswerResult(result);
             }).catch((err) => {
-              suppressNextVoiceAssistantRef.current = true;
-              conversationRef.current?.createResponse(voiceFollowupInstructions({
+              speakDeepAnswerResult({
                 error: err instanceof Error ? err.message : "background answer failed",
-              }));
+              });
             });
             promise.finally(() => {
               window.setTimeout(() => {
@@ -1675,6 +1681,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   async function stopVoice() {
     startAttemptRef.current += 1;
     clearVoiceConnectTimeout();
+    stopReadAloud();
     setVoiceState("stopping");
     pendingContextRef.current = "";
     setVoiceError(null);
@@ -1698,8 +1705,17 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
         lastVoiceUserTextRef.current = content;
+        stopReadAloud();
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
+        if (looksLikeReadAloudRequest(content) && lastDeepAnswerTextRef.current.trim()) {
+          streamVoiceReadout(lastDeepAnswerTextRef.current).catch((err) => {
+            console.warn("manual read-aloud failed", err);
+            toast.error("Read-aloud failed. I can try again if you ask me to read it.");
+          });
+          setPendingUser(null);
+          return;
+        }
         if (looksLikeResearchQuery(content)) {
           const textKey = normalizeVoiceQuery(content);
           const abort = new AbortController();
@@ -1708,13 +1724,11 @@ function ThreadView({ threadId }: { threadId: string }) {
           conversation.sendUserMessage(content, { createResponse: false });
           promise.then((result) => {
             if (lastVoiceUserTextRef.current && normalizeVoiceQuery(lastVoiceUserTextRef.current) !== textKey) return;
-            suppressNextVoiceAssistantRef.current = true;
-            conversationRef.current?.createResponse(voiceFollowupInstructions(result));
+            speakDeepAnswerResult(result);
           }).catch((err) => {
-            suppressNextVoiceAssistantRef.current = true;
-            conversationRef.current?.createResponse(voiceFollowupInstructions({
+            speakDeepAnswerResult({
               error: err instanceof Error ? err.message : "background answer failed",
-            }));
+            });
           }).finally(() => {
             window.setTimeout(() => {
               if (deepAnswerInFlightRef.current?.key === textKey) deepAnswerInFlightRef.current = null;
