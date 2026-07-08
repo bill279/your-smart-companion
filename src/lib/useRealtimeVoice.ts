@@ -73,6 +73,8 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     raf: number;
   } | null>(null);
   const localBargeInAtRef = useRef(0);
+  const instantMuteAtRef = useRef(0);
+  const instantMuteReleaseTimerRef = useRef<number | null>(null);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -141,6 +143,40 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     setIsSpeaking(false);
   }, [sendEvent]);
 
+  // Instant local mute: fires on the FIRST loud frame while the assistant
+  // is audible, WITHOUT sending anything to the server. Gives the user a
+  // true two-way-sync feel — audio drops the instant they open their
+  // mouth. If it turns out to be a noise blip and no confirmed speech
+  // follows within ~250ms, we un-mute automatically so the assistant
+  // isn't clipped by a cough or keyboard click.
+  const instantMuteLocalPlayback = useCallback(() => {
+    if (!assistantAudibleRef.current && !activeResponseRef.current) return;
+    const now = Date.now();
+    if (now - instantMuteAtRef.current < 80) return;
+    instantMuteAtRef.current = now;
+    const el = audioElRef.current;
+    if (el) {
+      try { el.muted = true; } catch (err) { console.warn(err); }
+      try { el.volume = 0; } catch (err) { console.warn(err); }
+    }
+    if (instantMuteReleaseTimerRef.current !== null) {
+      window.clearTimeout(instantMuteReleaseTimerRef.current);
+    }
+    instantMuteReleaseTimerRef.current = window.setTimeout(() => {
+      instantMuteReleaseTimerRef.current = null;
+      // If a real barge-in happened, bargeInNow already handled state.
+      // Otherwise the noise was a false alarm — restore playback.
+      if (localSpeechActiveRef.current) return;
+      const el2 = audioElRef.current;
+      if (!el2) return;
+      try { el2.muted = false; } catch (err) { console.warn(err); }
+      try { el2.volume = 1; } catch (err) { console.warn(err); }
+      if (el2.paused && (assistantAudibleRef.current || activeResponseRef.current)) {
+        el2.play().catch(() => {});
+      }
+    }, 260);
+  }, []);
+
   const markLocalSpeechStarted = useCallback(() => {
     if (localSpeechActiveRef.current) return;
     localSpeechActiveRef.current = true;
@@ -153,6 +189,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   }, [bargeInNow]);
 
   const releaseBargeIn = useCallback(() => {
+    if (instantMuteReleaseTimerRef.current !== null) {
+      window.clearTimeout(instantMuteReleaseTimerRef.current);
+      instantMuteReleaseTimerRef.current = null;
+    }
     const el = audioElRef.current;
     if (!el) return;
     try { el.muted = false; } catch (err) { console.warn(err); }
