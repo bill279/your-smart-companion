@@ -658,6 +658,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const hasConnectedVoiceRef = useRef(false);
   const voiceUserHasSpokenRef = useRef(false);
   const lastUserSpeechAtRef = useRef<number>(0);
+  const lastVoiceUserTextRef = useRef<string>("");
   const idleTimerRef = useRef<number | null>(null);
   const liveAssistantRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
@@ -741,18 +742,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       deep_answer: async () => {
         // Delegate to the same /api/chat pipeline the text UI uses — full
         // gpt-5-mini + live web_search / web_scrape / product_search /
-        // knowledge base loop. Reuses the user's most recent turn (the
-        // spoken transcript we just persisted) via regenerate=true, so the
-        // researched answer is saved to this same thread as an assistant
-        // message. Voice then speaks a one-sentence summary.
-        try {
-          conversationRef.current?.cancelResponse();
-        } catch (err) {
-          console.warn("cancelResponse before deep_answer failed", err);
-        }
+        // knowledge base loop. Use the latest spoken transcript directly
+        // instead of regenerate=true so we don't delete the prior assistant
+        // message or race the realtime response lifecycle.
         const { data: sess } = await supabase.auth.getSession();
         const token = sess.session?.access_token;
         if (!token) return { error: "not signed in" };
+        const latestUserMessage = lastVoiceUserTextRef.current || [...(messagesQ.data ?? [])].reverse().find((m) => m.role === "user")?.content?.trim() || "";
+        if (!latestUserMessage) return { error: "no user message available" };
         try {
           const res = await fetch("/api/chat", {
             method: "POST",
@@ -760,7 +757,7 @@ function ThreadView({ threadId }: { threadId: string }) {
               "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ threadId, regenerate: true }),
+            body: JSON.stringify({ threadId, content: latestUserMessage, skipUserInsert: true }),
           });
           if (!res.ok) {
             const errText = await res.text().catch(() => "");
@@ -1162,6 +1159,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           lastUserSpeechAtRef.current = Date.now();
+          lastVoiceUserTextRef.current = text;
           // Reset 90s idle auto-stop on every user utterance.
           if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
           idleTimerRef.current = window.setTimeout(() => {
@@ -1335,6 +1333,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       // If voice is connected, route through the realtime voice channel instead.
       if (isConnected && !regenerate) {
         voiceUserHasSpokenRef.current = true;
+        lastVoiceUserTextRef.current = content;
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
         conversation.sendUserMessage(content);
@@ -1612,7 +1611,7 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   async function signOut() {
     await supabase.auth.signOut();
-    navigate({ to: "/auth", search: {} });
+    navigate({ to: "/auth", search: { next: undefined } });
   }
 
   const voiceActive = voiceUiState === "connected" || voiceUiState === "starting";

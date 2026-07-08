@@ -302,6 +302,7 @@ export const Route = createFileRoute("/api/chat")({
           content?: string;
           attachments?: Array<{ path: string; name: string; mimeType: string; size?: number }>;
           regenerate?: boolean;
+          skipUserInsert?: boolean;
           forceWebSearch?: boolean;
         };
         const attachments = body.attachments ?? [];
@@ -338,7 +339,7 @@ export const Route = createFileRoute("/api/chat")({
           if (lastAssistant?.id) {
             await supabase.from("messages").delete().eq("id", lastAssistant.id);
           }
-        } else {
+        } else if (!body.skipUserInsert) {
         const { error: insErr } = await supabase.from("messages").insert({
           thread_id: body.threadId,
           user_id: userId,
@@ -413,7 +414,13 @@ export const Route = createFileRoute("/api/chat")({
             .limit(40),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
-        const rows = (histRes.data ?? []).slice().reverse();
+        let rows = (histRes.data ?? []).slice().reverse();
+        if (body.skipUserInsert && userText) {
+          const last = rows[rows.length - 1];
+          if (!last || last.role !== "user" || last.content.trim() !== userText) {
+            rows = [...rows, { role: "user", content: userText }];
+          }
+        }
         const factRows = factsRes.data;
         const lessonRows = lessonsRes.data ?? [];
         const feedbackRows = feedbackRes.data ?? [];
@@ -551,6 +558,7 @@ export const Route = createFileRoute("/api/chat")({
           model: gateway(CHAT_MODEL),
           system: systemWithUser,
           messages: baseMessages,
+          abortSignal: request.signal,
           stopWhen: stepCountIs(50),
           // Push the model toward richer, more thorough answers instead of
           // the terse default it tends to give. GPT-5.4 exposes both
