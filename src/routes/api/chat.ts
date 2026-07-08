@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
 import { computeCost, TOOL_FLAT_COST_USD } from "@/lib/usage-pricing";
+import { assertUnderCap } from "@/lib/spend-cap.functions";
 import {
   TOOL_FRAME_DELIM,
   encodeToolActivityMarker,
