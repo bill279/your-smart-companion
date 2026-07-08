@@ -706,6 +706,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastDeepAnswerQueryRef = useRef<string>("");
   const lastDeepAnswerCompletedAtRef = useRef<number>(0);
   const lastVoiceUserAtRef = useRef<number>(0);
+  const suppressNextVoiceAssistantRef = useRef(false);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -1345,8 +1346,10 @@ function ThreadView({ threadId }: { threadId: string }) {
             deepAnswerInFlightRef.current = { query: text, key: textKey, promise, abort };
             promise.then((result) => {
               if (lastVoiceUserTextRef.current && normalizeVoiceQuery(lastVoiceUserTextRef.current) !== textKey) return;
+              suppressNextVoiceAssistantRef.current = true;
               conversationRef.current?.createResponse(voiceFollowupInstructions(result));
             }).catch((err) => {
+              suppressNextVoiceAssistantRef.current = true;
               conversationRef.current?.createResponse(voiceFollowupInstructions({
                 error: err instanceof Error ? err.message : "background answer failed",
               }));
@@ -1363,12 +1366,15 @@ function ThreadView({ threadId }: { threadId: string }) {
           }
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
-          const justCompletedDeepAnswer = Date.now() - lastDeepAnswerCompletedAtRef.current < 90_000;
-          if (justCompletedDeepAnswer && (isVoiceChatPointer(cleaned) || cleaned.length < 240)) {
+          const shouldSuppressVoiceFollowup = suppressNextVoiceAssistantRef.current &&
+            (isVoiceChatPointer(cleaned) || cleaned.length < 240);
+          if (shouldSuppressVoiceFollowup) {
+            suppressNextVoiceAssistantRef.current = false;
             setPendingAssistant("");
             liveAssistantRef.current = "";
             return;
           }
+          suppressNextVoiceAssistantRef.current = false;
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
@@ -1537,8 +1543,10 @@ function ThreadView({ threadId }: { threadId: string }) {
           conversation.sendUserMessage(content, { createResponse: false });
           promise.then((result) => {
             if (lastVoiceUserTextRef.current && normalizeVoiceQuery(lastVoiceUserTextRef.current) !== textKey) return;
+            suppressNextVoiceAssistantRef.current = true;
             conversationRef.current?.createResponse(voiceFollowupInstructions(result));
           }).catch((err) => {
+            suppressNextVoiceAssistantRef.current = true;
             conversationRef.current?.createResponse(voiceFollowupInstructions({
               error: err instanceof Error ? err.message : "background answer failed",
             }));
