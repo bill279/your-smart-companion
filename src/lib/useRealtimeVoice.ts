@@ -73,6 +73,8 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     raf: number;
   } | null>(null);
   const localBargeInAtRef = useRef(0);
+  const instantMuteAtRef = useRef(0);
+  const instantMuteReleaseTimerRef = useRef<number | null>(null);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -94,6 +96,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       try { micMonitorRef.current.source.disconnect(); } catch (err) { console.warn(err); }
       try { micMonitorRef.current.ctx.close(); } catch (err) { console.warn(err); }
       micMonitorRef.current = null;
+    }
+    if (instantMuteReleaseTimerRef.current !== null) {
+      try { window.clearTimeout(instantMuteReleaseTimerRef.current); } catch (err) { console.warn(err); }
+      instantMuteReleaseTimerRef.current = null;
     }
     if (audioElRef.current) {
       try { audioElRef.current.srcObject = null; } catch (err) { console.warn(err); }
@@ -141,6 +147,40 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     setIsSpeaking(false);
   }, [sendEvent]);
 
+  // Instant local mute: fires on the FIRST loud frame while the assistant
+  // is audible, WITHOUT sending anything to the server. Gives the user a
+  // true two-way-sync feel — audio drops the instant they open their
+  // mouth. If it turns out to be a noise blip and no confirmed speech
+  // follows within ~250ms, we un-mute automatically so the assistant
+  // isn't clipped by a cough or keyboard click.
+  const instantMuteLocalPlayback = useCallback(() => {
+    if (!assistantAudibleRef.current && !activeResponseRef.current) return;
+    const now = Date.now();
+    if (now - instantMuteAtRef.current < 80) return;
+    instantMuteAtRef.current = now;
+    const el = audioElRef.current;
+    if (el) {
+      try { el.muted = true; } catch (err) { console.warn(err); }
+      try { el.volume = 0; } catch (err) { console.warn(err); }
+    }
+    if (instantMuteReleaseTimerRef.current !== null) {
+      window.clearTimeout(instantMuteReleaseTimerRef.current);
+    }
+    instantMuteReleaseTimerRef.current = window.setTimeout(() => {
+      instantMuteReleaseTimerRef.current = null;
+      // If a real barge-in happened, bargeInNow already handled state.
+      // Otherwise the noise was a false alarm — restore playback.
+      if (localSpeechActiveRef.current) return;
+      const el2 = audioElRef.current;
+      if (!el2) return;
+      try { el2.muted = false; } catch (err) { console.warn(err); }
+      try { el2.volume = 1; } catch (err) { console.warn(err); }
+      if (el2.paused && (assistantAudibleRef.current || activeResponseRef.current)) {
+        el2.play().catch(() => {});
+      }
+    }, 260);
+  }, []);
+
   const markLocalSpeechStarted = useCallback(() => {
     if (localSpeechActiveRef.current) return;
     localSpeechActiveRef.current = true;
@@ -153,6 +193,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   }, [bargeInNow]);
 
   const releaseBargeIn = useCallback(() => {
+    if (instantMuteReleaseTimerRef.current !== null) {
+      window.clearTimeout(instantMuteReleaseTimerRef.current);
+      instantMuteReleaseTimerRef.current = null;
+    }
     const el = audioElRef.current;
     if (!el) return;
     try { el.muted = false; } catch (err) { console.warn(err); }
@@ -435,6 +479,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           const buf = new Uint8Array(analyser.fftSize);
           let quietCount = 0;
           let loudCount = 0;
+          let instantHitCount = 0;
           const tick = () => {
             if (!micMonitorRef.current) return;
             analyser.getByteTimeDomainData(buf);
@@ -445,14 +490,34 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               sum += v * v;
             }
             const rms = Math.sqrt(sum / buf.length);
-            // Noise-gated barge-in. Breathing / throat-clears / keyboard
-            // clicks are short, low-energy pops — a single loud frame is
-            // NOT enough. Require sustained voice-level energy across
-            // several consecutive frames before we call it speech. Frame
-            // cadence is ~16ms, so 3 frames ≈ 50ms — still snappy for
-            // interrupting the assistant, but immune to a single pop.
-            const SPEECH_RMS = 0.06;        // higher gate → ignores breath/hum
-            const SPEECH_FRAMES = 3;        // consecutive frames required
+            // Two-tier gate for true two-way-sync feel:
+            //  * INSTANT tier — very low latency local mute. As soon as
+            //    the mic sees mild energy over 2 frames (~32ms) while
+            //    the assistant is speaking, drop local playback. This
+            //    is what makes it FEEL like ChatGPT voice: the audio
+            //    stops the instant you open your mouth. If it turns
+            //    out to be a cough / keyboard click / breath, the
+            //    auto-release in instantMuteLocalPlayback unmutes.
+            //  * CONFIRM tier — the real "user is speaking" decision.
+            //    Only after sustained voice-level energy do we send
+            //    response.cancel to the server, so background noise
+            //    doesn't kill legitimate responses.
+            const INSTANT_RMS  = 0.035;     // low: catch first syllable
+            const INSTANT_FRAMES = 2;       // ~32ms
+            const SPEECH_RMS   = 0.07;      // higher gate for real speech
+            const SPEECH_FRAMES = 4;        // ~64ms sustained
+            if (rms > INSTANT_RMS) {
+              instantHitCount++;
+              if (
+                instantHitCount >= INSTANT_FRAMES &&
+                (assistantAudibleRef.current || activeResponseRef.current) &&
+                !localSpeechActiveRef.current
+              ) {
+                instantMuteLocalPlayback();
+              }
+            } else {
+              instantHitCount = 0;
+            }
             if (rms > SPEECH_RMS) {
               loudCount++;
               quietCount = 0;
@@ -496,7 +561,12 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               // server_vad, which trips on any sound above the level.
               turn_detection: {
                 type: "semantic_vad",
-                eagerness: "high",
+                // "medium" is much less trigger-happy on breath / hums /
+                // background chatter than "high" while still reacting in
+                // well under a second. Local instant-mute already gives
+                // the perceived instant stop, so we don't need "high"
+                // eagerness at the cost of false transcriptions.
+                eagerness: "medium",
                 create_response: false,
                 interrupt_response: true,
               },
