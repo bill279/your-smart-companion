@@ -174,7 +174,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "deep_answer",
     description:
-      "PREFERRED for any research, comparison, list, ranking, 'best X', 'top N', 'options for Y', how-to, explain, recommend, draft, or any question that needs live web search or a substantive expert answer. Delegates to the full chat brain (stronger model + live web_search + web_scrape + product_search + knowledge base), which posts the researched answer (with citations, sources, and a full markdown table when relevant) directly into the chat. Do NOT compose the answer yourself with show_in_chat when deep_answer applies. After it returns, say ONE short spoken sentence pointing to the chat (e.g. \"I've put the full breakdown in the chat.\"). No arguments needed — it uses the user's most recent message in this thread.",
+      "PREFERRED for any research, comparison, list, ranking, 'best X', 'top N', 'options for Y', how-to, explain, recommend, draft, or any question that needs live web search or a substantive expert answer. Delegates to the full chat brain (stronger model + live web_search + web_scrape + product_search + knowledge base), which posts the researched answer (with citations, sources, and a full markdown table when relevant) directly into the chat. Do NOT compose the answer yourself with show_in_chat when deep_answer applies. After it returns, read the substantive answer aloud: top pick, runners-up by name, key numbers/tradeoffs, then briefly say full details and sources are in chat. Never just say check the chat. No arguments needed — it uses the user's most recent message in this thread.",
     parameters: { type: "object", properties: {} },
   },
   {
@@ -425,7 +425,7 @@ function isVoiceChatPointer(text: string) {
     /\b(full|there|in the chat|take a look|posted|laid out|up)\b/i.test(text);
 }
 
-function voiceFollowupInstructions(result: { ok?: boolean; error?: string; note?: string }) {
+function voiceFollowupInstructions(result: { ok?: boolean; error?: string; note?: string; answer?: string }) {
   if (result.ok) {
     const answer = (result as { answer?: string }).answer?.trim();
     const answerBlock = answer
@@ -445,6 +445,62 @@ function voiceFollowupInstructions(result: { ok?: boolean; error?: string; note?
     "Apologize briefly and say you're retrying or ask for one short clarification if needed.",
     "Do not claim anything is in the chat.",
   ].join(" ");
+}
+
+function stripMarkdownForSpeech(text: string) {
+  return cleanAssistantText(text)
+    .replace(/```[\s\S]*?```/g, " ")
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (/^\|/.test(trimmed)) return false;
+      if (/^[-:|\s]+$/.test(trimmed)) return false;
+      if (/^\s*#{1,6}\s*$/.test(trimmed)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(ARTIFACT_MARKER_RE, " ")
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function chunkForSpeech(text: string, maxWords = 260) {
+  const wordCount = (s: string) => (s.match(/\S+/g) ?? []).length;
+  const sentences = text.match(/[^.!?]+[.!?]*\s*/g) ?? [text];
+  const chunks: string[] = [];
+  let current = "";
+  const flush = () => {
+    if (current.trim()) chunks.push(current.trim());
+    current = "";
+  };
+  for (const sentence of sentences) {
+    if (wordCount(sentence) > maxWords) {
+      flush();
+      const words = sentence.match(/\S+/g) ?? [];
+      for (let i = 0; i < words.length; i += maxWords) {
+        chunks.push(words.slice(i, i + maxWords).join(" "));
+      }
+      continue;
+    }
+    if (current && wordCount(current) + wordCount(sentence) > maxWords) flush();
+    current += sentence;
+  }
+  flush();
+  return chunks;
+}
+
+function looksLikeReadAloudRequest(text: string) {
+  return /\b(read|say|speak|tell)\b[\s\S]{0,50}\b(it|that|this|answer|response|message|out loud|aloud)\b/i.test(text) ||
+    /\b(read it|read that|read this|read the answer|read the response|say it out loud|speak it)\b/i.test(text);
 }
 
 function cleanThreadTitle(title: string) {
@@ -715,6 +771,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const lastDeepAnswerTextRef = useRef<string>("");
   const lastVoiceUserAtRef = useRef<number>(0);
   const suppressNextVoiceAssistantRef = useRef(false);
+  const readAloudAbortRef = useRef<AbortController | null>(null);
+  const readAloudAudioRef = useRef<AudioContext | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -839,6 +897,103 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     [threadId, qc],
   );
+
+  const stopReadAloud = useCallback(() => {
+    readAloudAbortRef.current?.abort();
+    readAloudAbortRef.current = null;
+  }, []);
+
+  const streamVoiceReadout = useCallback(async (rawText: string) => {
+    const spokenText = stripMarkdownForSpeech(rawText);
+    if (!spokenText) return;
+    stopReadAloud();
+    const controller = new AbortController();
+    readAloudAbortRef.current = controller;
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    if (!token) throw new Error("not signed in");
+
+    const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) throw new Error("Audio playback is not supported in this browser");
+    const audioCtx = readAloudAudioRef.current ?? new AudioContextCtor({ sampleRate: 24000 });
+    readAloudAudioRef.current = audioCtx;
+    if (audioCtx.state === "suspended") await audioCtx.resume().catch(() => {});
+
+    let playhead = 0;
+    let pending = new Uint8Array(0);
+    const playPcm = (incoming: Uint8Array) => {
+      const bytes = new Uint8Array(pending.length + incoming.length);
+      bytes.set(pending);
+      bytes.set(incoming, pending.length);
+      const usable = bytes.length - (bytes.length % 2);
+      pending = bytes.slice(usable);
+      if (usable === 0) return;
+      const samples = new Int16Array(bytes.buffer.slice(0, usable));
+      const floats = Float32Array.from(samples, (sample) => sample / 32768);
+      const buffer = audioCtx.createBuffer(1, floats.length, 24000);
+      buffer.copyToChannel(floats, 0);
+      const source = audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioCtx.destination);
+      playhead = playhead === 0 ? audioCtx.currentTime + 0.05 : Math.max(playhead, audioCtx.currentTime);
+      source.start(playhead);
+      playhead += buffer.duration;
+    };
+
+    const parseSseBlock = (block: string) => {
+      const data = block
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim())
+        .join("\n");
+      if (!data || data === "[DONE]") return;
+      let payload: { type?: string; audio?: string };
+      try { payload = JSON.parse(data); } catch { return; }
+      if (payload.type !== "speech.audio.delta" || !payload.audio) return;
+      const binary = atob(payload.audio);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      playPcm(bytes);
+    };
+
+    for (const chunk of chunkForSpeech(spokenText)) {
+      if (controller.signal.aborted) return;
+      const res = await fetch("/api/voice-readout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text: chunk }),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        throw new Error(`read-aloud failed: ${res.status} ${await res.text().catch(() => "")}`.trim());
+      }
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() ?? "";
+        blocks.forEach(parseSseBlock);
+      }
+      if (buffer.trim()) parseSseBlock(buffer);
+    }
+  }, [stopReadAloud]);
+
+  const speakDeepAnswerResult = useCallback((result: { ok?: boolean; error?: string; note?: string; answer?: string }) => {
+    const answer = result.answer?.trim() || lastDeepAnswerTextRef.current.trim();
+    if (result.ok && answer) {
+      streamVoiceReadout(answer).catch((err) => {
+        console.warn("voice readout failed; falling back to realtime", err);
+        suppressNextVoiceAssistantRef.current = true;
+        conversationRef.current?.createResponse(voiceFollowupInstructions({ ...result, answer }));
+      });
+      return;
+    }
+    suppressNextVoiceAssistantRef.current = true;
+    conversationRef.current?.createResponse(voiceFollowupInstructions(result));
+  }, [streamVoiceReadout]);
 
   // Heuristic: does this spoken turn deserve the full research pipeline?
   // Keep it broad — false positives just do extra work quietly in the

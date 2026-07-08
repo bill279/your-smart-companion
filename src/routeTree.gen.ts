@@ -13,6 +13,7 @@ import { Route as McpRouteImport } from './routes/mcp'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiVoiceReadoutRouteImport } from './routes/api/voice-readout'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as AuthenticatedUsageRouteImport } from './routes/_authenticated/usage'
 import { Route as AuthenticatedKnowledgeRouteImport } from './routes/_authenticated/knowledge'
@@ -51,6 +52,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiVoiceReadoutRoute = ApiVoiceReadoutRouteImport.update({
+  id: '/api/voice-readout',
+  path: '/api/voice-readout',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiChatRoute = ApiChatRouteImport.update({
@@ -176,6 +182,7 @@ export interface FileRoutesByFullPath {
   '/knowledge': typeof AuthenticatedKnowledgeRoute
   '/usage': typeof AuthenticatedUsageRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/voice-readout': typeof ApiVoiceReadoutRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
@@ -201,6 +208,7 @@ export interface FileRoutesByTo {
   '/knowledge': typeof AuthenticatedKnowledgeRoute
   '/usage': typeof AuthenticatedUsageRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/voice-readout': typeof ApiVoiceReadoutRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
@@ -228,6 +236,7 @@ export interface FileRoutesById {
   '/_authenticated/knowledge': typeof AuthenticatedKnowledgeRoute
   '/_authenticated/usage': typeof AuthenticatedUsageRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/voice-readout': typeof ApiVoiceReadoutRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
@@ -255,6 +264,7 @@ export interface FileRouteTypes {
     | '/knowledge'
     | '/usage'
     | '/api/chat'
+    | '/api/voice-readout'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
     | '/chat/$threadId'
@@ -280,6 +290,7 @@ export interface FileRouteTypes {
     | '/knowledge'
     | '/usage'
     | '/api/chat'
+    | '/api/voice-readout'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
     | '/chat/$threadId'
@@ -306,6 +317,7 @@ export interface FileRouteTypes {
     | '/_authenticated/knowledge'
     | '/_authenticated/usage'
     | '/api/chat'
+    | '/api/voice-readout'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
     | '/_authenticated/chat/$threadId'
@@ -328,6 +340,7 @@ export interface RootRouteChildren {
   Char91DotmcpChar93ListToolsRoute: typeof Char91DotmcpChar93ListToolsRoute
   Char91DotwellKnownChar93OauthProtectedResourceRoute: typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   ApiChatRoute: typeof ApiChatRoute
+  ApiVoiceReadoutRoute: typeof ApiVoiceReadoutRoute
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
   ApiPublicWebSearchRoute: typeof ApiPublicWebSearchRoute
@@ -368,6 +381,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/voice-readout': {
+      id: '/api/voice-readout'
+      path: '/api/voice-readout'
+      fullPath: '/api/voice-readout'
+      preLoaderRoute: typeof ApiVoiceReadoutRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/chat': {
@@ -545,6 +565,7 @@ const rootRouteChildren: RootRouteChildren = {
   Char91DotwellKnownChar93OauthProtectedResourceRoute:
     Char91DotwellKnownChar93OauthProtectedResourceRoute,
   ApiChatRoute: ApiChatRoute,
+  ApiVoiceReadoutRoute: ApiVoiceReadoutRoute,
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
   ApiPublicWebSearchRoute: ApiPublicWebSearchRoute,
