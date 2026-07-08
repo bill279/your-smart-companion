@@ -1537,7 +1537,22 @@ function ThreadView({ threadId }: { threadId: string }) {
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
-          await add({ data: { threadId, role: "user", content: text } });
+          // Attach any files the user uploaded while voice was active so they
+          // render as clickable previews on the user's transcript bubble,
+          // just like in chat mode. Clear the composer chips after sending.
+          const pendingFiles = attachmentsRef.current;
+          if (pendingFiles.length > 0) {
+            setAttachments([]);
+            attachmentsRef.current = [];
+          }
+          await add({
+            data: {
+              threadId,
+              role: "user",
+              content: text,
+              ...(pendingFiles.length > 0 ? { attachments: pendingFiles } : {}),
+            },
+          });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingUser(null);
           if (looksLikeReadAloudRequest(text) && lastDeepAnswerTextRef.current.trim()) {
