@@ -667,6 +667,10 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const conversation = useRealtimeVoice({
     toolDefs: REALTIME_TOOL_DEFS,
+    onUsage: (u) => {
+      // Fire-and-forget: log per-turn realtime token usage for the spend dashboard.
+      logUsage({ data: u }).catch((err) => console.warn("logVoiceUsage failed", err));
+    },
     clientTools: {
       show_in_chat: async (params) => {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
