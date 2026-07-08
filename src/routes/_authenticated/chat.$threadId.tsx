@@ -722,6 +722,13 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Mirror attachments in a ref so the voice onMessage closure (registered
+  // once with the realtime hook) can read the latest pending uploads and
+  // attach them to the voice-driven user turn.
+  const attachmentsRef = useRef<Attachment[]>([]);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
   const [chatSearch, setChatSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
