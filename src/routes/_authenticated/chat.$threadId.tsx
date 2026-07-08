@@ -414,6 +414,30 @@ function cleanAssistantText(text: string) {
     .trim();
 }
 
+function normalizeVoiceQuery(text: string) {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function isVoiceChatPointer(text: string) {
+  return /\b(chat|breakdown|comparison|details|laid out|posted|full answer|full list)\b/i.test(text) &&
+    /\b(full|there|in the chat|take a look|posted|laid out|up)\b/i.test(text);
+}
+
+function voiceFollowupInstructions(result: { ok?: boolean; error?: string; note?: string }) {
+  if (result.ok) {
+    return [
+      "The full answer is already visible in the chat now.",
+      "Speak exactly one short sentence that says it is ready and give the top recommendation if the tool note includes one.",
+      "Do not add another list, table, comparison, or second summary to the chat.",
+    ].join(" ");
+  }
+  return [
+    `The background chat answer did not complete successfully: ${result.error ?? "unknown error"}.",
+    "Apologize briefly and say you're retrying or ask for one short clarification if needed.",
+    "Do not claim anything is in the chat.",
+  ].join(" ");
+}
+
 function cleanThreadTitle(title: string) {
   const cleaned = cleanAssistantText(title);
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
