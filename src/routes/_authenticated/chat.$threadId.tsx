@@ -722,6 +722,13 @@ function ThreadView({ threadId }: { threadId: string }) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Mirror attachments in a ref so the voice onMessage closure (registered
+  // once with the realtime hook) can read the latest pending uploads and
+  // attach them to the voice-driven user turn.
+  const attachmentsRef = useRef<Attachment[]>([]);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
   const [chatSearch, setChatSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
@@ -1530,7 +1537,22 @@ function ThreadView({ threadId }: { threadId: string }) {
           try { conversationRef.current?.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
           // Live update: show the user's spoken turn immediately.
           setPendingUser(text);
-          await add({ data: { threadId, role: "user", content: text } });
+          // Attach any files the user uploaded while voice was active so they
+          // render as clickable previews on the user's transcript bubble,
+          // just like in chat mode. Clear the composer chips after sending.
+          const pendingFiles = attachmentsRef.current;
+          if (pendingFiles.length > 0) {
+            setAttachments([]);
+            attachmentsRef.current = [];
+          }
+          await add({
+            data: {
+              threadId,
+              role: "user",
+              content: text,
+              ...(pendingFiles.length > 0 ? { attachments: pendingFiles } : {}),
+            },
+          });
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           setPendingUser(null);
           if (looksLikeReadAloudRequest(text) && lastDeepAnswerTextRef.current.trim()) {
