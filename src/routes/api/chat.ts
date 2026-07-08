@@ -1582,7 +1582,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               }),
               execute: async ({ format, filename, title, markdown }) => {
                 try {
-                  if (looksLikeCalendarInviteText(`${title}\n${filename}\n${markdown}`)) {
+                  const safeTitle = cleanDocumentTitle(title, titleFromSource(markdown, "Generated Document"));
+                  const safeMarkdown = normalizeDocumentBody(markdown, safeTitle);
+                  const safeFilenameBase = cleanFilenameBase(
+                    looksLikeNoisyVoiceTitle(filename) ? safeTitle : filename,
+                  );
+                  if (looksLikeCalendarInviteText(`${safeTitle}\n${safeFilenameBase}\n${safeMarkdown}`)) {
                     return {
                       error:
                         "This is a calendar/Teams invite, not a document. Call create_calendar_event with online_meeting=true so Outlook sends the real invite and Teams link.",
@@ -1591,10 +1596,10 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   const { generateDocument } = await import("@/lib/document-generator.server");
                   const { bytes, mimeType, extension } = await generateDocument({
                     format,
-                    title,
-                    markdown,
+                    title: safeTitle,
+                    markdown: safeMarkdown,
                   });
-                  const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
+                  const safeName = safeFilenameBase.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
                   // Put the timestamp in a folder segment so the visible
                   // filename in the URL stays clean (e.g. no "1783...-name").
                   const path = `generated/${userId}/${Date.now().toString(36)}/${safeName}.${extension}`;
