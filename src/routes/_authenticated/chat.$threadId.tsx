@@ -1467,6 +1467,15 @@ function ThreadView({ threadId }: { threadId: string }) {
     onMessage: async (message) => {
       const text = message?.message;
       if (!text) return;
+      if (message.source === "user" && message.isFinal === false) {
+        voiceUserHasSpokenRef.current = true;
+        lastUserSpeechAtRef.current = Date.now();
+        lastVoiceUserTextRef.current = text;
+        stopReadAloud();
+        try { conversationRef.current?.cancelResponse(); } catch { /* noop */ }
+        setPendingUser(text);
+        return;
+      }
       const eventKey = `${message.source}:${message.event_id ?? text}`;
       if (seenVoiceEventsRef.current.has(eventKey)) return;
       seenVoiceEventsRef.current.add(eventKey);

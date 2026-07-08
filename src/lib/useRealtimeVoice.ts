@@ -18,6 +18,7 @@ export type RealtimeMessage = {
   source: "user" | "ai";
   message: string;
   event_id?: string;
+  isFinal?: boolean;
 };
 
 export type RealtimeAssistantDelta = {
@@ -61,6 +62,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   const activeResponseRef = useRef(false);
   const assistantAudibleRef = useRef(false);
   const localSpeechActiveRef = useRef(false);
+  const userTranscriptAccumRef = useRef<Map<string, string>>(new Map());
   const responseCreatePendingRef = useRef(false);
   const responseCreateInFlightRef = useRef(false);
   const responseInstructionsPendingRef = useRef<string | undefined>(undefined);
@@ -97,6 +99,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       try { audioElRef.current.srcObject = null; } catch (err) { console.warn(err); }
     }
     assistantAccumRef.current.clear();
+    userTranscriptAccumRef.current.clear();
     activeResponseRef.current = false;
     assistantAudibleRef.current = false;
     localSpeechActiveRef.current = false;
@@ -216,9 +219,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         type === "conversation.item.input_audio_transcription.delta" ||
         type === "conversation.item.input_audio_transcription.updated"
       ) {
-        const text = String((msg.delta ?? msg.transcript ?? "")).trim();
+        const itemId = String(msg.item_id ?? "live");
+        const delta = String(msg.delta ?? "");
+        const transcript = String(msg.transcript ?? "");
+        const next = (transcript || `${userTranscriptAccumRef.current.get(itemId) ?? ""}${delta}`).trim();
+        if (next) userTranscriptAccumRef.current.set(itemId, next);
+        const text = next;
         if (text) {
-          opts.onMessage?.({ source: "user", message: text, event_id: String(msg.item_id ?? "") });
+          opts.onMessage?.({ source: "user", message: text, event_id: itemId, isFinal: false });
         }
         return;
       }
@@ -228,9 +236,11 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         type === "conversation.item.input_audio_transcription.completed" ||
         type === "conversation.item.input_audio_transcription.done"
       ) {
+        const itemId = String(msg.item_id ?? "");
         const text = String(msg.transcript ?? "").trim();
+        if (itemId) userTranscriptAccumRef.current.delete(itemId);
         if (text) {
-          opts.onMessage?.({ source: "user", message: text, event_id: String(msg.item_id ?? "") });
+          opts.onMessage?.({ source: "user", message: text, event_id: itemId, isFinal: true });
         }
         return;
       }
