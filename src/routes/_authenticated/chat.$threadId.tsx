@@ -1498,6 +1498,17 @@ function ThreadView({ threadId }: { threadId: string }) {
             deepAnswerInFlightRef.current = null;
           }
           stopReadAloud();
+          // Preempt any in-flight assistant response the moment a new user
+          // turn arrives. Realtime VAD sometimes lets the model keep
+          // generating a reply to the PREVIOUS turn ("Got it, what's next?")
+          // for a beat after the user has already asked something new,
+          // producing a stale spoken/typed answer that lands out of order.
+          // Cancelling here guarantees the next createResponse binds to the
+          // fresh user turn.
+          try { conversationRef.current?.cancelResponse(); } catch { /* noop */ }
+          suppressNextVoiceAssistantRef.current = false;
+          setPendingAssistant("");
+          liveAssistantRef.current = "";
           lastVoiceUserTextRef.current = text;
           // Reset 90s idle auto-stop on every user utterance.
           if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
