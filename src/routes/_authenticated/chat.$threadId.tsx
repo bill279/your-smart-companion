@@ -750,7 +750,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     async (
       query: string,
       signal?: AbortSignal,
-    ): Promise<{ ok?: boolean; error?: string; note?: string }> => {
+    ): Promise<{ ok?: boolean; error?: string; note?: string; answer?: string }> => {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) return { error: "not signed in" };
@@ -772,10 +772,10 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingActivity([]);
           return { error: `deep answer failed: ${errText.slice(0, 200)}` };
         }
+        let acc = "";
         const reader = res.body?.getReader();
         if (reader) {
           const decoder = new TextDecoder();
-          let acc = "";
           let buf = "";
           let inCtrl = false;
           let activity: ToolActivity[] = [];
