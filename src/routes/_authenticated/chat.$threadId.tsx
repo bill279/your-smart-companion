@@ -83,7 +83,7 @@ You are a genuinely knowledgeable expert. Your training covers vendors, products
 
 # 3. Depth (still applies — depth goes into show_in_chat, not the spoken track)
 - Simple factual / yes-no / chit-chat → answer aloud in 1–3 sentences, no tool.
-- Analysis, comparison, how-to, explain, recommend, draft, or any "options/best/list" question → the FULL substantive answer (roughly 350–800 words with real numbers, named products, tradeoffs, "why", edge cases, a pick at the end) goes into show_in_chat. Then speak one short sentence like "I've put the full breakdown in the chat — top pick is X."
+- Analysis, comparison, how-to, explain, recommend, draft, or any "options/best/list" question → the FULL substantive answer (roughly 350–800 words with real numbers, named products, tradeoffs, "why", edge cases, a pick at the end) goes into show_in_chat. Then READ THE KEY FINDINGS ALOUD in natural conversational voice — the top pick and why, the runners-up by name, the key numbers/tradeoffs — roughly 30–60 seconds of speech. Don't just say "check the chat"; the whole point of voice is that the user hears the answer.
 - BE EXHAUSTIVE ON THE FIRST TRY. If the user asks for "the best X", "options for Y", "vendors that do Z", "a list of…", the show_in_chat markdown must include AT LEAST 7–10 items unless the user gave a smaller number or the category genuinely only has a few serious options (say so explicitly).
 - TABLES MUST BE COMPLETE. Every item goes into the markdown table itself — no truncated 3-row previews. If you also attach a document via generate_document, the chat table and the document must have the SAME rows.
 
@@ -100,7 +100,7 @@ Forbidden answer shapes (spoken OR in show_in_chat):
 Clean Markdown. ## headings for multi-part answers. Short paragraphs (2–4 lines). **Bold** for key terms. Bullets only when they aid scanning. Full GitHub-Flavored Markdown tables using pipes for any comparison/schedule/spec/tabular content. Fenced code blocks with a language tag for code. Never wrap the whole reply in a code block. Never dump raw JSON.
 
 # 5. Tools (call them; don't narrate)
-- deep_answer — YOUR PRIMARY TOOL for any research, comparison, ranking, list, "best X", "top N", "options for Y", how-to, explain, recommend, or long-draft question. Delegates to the full chat brain (stronger reasoning model + live web_search + web_scrape + product_search + knowledge base) which posts the full researched answer (with citations, sources, complete table when relevant) directly into the chat. YOU DO NOT compose these answers yourself. Call deep_answer with no arguments — it uses the user's most recent message. CRITICAL ORDERING: (1) call deep_answer FIRST, in silence — do NOT speak beforehand, do NOT say "let me search", "one sec", "I'll put it in the chat", or anything else before calling. (2) WAIT for the tool to return. (3) ONLY THEN speak ONE short sentence pointing to the chat ("The full breakdown's up in the chat — top pick is X.", "It's in the chat."). Never announce that something is in the chat before the tool has returned. Never re-read the content aloud.
+- deep_answer — YOUR PRIMARY TOOL for any research, comparison, ranking, list, "best X", "top N", "options for Y", how-to, explain, recommend, or long-draft question. Delegates to the full chat brain (stronger reasoning model + live web_search + web_scrape + product_search + knowledge base) which posts the full researched answer (with citations, sources, complete table when relevant) directly into the chat. YOU DO NOT compose these answers yourself. Call deep_answer with no arguments — it uses the user's most recent message. CRITICAL ORDERING: (1) call deep_answer FIRST, in silence — do NOT speak beforehand, do NOT say "let me search", "one sec", "I'll put it in the chat", or anything else before calling. (2) WAIT for the tool to return — the result includes the full answer text. (3) ONLY THEN speak the substance aloud in natural conversational voice using that answer text: name the top pick and why (1–2 sentences), then the runners-up with a brief reason each, then key numbers/tradeoffs or the recommendation — roughly 30–60 seconds total. End with a brief pointer like "full details and sources are in the chat." NEVER just say "check the chat" without reading the substance — voice users need to hear the answer. Never read URLs, long tables, or citation lists aloud — summarize them.
 - IMPORTANT: for research/list/comparison questions, the app may already be running deep_answer in the background before you respond. If so, wait silently for the tool result / system instruction. Do not give a premature spoken placeholder.
 - show_in_chat — ONLY for short structured content you're composing yourself: a draft email you wrote from the user's dictation, a code snippet, or a simple table with data you already have in the conversation. NOT for research or "best X" answers — use deep_answer for those. After it returns, one short spoken summary sentence.
 - web_search / web_scrape / product_search / search_knowledge_base — you almost never need these directly, because deep_answer runs them inside the chat brain. Use them only for a quick spoken fact-check (a single price, a phone number, an address) where a full deep_answer would be overkill.
@@ -427,11 +427,18 @@ function isVoiceChatPointer(text: string) {
 
 function voiceFollowupInstructions(result: { ok?: boolean; error?: string; note?: string }) {
   if (result.ok) {
+    const answer = (result as { answer?: string }).answer?.trim();
+    const answerBlock = answer
+      ? `\n\nHere is the answer that was just posted to the chat — read the substance of it aloud in natural conversational voice:\n\n"""\n${answer.slice(0, 6000)}\n"""`
+      : "";
     return [
-      "The full answer is already visible in the chat now.",
-      "Speak exactly one short sentence that says it is ready and give the top recommendation if the tool note includes one.",
-      "Do not add another list, table, comparison, or second summary to the chat.",
-    ].join(" ");
+      "The full answer is now visible in the chat.",
+      "Read the substance aloud in natural conversational voice — name the top pick and why, mention the runners-up by name with a brief reason, and hit the key numbers or tradeoffs. Aim for roughly 30–60 seconds of speech.",
+      "Do NOT just say 'check the chat' — the whole point of voice is that the user hears the answer.",
+      "Do NOT read URLs, long tables, or citation lists aloud — summarize sources by name.",
+      "End with a brief pointer like 'full details and sources are in the chat.'",
+      "Do NOT post another chat message.",
+    ].join(" ") + answerBlock;
   }
   return [
     `The background chat answer did not complete successfully: ${result.error ?? "unknown error"}.`,
@@ -696,7 +703,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const deepAnswerInFlightRef = useRef<{
     query: string;
     key: string;
-    promise: Promise<{ ok?: boolean; error?: string; note?: string }>;
+    promise: Promise<{ ok?: boolean; error?: string; note?: string; answer?: string }>;
     abort: AbortController;
   } | null>(null);
   // Query text of the most recently COMPLETED deep_answer run. If the model
@@ -705,6 +712,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   // the whole /api/chat pipeline and posting a duplicate answer.
   const lastDeepAnswerQueryRef = useRef<string>("");
   const lastDeepAnswerCompletedAtRef = useRef<number>(0);
+  const lastDeepAnswerTextRef = useRef<string>("");
   const lastVoiceUserAtRef = useRef<number>(0);
   const suppressNextVoiceAssistantRef = useRef(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -742,7 +750,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     async (
       query: string,
       signal?: AbortSignal,
-    ): Promise<{ ok?: boolean; error?: string; note?: string }> => {
+    ): Promise<{ ok?: boolean; error?: string; note?: string; answer?: string }> => {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) return { error: "not signed in" };
@@ -764,10 +772,10 @@ function ThreadView({ threadId }: { threadId: string }) {
           setPendingActivity([]);
           return { error: `deep answer failed: ${errText.slice(0, 200)}` };
         }
+        let acc = "";
         const reader = res.body?.getReader();
         if (reader) {
           const decoder = new TextDecoder();
-          let acc = "";
           let buf = "";
           let inCtrl = false;
           let activity: ToolActivity[] = [];
@@ -813,9 +821,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         setPendingActivity([]);
         lastDeepAnswerQueryRef.current = normalizeVoiceQuery(query);
         lastDeepAnswerCompletedAtRef.current = Date.now();
+        lastDeepAnswerTextRef.current = acc;
         return {
           ok: true,
-          note: "The full researched answer is now posted and visible in the chat. Say ONE short spoken sentence only — do NOT re-read the content aloud and do NOT post another chat message.",
+          answer: acc,
+          note: "The full researched answer is now posted and visible in the chat. Read the substance aloud in natural conversational voice (top pick + why, runners-up by name, key numbers/tradeoffs) — do NOT just say 'check the chat', and do NOT post another chat message.",
         };
       } catch (err) {
         setPendingAssistant("");
