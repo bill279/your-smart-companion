@@ -280,14 +280,6 @@ function normalizeDocumentBody(markdown: string, title: string) {
   return /^#\s+\S/m.test(md) ? md : `# ${title}\n\n${md || title}`;
 }
 
-function requestedFormat(text: string): "pdf" | "docx" | "xlsx" | "csv" | null {
-  if (/\b(pdf)\b/i.test(text)) return "pdf";
-  if (/\b(docx|word\s*doc|word)\b/i.test(text)) return "docx";
-  if (/\b(xlsx|excel|spreadsheet)\b/i.test(text)) return "xlsx";
-  if (/\b(csv)\b/i.test(text)) return "csv";
-  return null;
-}
-
 function stripPersistedMarkers(content: string) {
   return cleanAssistantText(content)
     .replace(/<!--tool-activity:[A-Za-z0-9+/=]+-->\s*/g, "")
