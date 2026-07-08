@@ -372,6 +372,49 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         localStreamRef.current = stream;
         stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
+        // Local RMS monitor: fires bargeInNow() the instant the mic picks up
+        // voice-level energy, so we don't wait ~200–500ms for the server VAD
+        // event to round-trip back over the data channel.
+        try {
+          const AudioCtx =
+            (window.AudioContext ||
+              (window as unknown as { webkitAudioContext?: typeof AudioContext })
+                .webkitAudioContext)!;
+          const ctx = new AudioCtx();
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          analyser.smoothingTimeConstant = 0.2;
+          source.connect(analyser);
+          const buf = new Uint8Array(analyser.fftSize);
+          let aboveCount = 0;
+          const tick = () => {
+            if (!micMonitorRef.current) return;
+            analyser.getByteTimeDomainData(buf);
+            // RMS around 128 midpoint, 0..1
+            let sum = 0;
+            for (let i = 0; i < buf.length; i++) {
+              const v = (buf[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / buf.length);
+            // Only interrupt when the assistant is actively speaking.
+            if (rms > 0.04) {
+              aboveCount++;
+              if (aboveCount >= 2 && activeResponseRef.current) {
+                bargeInNow();
+              }
+            } else {
+              aboveCount = 0;
+            }
+            micMonitorRef.current.raf = requestAnimationFrame(tick);
+          };
+          micMonitorRef.current = { ctx, analyser, source, raf: 0 };
+          micMonitorRef.current.raf = requestAnimationFrame(tick);
+        } catch (err) {
+          console.warn("mic monitor init failed", err);
+        }
+
         const dc = pc.createDataChannel("oai-events");
         dcRef.current = dc;
 
