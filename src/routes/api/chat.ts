@@ -582,33 +582,37 @@ export const Route = createFileRoute("/api/chat")({
         if (insErr) return new Response(insErr.message, { status: 400 });
         }
 
-        // Generate signed URLs for any attachments on the just-sent message
-        // (used as multimodal blocks for the model on this turn).
-        // Sign all attachment URLs in parallel.
-        const signedResults = await Promise.all(
-          attachments.map((a) =>
-            supabase.storage.from("chat-uploads").createSignedUrl(a.path, 60 * 60),
-          ),
-        );
+        // Download attachment bytes on the server so the model always has
+        // access. Passing signed URLs is fragile: the model provider may not
+        // be able to fetch them, or the URL can expire mid-turn. Inlining
+        // the bytes as Uint8Array is the reliable path for both images and
+        // PDFs/docs.
         const turnAttachmentBlocks: Array<
-          | { type: "image"; image: URL; mediaType: string }
-          | { type: "file"; data: URL; mediaType: string; filename: string }
+          | { type: "image"; image: Uint8Array; mediaType: string }
+          | { type: "file"; data: Uint8Array; mediaType: string; filename: string }
         > = [];
-        attachments.forEach((a, i) => {
-          const signed = signedResults[i]?.data;
-          if (!signed?.signedUrl) return;
-          const url = new URL(signed.signedUrl);
-          if (a.mimeType.startsWith("image/")) {
-            turnAttachmentBlocks.push({ type: "image", image: url, mediaType: a.mimeType });
-          } else {
-            turnAttachmentBlocks.push({
-              type: "file",
-              data: url,
-              mediaType: a.mimeType,
-              filename: a.name,
-            });
+        if (attachments.length > 0) {
+          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+          const dls = await Promise.all(
+            attachments.map((a) => supabaseAdmin.storage.from("chat-uploads").download(a.path)),
+          );
+          for (let i = 0; i < attachments.length; i++) {
+            const a = attachments[i];
+            const dl = dls[i];
+            if (dl.error || !dl.data) continue;
+            const buf = new Uint8Array(await dl.data.arrayBuffer());
+            if (a.mimeType.startsWith("image/")) {
+              turnAttachmentBlocks.push({ type: "image", image: buf, mediaType: a.mimeType });
+            } else {
+              turnAttachmentBlocks.push({
+                type: "file",
+                data: buf,
+                mediaType: a.mimeType || "application/octet-stream",
+                filename: a.name,
+              });
+            }
           }
-        });
+        }
 
         // Load recent history + facts in parallel. Cap history tightly for speed;
         // durable context lives in user_facts / lessons, not the full transcript.
