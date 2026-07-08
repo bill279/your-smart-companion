@@ -12,6 +12,8 @@ import {
   BorderStyle,
   ShadingType,
   PageOrientation,
+  LevelFormat,
+  AlignmentType,
 } from "docx";
 import * as XLSX from "xlsx";
 
@@ -74,6 +76,37 @@ function humanizeTitle(raw: string): string {
   return t;
 }
 
+function looksLikeConversationalNoise(text: string): boolean {
+  const t = (text ?? "").trim();
+  if (!t) return true;
+  if (t.length > 90) return true;
+  if (/^(?:no|nah|yeah|yes|yep|okay|ok|sure|fine|cool|great|perfect|thanks?|thank you|that'?s fine|go ahead|send it|do it)\b/i.test(t)) return true;
+  if (/\b(?:i want you to|go with|probably|that'?s fine|no,? that'?s fine|use of a camera)\b/i.test(t)) return true;
+  return false;
+}
+
+function cleanDocumentTitle(raw: string, markdown: string): string {
+  const h1 = markdown.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  const h2 = markdown.match(/^##\s+(.+)$/m)?.[1]?.trim();
+  const candidate = !looksLikeConversationalNoise(raw) ? raw : !looksLikeConversationalNoise(h1 ?? "") ? h1 : h2;
+  return humanizeTitle(candidate || "Generated Document").slice(0, 120);
+}
+
+function normalizeDocumentMarkdown(title: string, markdown: string): string {
+  let md = (markdown ?? "").trim();
+  if (!md) return `# ${title}\n`;
+  const firstH1 = md.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  if (firstH1 && looksLikeConversationalNoise(firstH1)) {
+    md = md.replace(/^#\s+.+\n?/, "").trim();
+  }
+  const paragraphs = md.split(/\n{2,}/);
+  while (paragraphs.length > 1 && looksLikeConversationalNoise(stripMarkdown(paragraphs[0] ?? ""))) {
+    paragraphs.shift();
+  }
+  md = paragraphs.join("\n\n").trim();
+  return md || `# ${title}\n`;
+}
+
 // True if the markdown body already starts with an H1 — we should let the
 // document's own heading own the title rather than stamping our own on top.
 function markdownStartsWithH1(md: string): boolean {
@@ -86,7 +119,9 @@ export async function generateDocument(opts: {
   title: string;
   markdown: string;
 }): Promise<{ bytes: Uint8Array; mimeType: string; extension: string }> {
-  const { format, title, markdown } = opts;
+  const format = opts.format;
+  const title = cleanDocumentTitle(opts.title, opts.markdown);
+  const markdown = normalizeDocumentMarkdown(title, opts.markdown);
 
   if (format === "txt") {
     const bytes = new TextEncoder().encode(stripMarkdown(markdown));
@@ -127,26 +162,29 @@ export async function generateDocument(opts: {
   }
 
   if (format === "docx") {
-    const tables = parseMarkdownTables(markdown);
     const cleanTitle = humanizeTitle(title);
     const skipAutoTitle = markdownStartsWithH1(markdown);
     const children: (Paragraph | Table)[] = skipAutoTitle
       ? []
       : [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(cleanTitle)] })];
-    const tableSet = new Set(tables.flat().map((r) => r.join("|")));
     const lines = markdown.split(/\r?\n/);
-    let inTable = false;
-    for (const line of lines) {
-      if (/^\s*\|/.test(line) || /^\s*\|?\s*:?-{2,}/.test(line.trim())) {
-        inTable = true;
-        continue;
-      }
-      if (inTable && line.trim() === "") {
-        inTable = false;
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i] ?? "";
+      if (/\|/.test(line) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test((lines[i + 1] ?? "").trim())) {
+        const rows: string[][] = [splitRow(line)];
+        let j = i + 2;
+        while (j < lines.length && /\|/.test(lines[j] ?? "") && (lines[j] ?? "").trim() !== "") {
+          rows.push(splitRow(lines[j] ?? ""));
+          j++;
+        }
+        children.push(buildDocxTable(rows));
+        i = j;
         continue;
       }
       if (!line.trim()) {
         children.push(new Paragraph({ children: [new TextRun("")] }));
+        i++;
         continue;
       }
       const m = line.match(/^(#{1,6})\s+(.*)$/);
@@ -158,58 +196,62 @@ export async function generateDocument(opts: {
             : lvl === 2
               ? HeadingLevel.HEADING_2
               : HeadingLevel.HEADING_3;
-        children.push(new Paragraph({ heading, children: [new TextRun(m[2])] }));
+        children.push(new Paragraph({ heading, spacing: { before: lvl <= 2 ? 240 : 160, after: 120 }, children: [new TextRun(stripMarkdown(m[2]))] }));
+      } else if (/^[-*+]\s+/.test(line.trim())) {
+        children.push(new Paragraph({ numbering: { reference: "bullets", level: 0 }, spacing: { after: 80 }, children: [new TextRun(stripMarkdown(line.trim().replace(/^[-*+]\s+/, "")))] }));
+      } else if (/^\d+\.\s+/.test(line.trim())) {
+        children.push(new Paragraph({ numbering: { reference: "numbers", level: 0 }, spacing: { after: 80 }, children: [new TextRun(stripMarkdown(line.trim().replace(/^\d+\.\s+/, "")))] }));
       } else {
-        children.push(new Paragraph({ children: [new TextRun(stripMarkdown(line))] }));
+        children.push(new Paragraph({ spacing: { after: 120 }, children: [new TextRun(stripMarkdown(line))] }));
       }
+      i++;
     }
-    for (const t of tables) {
-      const colCount = Math.max(1, ...t.map((r) => r.length));
-      const totalWidth = 9360; // US Letter with 1" margins (DXA)
-      const colWidth = Math.floor(totalWidth / colCount);
-      const columnWidths = Array(colCount).fill(colWidth);
-      const cellBorder = { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" };
-      const cellBorders = { top: cellBorder, bottom: cellBorder, left: cellBorder, right: cellBorder };
-      children.push(
-        new Table({
-          width: { size: totalWidth, type: WidthType.DXA },
-          columnWidths,
-          rows: t.map(
-            (row, rowIdx) =>
-              new TableRow({
-                tableHeader: rowIdx === 0,
-                children: Array.from({ length: colCount }).map(
-                  (_, colIdx) =>
-                    new TableCell({
-                      borders: cellBorders,
-                      width: { size: colWidth, type: WidthType.DXA },
-                      margins: { top: 80, bottom: 80, left: 120, right: 120 },
-                      ...(rowIdx === 0
-                        ? { shading: { fill: "0B2545", type: ShadingType.CLEAR, color: "auto" } }
-                        : {}),
-                      children: [
-                        new Paragraph({
-                          spacing: { before: 40, after: 40 },
-                          children: [
-                            new TextRun({
-                              text: stripMarkdown(row[colIdx] ?? ""),
-                              bold: rowIdx === 0,
-                              color: rowIdx === 0 ? "FFFFFF" : undefined,
-                            }),
-                          ],
-                        }),
-                      ],
-                    }),
-                ),
-              }),
-          ),
-        }),
-      );
-    }
-    // suppress unused
-    void tableSet;
     void PageOrientation;
     const doc = new Document({
+      styles: {
+        default: { document: { run: { font: "Arial", size: 22 } } },
+        paragraphStyles: [
+          {
+            id: "Heading1",
+            name: "Heading 1",
+            basedOn: "Normal",
+            next: "Normal",
+            quickFormat: true,
+            run: { size: 32, bold: true, font: "Arial", color: "0B2545" },
+            paragraph: { spacing: { before: 240, after: 180 }, outlineLevel: 0 },
+          },
+          {
+            id: "Heading2",
+            name: "Heading 2",
+            basedOn: "Normal",
+            next: "Normal",
+            quickFormat: true,
+            run: { size: 26, bold: true, font: "Arial", color: "0B2545" },
+            paragraph: { spacing: { before: 220, after: 140 }, outlineLevel: 1 },
+          },
+          {
+            id: "Heading3",
+            name: "Heading 3",
+            basedOn: "Normal",
+            next: "Normal",
+            quickFormat: true,
+            run: { size: 23, bold: true, font: "Arial", color: "0B2545" },
+            paragraph: { spacing: { before: 180, after: 100 }, outlineLevel: 2 },
+          },
+        ],
+      },
+      numbering: {
+        config: [
+          {
+            reference: "bullets",
+            levels: [{ level: 0, format: LevelFormat.BULLET, text: "•", alignment: AlignmentType.LEFT, style: { paragraph: { indent: { left: 720, hanging: 360 } } } }],
+          },
+          {
+            reference: "numbers",
+            levels: [{ level: 0, format: LevelFormat.DECIMAL, text: "%1.", alignment: AlignmentType.LEFT, style: { paragraph: { indent: { left: 720, hanging: 360 } } } }],
+          },
+        ],
+      },
       sections: [
         {
           properties: {
@@ -237,6 +279,52 @@ export async function generateDocument(opts: {
     mimeType: "application/pdf",
     extension: "pdf",
   };
+}
+
+function buildDocxTable(rows: string[][]): Table {
+  const colCount = Math.max(1, ...rows.map((r) => r.length));
+  const totalWidth = 9360;
+  const baseColWidth = Math.floor(totalWidth / colCount);
+  const columnWidths = Array.from({ length: colCount }, (_, idx) =>
+    idx === colCount - 1 ? totalWidth - baseColWidth * (colCount - 1) : baseColWidth,
+  );
+  const cellBorder = { style: BorderStyle.SINGLE, size: 1, color: "CBD5E1" };
+  const cellBorders = { top: cellBorder, bottom: cellBorder, left: cellBorder, right: cellBorder };
+  return new Table({
+    width: { size: totalWidth, type: WidthType.DXA },
+    columnWidths,
+    rows: rows.map(
+      (row, rowIdx) =>
+        new TableRow({
+          tableHeader: rowIdx === 0,
+          children: Array.from({ length: colCount }).map(
+            (_, colIdx) =>
+              new TableCell({
+                borders: cellBorders,
+                width: { size: columnWidths[colIdx], type: WidthType.DXA },
+                margins: { top: 100, bottom: 100, left: 120, right: 120 },
+                ...(rowIdx === 0
+                  ? { shading: { fill: "DCEAF2", type: ShadingType.CLEAR, color: "auto" } }
+                  : rowIdx % 2 === 0
+                    ? { shading: { fill: "F8FAFC", type: ShadingType.CLEAR, color: "auto" } }
+                    : {}),
+                children: [
+                  new Paragraph({
+                    spacing: { before: 40, after: 40 },
+                    children: [
+                      new TextRun({
+                        text: stripMarkdown(row[colIdx] ?? ""),
+                        bold: rowIdx === 0,
+                        color: "0F172A",
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+          ),
+        }),
+    ),
+  });
 }
 
 // ---------------- PDF rendering ----------------

@@ -122,7 +122,7 @@ Research / web
 - \`search_knowledge_base\` — semantic search over the user's uploaded company docs. Use FIRST for anything that sounds internal/company-specific. Cite the document name.
 
 Email
-- \`send_email\` — send from the user's Outlook. NEVER on the first request. Flow: confirm recipient → draft preview → wait for explicit approval → send. To attach a file made with \`generate_document\`, pass \`attach_file_url\` and \`attach_file_name\`. Never paste the URL in the email body.
+- \`send_email\` — send from the user's Outlook. NEVER on the first request. Flow: confirm recipient → draft preview → wait for explicit approval → send. To attach files made with \`generate_document\`, pass \`attachments\` with every file URL/name, or pass \`attach_file_url\`/\`attach_file_name\` for one file. If the user asked for both PDF and Word, attach BOTH files in the same email. Never paste the URL in the email body.
 
 Contacts
 - \`list_contacts\` / \`save_contact\` — call \`list_contacts\` before asking for an email when the user names a person. Never invent an address.
@@ -143,8 +143,8 @@ Memory
 
 Files
 - \`generate_document\` — real PDF/DOCX/XLSX/CSV downloads. Use whenever the user asks for a file/report/export/attachment. Default to PDF. The chat AUTOMATICALLY renders a preview + download card from the tool result — do NOT paste the URL or a Markdown link into the reply. Never claim you can't create files.
-- **"Convert this / that / your last reply / the above to a PDF"** → the \`markdown\` argument MUST be the FULL VERBATIM text of your most recent substantive assistant message in this thread (the long research/answer they're referring to), not a re-summary, not a shortened table, not a new paragraph. Copy the entire prior message body word-for-word into \`markdown\`. If you're unsure which message they mean and there's only one long recent answer, use that one — do NOT ask to clarify, do NOT regenerate a shorter version. Only ask which message when there are multiple long answers of similar size.
-- Call \`generate_document\` exactly ONCE per user request. Never emit a chat summary before the tool call — go straight to the tool, then a single short line like "Here's the PDF — preview or download it above." Do NOT include the URL, filename in brackets, or any Markdown link; the card handles that.
+- **"Convert this / that / your last reply / the above to a PDF"** → the \`markdown\` argument must contain ONLY the document body from your most recent substantive assistant message in this thread. No greeting, no "here's the document", no approval text, no user message text, no transcript fragments, no raw tool URLs. Keep the prior assistant answer complete — not a re-summary, not a shortened table, not a new paragraph. If you're unsure which message they mean and there's only one long recent answer, use that one — do NOT ask to clarify, do NOT regenerate a shorter version. Only ask which message when there are multiple long answers of similar size.
+- Call \`generate_document\` exactly ONCE per requested file format. If the user asks for both PDF and Word, call it once for PDF and once for DOCX from the SAME markdown/title. Never emit a chat summary before the tool call(s) — go straight to the tool(s), then a single short line like "Here are the PDF and Word files — preview or download them above." Do NOT include URLs, filenames in brackets, or Markdown links; the cards handle that.
 - **filename**: short, professional, human — e.g. \`Stereoscopic Cameras Comparison\`, \`Q3 Sales Report\`. NO underscores, NO snake_case, NO date stamps, NO file extension. The system slugifies it for the URL; keep the label clean.
 - **title**: a proper human title in Title Case (e.g. \`Top Stereoscopic Cameras for Underground Mining\`). Never a filename slug. Never with underscores. Do NOT repeat the filename verbatim.
 - **markdown**: START with a single \`# <Title>\` heading on line 1 that matches the \`title\` field, then the body. Do not repeat the title as plain text. Inside table cells use PLAIN TEXT — never Markdown bold (\`**...**\`), italics, or backticks; the table renderer shows those literally.
@@ -228,12 +228,56 @@ const DOCUMENT_FORMAT_RE = /\b(pdf|docx|word\s*doc|word|xlsx|excel|csv|spreadshe
 const EXISTING_CONTENT_DOC_RE = /\b(convert|turn|make|generate|create|export|save)\b[\s\S]{0,80}\b(this|that|it|all|everything|above|previous|last|table|list|answer|response|reply|chat)\b/i;
 const DOCUMENT_META_RE = /(here(?:'|’)s the\s+(?:pdf|word|document)|preview or download|attached to this chat|downloadable preview card|draft email — please review|reply\s+["“]send["”]|attachment failed|could not fetch attachment|generated the word document|generated the pdf)/i;
 
-function requestedFormat(text: string): "pdf" | "docx" | "xlsx" | "csv" | null {
-  if (/\b(pdf)\b/i.test(text)) return "pdf";
-  if (/\b(docx|word\s*doc|word)\b/i.test(text)) return "docx";
-  if (/\b(xlsx|excel|spreadsheet)\b/i.test(text)) return "xlsx";
-  if (/\b(csv)\b/i.test(text)) return "csv";
-  return null;
+type GeneratedDocFormat = "pdf" | "docx" | "xlsx" | "csv";
+
+function requestedFormats(text: string): GeneratedDocFormat[] {
+  const formats: GeneratedDocFormat[] = [];
+  const add = (fmt: GeneratedDocFormat) => {
+    if (!formats.includes(fmt)) formats.push(fmt);
+  };
+  if (/\b(pdf)\b/i.test(text)) add("pdf");
+  if (/\b(docx|word\s*(?:doc|document)?|word)\b/i.test(text)) add("docx");
+  if (/\b(xlsx|excel|spreadsheet)\b/i.test(text)) add("xlsx");
+  if (/\b(csv)\b/i.test(text)) add("csv");
+  return formats;
+}
+
+function requestedFormat(text: string): GeneratedDocFormat | null {
+  return requestedFormats(text)[0] ?? null;
+}
+
+function looksLikeNoisyVoiceTitle(text: string | null | undefined) {
+  const t = (text ?? "").trim();
+  if (!t) return true;
+  if (t.length > 110) return true;
+  return /^(?:no|nah|yeah|yes|yep|okay|ok|sure|fine|cool|great|perfect|thanks?|that'?s fine)\b/i.test(t) ||
+    /\b(?:i want you to|go with|probably|best use of a camera|that'?s fine)\b/i.test(t);
+}
+
+function cleanDocumentTitle(title: string | null | undefined, fallback = "Generated Document") {
+  const raw = looksLikeNoisyVoiceTitle(title) ? fallback : title!.trim();
+  const cleaned = raw
+    .replace(/\.(pdf|docx|xlsx|csv)$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-zA-Z0-9 .:()/&-]+/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.!?,;:]+$/g, "")
+    .trim();
+  return cleaned || fallback;
+}
+
+function normalizeDocumentBody(markdown: string, title: string) {
+  let md = (markdown || "").trim();
+  const h1 = md.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  if (h1 && looksLikeNoisyVoiceTitle(h1)) {
+    md = md.replace(/^#\s+.+\n?/, "").trim();
+  }
+  const paragraphs = md.split(/\n{2,}/);
+  while (paragraphs.length > 1 && looksLikeNoisyVoiceTitle(paragraphs[0]?.replace(/^#+\s+/, ""))) {
+    paragraphs.shift();
+  }
+  md = paragraphs.join("\n\n").trim();
+  return /^#\s+\S/m.test(md) ? md : `# ${title}\n\n${md || title}`;
 }
 
 function stripPersistedMarkers(content: string) {
@@ -347,8 +391,8 @@ function formatLabelFor(extension: string) {
 }
 
 function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow[]) {
-  const format = requestedFormat(userText);
-  if (!format || !DOCUMENT_FORMAT_RE.test(userText) || !EXISTING_CONTENT_DOC_RE.test(userText)) return null;
+  const formats = requestedFormats(userText);
+  if (formats.length === 0 || !DOCUMENT_FORMAT_RE.test(userText) || !EXISTING_CONTENT_DOC_RE.test(userText)) return null;
 
   // Walk history in reverse to find the last substantive assistant message
   // AND the user prompt that triggered it (the user turn immediately before).
@@ -390,11 +434,12 @@ function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow
     }
   }
   const promptTitle = triggeringUserPrompt ? titleFromUserPrompt(triggeringUserPrompt) : null;
-  const fallback = format === "pdf" ? "Chat Export" : "Generated Document";
-  const title = promptTitle ?? titleFromSource(source, fallback);
+  const fallback = formats.includes("pdf") ? "Chat Export" : "Generated Document";
+  const sourceTitle = titleFromSource(source, fallback);
+  const title = cleanDocumentTitle(!looksLikeNoisyVoiceTitle(promptTitle) ? promptTitle : sourceTitle, fallback);
 
-  const markdown = /^\s*#\s+\S/m.test(source) ? source : `# ${title}\n\n${source}`;
-  return { format, title, filename: cleanFilenameBase(title), markdown };
+  const markdown = normalizeDocumentBody(source, title);
+  return { formats, title, filename: cleanFilenameBase(title), markdown };
 }
 
 function storagePathFromSignedUrl(url: string) {
@@ -425,7 +470,14 @@ function emailNeedsGeneratedAttachment(userText: string, subject: string, body: 
 function latestGeneratedDocFromHistory(
   rows: ChatHistoryRow[],
   preferredFormat: "pdf" | "docx" | "xlsx" | "csv" | null,
+  currentTurnActivity?: ToolActivity[],
 ): NonNullable<ToolActivity["docFile"]> | null {
+  for (const activity of [...(currentTurnActivity ?? [])].reverse()) {
+    const doc = activity.docFile;
+    if (!doc?.url || !doc.filename) continue;
+    const ext = doc.filename.toLowerCase().split(".").pop();
+    if (!preferredFormat || ext === preferredFormat) return doc;
+  }
   for (const row of [...rows].reverse()) {
     if (row.role !== "assistant") continue;
     const { activities } = extractToolActivity(row.content);
@@ -437,6 +489,40 @@ function latestGeneratedDocFromHistory(
     }
   }
   return null;
+}
+
+function latestGeneratedDocsFromHistory(
+  rows: ChatHistoryRow[],
+  preferredFormats: GeneratedDocFormat[],
+  currentTurnActivity?: ToolActivity[],
+): NonNullable<ToolActivity["docFile"]>[] {
+  const wanted: GeneratedDocFormat[] = preferredFormats.length > 0 ? preferredFormats : ["pdf"];
+  const found = new Map<GeneratedDocFormat, NonNullable<ToolActivity["docFile"]>>();
+  for (const activity of [...(currentTurnActivity ?? [])].reverse()) {
+    const doc = activity.docFile;
+    if (!doc?.url || !doc.filename) continue;
+    const rawExt = doc.filename.toLowerCase().split(".").pop();
+    if (rawExt !== "pdf" && rawExt !== "docx" && rawExt !== "xlsx" && rawExt !== "csv") continue;
+    const ext: GeneratedDocFormat = rawExt;
+    if (!wanted.includes(ext) || found.has(ext)) continue;
+    found.set(ext, doc);
+    if (found.size === wanted.length) return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
+  }
+  for (const row of [...rows].reverse()) {
+    if (row.role !== "assistant") continue;
+    const { activities } = extractToolActivity(row.content);
+    for (const activity of [...activities].reverse()) {
+      const doc = activity.docFile;
+      if (!doc?.url || !doc.filename) continue;
+      const rawExt = doc.filename.toLowerCase().split(".").pop();
+      if (rawExt !== "pdf" && rawExt !== "docx" && rawExt !== "xlsx" && rawExt !== "csv") continue;
+      const ext: GeneratedDocFormat = rawExt;
+      if (!wanted.includes(ext) || found.has(ext)) continue;
+      found.set(ext, doc);
+      if (found.size === wanted.length) return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
+    }
+  }
+  return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -657,34 +743,43 @@ export const Route = createFileRoute("/api/chat")({
         if (directDoc) {
           try {
             const { generateDocument } = await import("@/lib/document-generator.server");
-            const { bytes, mimeType, extension } = await generateDocument({
-              format: directDoc.format,
-              title: directDoc.title,
-              markdown: directDoc.markdown,
-            });
-            const safeName = directDoc.filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "Document";
-            const path = `generated/${userId}/${Date.now().toString(36)}/${safeName}.${extension}`;
             const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-            const up = await supabaseAdmin.storage
-              .from("chat-uploads")
-              .upload(path, bytes, { contentType: mimeType, upsert: false });
-            if (up.error) throw new Error(up.error.message);
-            const signed = await supabaseAdmin.storage
-              .from("chat-uploads")
-              .createSignedUrl(path, 60 * 60 * 24 * 7);
-            if (signed.error) throw new Error(signed.error.message);
-
-            const filename = `${safeName}.${extension}`;
-            const formatLabel = formatLabelFor(extension);
-            const activity: ToolActivity[] = [
-              {
-                id: `direct_${Date.now().toString(36)}`,
+            const safeName = directDoc.filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "Document";
+            const activity: ToolActivity[] = [];
+            const generatedNames: string[] = [];
+            for (const format of directDoc.formats) {
+              const { bytes, mimeType, extension } = await generateDocument({
+                format,
+                title: directDoc.title,
+                markdown: directDoc.markdown,
+              });
+              const path = `generated/${userId}/${Date.now().toString(36)}-${extension}/${safeName}.${extension}`;
+              const up = await supabaseAdmin.storage
+                .from("chat-uploads")
+                .upload(path, bytes, { contentType: mimeType, upsert: false });
+              if (up.error) throw new Error(up.error.message);
+              const signed = await supabaseAdmin.storage
+                .from("chat-uploads")
+                .createSignedUrl(path, 60 * 60 * 24 * 7);
+              if (signed.error) throw new Error(signed.error.message);
+              const filename = `${safeName}.${extension}`;
+              const formatLabel = formatLabelFor(extension);
+              generatedNames.push(formatLabel);
+              activity.push({
+                id: `direct_${Date.now().toString(36)}_${extension}`,
                 name: "generate_document",
                 label: directDoc.title,
                 docFile: { url: signed.data.signedUrl, filename, formatLabel, mimeType, size: bytes.byteLength },
-              },
-            ];
-            const responseText = `Here's the ${formatLabel} — preview or download it above.`;
+              });
+              await logAction("generate_document", `Generated ${extension.toUpperCase()} "${safeName}"`, {
+                format,
+                filename,
+                path: "direct-existing-content",
+              });
+            }
+            const responseText = generatedNames.length > 1
+              ? `Here are the ${generatedNames.join(" and ")} files — preview or download them above.`
+              : `Here's the ${generatedNames[0]} — preview or download it above.`;
             const content = `${encodeToolActivityMarker(activity)}${responseText}`;
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
@@ -693,16 +788,11 @@ export const Route = createFileRoute("/api/chat")({
               content,
             });
             await supabase.from("threads").update({ updated_at: new Date().toISOString() }).eq("id", body.threadId!);
-            await logAction("generate_document", `Generated ${extension.toUpperCase()} "${safeName}"`, {
-              format: directDoc.format,
-              filename,
-              path: "direct-existing-content",
-            });
             return new Response(responseText, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
           } catch (e) {
             const msg = e instanceof Error ? e.message : "document generation failed";
-            await logAction("generate_document", `Failed to generate ${directDoc.format.toUpperCase()} from existing chat content`, { error: msg }, "error");
-            const content = `I couldn't generate the ${directDoc.format.toUpperCase()} because: ${msg}`;
+            await logAction("generate_document", `Failed to generate ${directDoc.formats.join("+").toUpperCase()} from existing chat content`, { error: msg }, "error");
+            const content = `I couldn't generate the requested files because: ${msg}`;
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
               user_id: userId,
@@ -1023,12 +1113,22 @@ export const Route = createFileRoute("/api/chat")({
             }),
             send_email: tool({
               description:
-                "Send an email from the user's connected Outlook account. Use when the user asks to email someone, send a message, or email themselves. To attach a file you just generated with generate_document, pass its returned `url` as `attach_file_url` (and its `filename` as `attach_file_name`) — do NOT paste the raw URL into the body.",
+                "Send an email from the user's connected Outlook account. Use when the user asks to email someone, send a message, or email themselves. To attach generated files, pass `attachments` with every generated document. For one file, legacy `attach_file_url` and `attach_file_name` also work. If the user asked for PDF and Word, attach both files in one email — do NOT send two emails and do NOT paste raw URLs into the body.",
               inputSchema: z.object({
                 to: z.string().email().describe("Recipient email address"),
                 subject: z.string().min(1).max(200),
                 body: z.string().min(1).max(20000),
                 cc: z.string().email().optional(),
+                attachments: z
+                  .array(
+                    z.object({
+                      url: z.string().url(),
+                      filename: z.string().min(1).max(160),
+                    }),
+                  )
+                  .max(10)
+                  .optional()
+                  .describe("All generated files to attach. Use this for multiple files like PDF + Word."),
                 attach_file_url: z
                   .string()
                   .url()
@@ -1041,34 +1141,55 @@ export const Route = createFileRoute("/api/chat")({
                   .optional()
                   .describe("Filename to use for the attachment (e.g. 'Report.docx'). Required when attach_file_url is set."),
               }),
-              execute: async ({ to, subject, body: emailBody, cc, attach_file_url, attach_file_name }) => {
+              execute: async ({ to, subject, body: emailBody, cc, attachments, attach_file_url, attach_file_name }) => {
                 if (looksLikeCalendarInviteText(`${subject}\n${emailBody}\n${attach_file_name ?? ""}`)) {
                   return {
                     error:
                       "This looks like a calendar/Teams invite. Use create_calendar_event so Outlook sends a real invite with accept/decline and a Teams link.",
                   };
                 }
-                const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
                 const { marked } = await import("marked");
-                // Optionally fetch the file bytes for attachment.
-                let attachment: { filename: string; mimeType: string; base64: string } | null = null;
-                let effectiveAttachUrl = attach_file_url;
-                let effectiveAttachName = attach_file_name;
+                type PendingAttachment = { url: string; filename: string };
+                type EmailAttachment = { filename: string; mimeType: string; base64: string; size: number };
+                const pendingAttachments: PendingAttachment[] = [...(attachments ?? [])];
+                if (attach_file_url) {
+                  pendingAttachments.push({ url: attach_file_url, filename: attach_file_name || "attachment" });
+                }
                 const mustAttach = emailNeedsGeneratedAttachment(userText, subject, emailBody);
-                if (!effectiveAttachUrl && mustAttach) {
-                  const doc = latestGeneratedDocFromHistory(rows, requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`));
-                  if (!doc) {
+                if (pendingAttachments.length === 0 && mustAttach) {
+                  const requested = requestedFormats(`${subject}\n${emailBody}\n${userText}`);
+                  const docs = latestGeneratedDocsFromHistory(rows, requested.length ? requested : [requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`) ?? "pdf"], collectedActivity);
+                  if (docs.length === 0) {
                     return {
                       error:
                         "No generated document was found to attach. Generate the PDF/Word document first, then send the email.",
                     };
                   }
-                  effectiveAttachUrl = doc.url;
-                  effectiveAttachName = doc.filename;
+                  if (requested.length > 0 && docs.length < requested.length) {
+                    return {
+                      error: `I found ${docs.length} generated attachment(s), but the email asks for ${requested.length}. Generate the missing file format before sending.`,
+                    };
+                  }
+                  pendingAttachments.push(...docs.map((doc) => ({ url: doc.url, filename: doc.filename })));
                 }
-                if (effectiveAttachUrl) {
+                const requestedForEmail = requestedFormats(`${subject}\n${emailBody}\n${userText}`);
+                if (pendingAttachments.length > 0 && requestedForEmail.length > 1) {
+                  const present = new Set(
+                    pendingAttachments
+                      .map((a) => a.filename.toLowerCase().split(".").pop())
+                      .filter(Boolean),
+                  );
+                  const missing = requestedForEmail.filter((fmt) => !present.has(fmt));
+                  if (missing.length > 0) {
+                    const docs = latestGeneratedDocsFromHistory(rows, missing, collectedActivity);
+                    pendingAttachments.push(...docs.map((doc) => ({ url: doc.url, filename: doc.filename })));
+                  }
+                }
+
+                const emailAttachments: EmailAttachment[] = [];
+                for (const file of pendingAttachments) {
                   try {
-                    let r = await fetch(effectiveAttachUrl);
+                    const r = await fetch(file.url);
                     let mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
                     let buf: Uint8Array | null = null;
                     // HTML/JSON coming back from Supabase means the signed URL
@@ -1079,7 +1200,7 @@ export const Route = createFileRoute("/api/chat")({
                     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
                     if (!buf) {
                       // 1) Try to recover by re-signing the same storage path.
-                      const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
+                      const storagePath = storagePathFromSignedUrl(file.url);
                       if (storagePath) {
                         const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
                         if (!dl.error && dl.data) {
@@ -1091,9 +1212,14 @@ export const Route = createFileRoute("/api/chat")({
                     if (!buf) {
                       // 2) Last resort: look up the most recent generated doc
                       // of the requested format in this thread and use it.
+                      const fileExt = file.filename.toLowerCase().split(".").pop();
+                      const preferred = fileExt === "pdf" || fileExt === "docx" || fileExt === "xlsx" || fileExt === "csv"
+                        ? fileExt
+                        : requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`);
                       const fallbackDoc = latestGeneratedDocFromHistory(
                         rows,
-                        requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`),
+                        preferred,
+                        collectedActivity,
                       );
                       if (fallbackDoc?.url) {
                         const fallbackPath = storagePathFromSignedUrl(fallbackDoc.url);
@@ -1102,7 +1228,7 @@ export const Route = createFileRoute("/api/chat")({
                           if (!dl.error && dl.data) {
                             mimeType = dl.data.type || mimeType;
                             buf = new Uint8Array(await dl.data.arrayBuffer());
-                            effectiveAttachName = effectiveAttachName || fallbackDoc.filename;
+                            file.filename = file.filename || fallbackDoc.filename;
                           }
                         }
                       }
@@ -1111,15 +1237,18 @@ export const Route = createFileRoute("/api/chat")({
                     if (buf.byteLength > 15 * 1024 * 1024) return { error: "Attachment too large (max 15MB)" };
                     let bin = "";
                     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-                    attachment = {
-                      filename: (effectiveAttachName || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
+                    emailAttachments.push({
+                      filename: (file.filename || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
                       mimeType,
                       base64: Buffer.from(bin, "binary").toString("base64"),
-                    };
+                      size: buf.byteLength,
+                    });
                   } catch (e) {
                     return { error: `Attachment fetch failed: ${e instanceof Error ? e.message : String(e)}` };
                   }
                 }
+                const totalAttachmentBytes = emailAttachments.reduce((sum, a) => sum + a.size, 0);
+                if (totalAttachmentBytes > 15 * 1024 * 1024) return { error: "Combined attachments too large (max 15MB)" };
                 const renderHtml = (md: string) => {
                   const inner = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
                   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -1148,16 +1277,14 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                            ...(cc
                              ? { ccRecipients: [{ emailAddress: { address: cc } }] }
                              : {}),
-                            ...(attachment
+                             ...(emailAttachments.length > 0
                               ? {
-                                  attachments: [
-                                    {
+                                   attachments: emailAttachments.map((attachment) => ({
                                       "@odata.type": "#microsoft.graph.fileAttachment",
                                       name: attachment.filename,
                                       contentType: attachment.mimeType,
                                       contentBytes: attachment.base64,
-                                    },
-                                  ],
+                                     })),
                                 }
                               : {}),
                          },
@@ -1170,8 +1297,8 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                      await logAction("send_email", `Failed to send email to ${to}`, { to, subject, provider: "outlook", status: r.status }, "error");
                      return { error: `Outlook send failed (${r.status})`, detail: t.slice(0, 200) };
                    }
-                   await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attached: attachment?.filename ?? null });
-                   return { ok: true, provider: "outlook", to, subject, attached: attachment?.filename ?? null };
+                    await logAction("send_email", `Sent email to ${to} — ${subject}`, { to, cc, subject, provider: "outlook", attached: emailAttachments.map((a) => a.filename) });
+                    return { ok: true, provider: "outlook", to, subject, attached: emailAttachments.map((a) => a.filename) };
                  }
               },
             }),
@@ -1474,7 +1601,12 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               }),
               execute: async ({ format, filename, title, markdown }) => {
                 try {
-                  if (looksLikeCalendarInviteText(`${title}\n${filename}\n${markdown}`)) {
+                  const safeTitle = cleanDocumentTitle(title, titleFromSource(markdown, "Generated Document"));
+                  const safeMarkdown = normalizeDocumentBody(markdown, safeTitle);
+                  const safeFilenameBase = cleanFilenameBase(
+                    looksLikeNoisyVoiceTitle(filename) ? safeTitle : filename,
+                  );
+                  if (looksLikeCalendarInviteText(`${safeTitle}\n${safeFilenameBase}\n${safeMarkdown}`)) {
                     return {
                       error:
                         "This is a calendar/Teams invite, not a document. Call create_calendar_event with online_meeting=true so Outlook sends the real invite and Teams link.",
@@ -1483,10 +1615,10 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   const { generateDocument } = await import("@/lib/document-generator.server");
                   const { bytes, mimeType, extension } = await generateDocument({
                     format,
-                    title,
-                    markdown,
+                    title: safeTitle,
+                    markdown: safeMarkdown,
                   });
-                  const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
+                  const safeName = safeFilenameBase.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
                   // Put the timestamp in a folder segment so the visible
                   // filename in the URL stays clean (e.g. no "1783...-name").
                   const path = `generated/${userId}/${Date.now().toString(36)}/${safeName}.${extension}`;

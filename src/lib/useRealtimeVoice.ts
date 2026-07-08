@@ -480,6 +480,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           let quietCount = 0;
           let loudCount = 0;
           let instantHitCount = 0;
+          let noiseFloor = 0.012;
           const tick = () => {
             if (!micMonitorRef.current) return;
             analyser.getByteTimeDomainData(buf);
@@ -490,6 +491,9 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               sum += v * v;
             }
             const rms = Math.sqrt(sum / buf.length);
+            if (!assistantAudibleRef.current && !activeResponseRef.current && !localSpeechActiveRef.current) {
+              noiseFloor = noiseFloor * 0.96 + Math.min(rms, 0.06) * 0.04;
+            }
             // Two-tier gate for true two-way-sync feel:
             //  * INSTANT tier — very low latency local mute. As soon as
             //    the mic sees mild energy over 2 frames (~32ms) while
@@ -502,11 +506,11 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
             //    Only after sustained voice-level energy do we send
             //    response.cancel to the server, so background noise
             //    doesn't kill legitimate responses.
-            const INSTANT_RMS  = 0.035;     // low: catch first syllable
+            const INSTANT_RMS = Math.max(0.048, noiseFloor * 3.1); // local mute only
             const INSTANT_FRAMES = 2;       // ~32ms
-            const SPEECH_RMS   = 0.07;      // higher gate for real speech
-            const SPEECH_FRAMES = 4;        // ~64ms sustained
-            if (rms > INSTANT_RMS) {
+            const SPEECH_RMS = Math.max(0.092, noiseFloor * 4.2);  // confirmed speech
+            const SPEECH_FRAMES = 6;        // ~96ms sustained
+            if (rms > INSTANT_RMS && rms - noiseFloor > 0.026) {
               instantHitCount++;
               if (
                 instantHitCount >= INSTANT_FRAMES &&
@@ -518,7 +522,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
             } else {
               instantHitCount = 0;
             }
-            if (rms > SPEECH_RMS) {
+            if (rms > SPEECH_RMS && rms - noiseFloor > 0.048) {
               loudCount++;
               quietCount = 0;
               if (
@@ -561,12 +565,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               // server_vad, which trips on any sound above the level.
               turn_detection: {
                 type: "semantic_vad",
-                // "medium" is much less trigger-happy on breath / hums /
-                // background chatter than "high" while still reacting in
-                // well under a second. Local instant-mute already gives
-                // the perceived instant stop, so we don't need "high"
-                // eagerness at the cost of false transcriptions.
-                eagerness: "medium",
+                // Conservative server turn detection prevents breaths,
+                // throat-clears, and background chatter from becoming chat
+                // turns. Local instant-mute still keeps real interruptions fast.
+                eagerness: "low",
                 create_response: false,
                 interrupt_response: true,
               },
