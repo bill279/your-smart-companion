@@ -427,11 +427,18 @@ function isVoiceChatPointer(text: string) {
 
 function voiceFollowupInstructions(result: { ok?: boolean; error?: string; note?: string }) {
   if (result.ok) {
+    const answer = (result as { answer?: string }).answer?.trim();
+    const answerBlock = answer
+      ? `\n\nHere is the answer that was just posted to the chat — read the substance of it aloud in natural conversational voice:\n\n"""\n${answer.slice(0, 6000)}\n"""`
+      : "";
     return [
-      "The full answer is already visible in the chat now.",
-      "Speak exactly one short sentence that says it is ready and give the top recommendation if the tool note includes one.",
-      "Do not add another list, table, comparison, or second summary to the chat.",
-    ].join(" ");
+      "The full answer is now visible in the chat.",
+      "Read the substance aloud in natural conversational voice — name the top pick and why, mention the runners-up by name with a brief reason, and hit the key numbers or tradeoffs. Aim for roughly 30–60 seconds of speech.",
+      "Do NOT just say 'check the chat' — the whole point of voice is that the user hears the answer.",
+      "Do NOT read URLs, long tables, or citation lists aloud — summarize sources by name.",
+      "End with a brief pointer like 'full details and sources are in the chat.'",
+      "Do NOT post another chat message.",
+    ].join(" ") + answerBlock;
   }
   return [
     `The background chat answer did not complete successfully: ${result.error ?? "unknown error"}.`,
