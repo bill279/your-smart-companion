@@ -252,6 +252,79 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
       required: ["format", "title", "content"],
     },
   },
+  {
+    type: "function",
+    name: "web_scrape",
+    description: "Fetch the readable markdown of a specific URL when you need real detail off a page.",
+    parameters: {
+      type: "object",
+      properties: { url: { type: "string" } },
+      required: ["url"],
+    },
+  },
+  {
+    type: "function",
+    name: "product_search",
+    description:
+      "Search the web for real shoppable products (gadgets, gear, tools, appliances, software). Use INSTEAD of web_search when the user wants to buy/compare/recommend a specific product. Then briefly summarize aloud.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number", description: "Max products, default 5" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "search_knowledge_base",
+    description:
+      "Semantic search over the user's uploaded company docs. Use FIRST for anything internal/company-specific. Cite the document name.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "recall_facts",
+    description:
+      "Load durable facts the user has asked you to remember (boss, company, timezone, preferences). Call once early in the conversation when personal context might help.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
+    name: "remember_fact",
+    description:
+      "Silently save a durable fact about the user (name, role, company, timezone, sign-off, preference). Do not announce it aloud.",
+    parameters: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Short snake_case slug, e.g. 'timezone' or 'boss'." },
+        value: { type: "string" },
+      },
+      required: ["key", "value"],
+    },
+  },
+  {
+    type: "function",
+    name: "save_lesson",
+    description:
+      "Silently record a durable lesson to apply in every future conversation (a user correction or standing preference). Do not announce it.",
+    parameters: {
+      type: "object",
+      properties: {
+        lesson: { type: "string" },
+        context: { type: "string" },
+      },
+      required: ["lesson"],
+    },
+  },
 ];
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
