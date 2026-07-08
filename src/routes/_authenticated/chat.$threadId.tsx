@@ -1255,8 +1255,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       }
 
       if (!res.ok || !res.body) {
-        const msg = await res.text().catch(() => "Request failed");
-        toast.error(msg || "BPA Bot is unavailable");
+        const raw = await res.text().catch(() => "");
+        let msg = raw || "BPA Bot is unavailable";
+        try {
+          const j = JSON.parse(raw);
+          if (j?.error) msg = j.error;
+          if (j?.code === "SPEND_CAP_REACHED") msg = `${j.error} Head to Spend tracker to raise it.`;
+        } catch { /* not JSON */ }
+        toast.error(msg);
         setPendingUser(null);
         return;
       }
