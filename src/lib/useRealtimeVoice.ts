@@ -578,7 +578,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               instructions: opts.instructions ?? "",
               audio: {
                 input: {
-                  transcription: { model: "gpt-4o-transcribe" },
+                  transcription: { model: "gpt-4o-transcribe", language: "en" },
               // Semantic VAD uses a model to decide when the user is
               // actually speaking vs. making noise (breathing, throat
               // clearing, keyboard, background hum). "high" eagerness
