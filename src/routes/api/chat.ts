@@ -391,8 +391,8 @@ function formatLabelFor(extension: string) {
 }
 
 function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow[]) {
-  const format = requestedFormat(userText);
-  if (!format || !DOCUMENT_FORMAT_RE.test(userText) || !EXISTING_CONTENT_DOC_RE.test(userText)) return null;
+  const formats = requestedFormats(userText);
+  if (formats.length === 0 || !DOCUMENT_FORMAT_RE.test(userText) || !EXISTING_CONTENT_DOC_RE.test(userText)) return null;
 
   // Walk history in reverse to find the last substantive assistant message
   // AND the user prompt that triggered it (the user turn immediately before).
@@ -434,11 +434,11 @@ function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow
     }
   }
   const promptTitle = triggeringUserPrompt ? titleFromUserPrompt(triggeringUserPrompt) : null;
-  const fallback = format === "pdf" ? "Chat Export" : "Generated Document";
-  const title = promptTitle ?? titleFromSource(source, fallback);
+  const fallback = formats.includes("pdf") ? "Chat Export" : "Generated Document";
+  const title = cleanDocumentTitle(promptTitle ?? titleFromSource(source, fallback), fallback);
 
-  const markdown = /^\s*#\s+\S/m.test(source) ? source : `# ${title}\n\n${source}`;
-  return { format, title, filename: cleanFilenameBase(title), markdown };
+  const markdown = normalizeDocumentBody(source, title);
+  return { formats, title, filename: cleanFilenameBase(title), markdown };
 }
 
 function storagePathFromSignedUrl(url: string) {
