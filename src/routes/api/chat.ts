@@ -283,11 +283,10 @@ export const Route = createFileRoute("/api/chat")({
           }
         });
 
-        // Load recent history + facts in parallel. Cap history at the last 8
-        // turns — anything older is rarely useful and just inflates latency
-        // and token cost. Durable context lives in user_facts.
-        const HISTORY_LIMIT = 8;
-        const toolsEnabled = shouldEnableChatTools(userText, body.forceWebSearch);
+        // Load recent history + facts in parallel. Keep a healthy window so
+        // the bot doesn't feel amnesiac mid-conversation. Durable context
+        // still lives in user_facts / lessons_learned.
+        const HISTORY_LIMIT = 30;
         const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes] = await Promise.all([
           supabase
             .from("messages")
@@ -299,23 +298,23 @@ export const Route = createFileRoute("/api/chat")({
             .from("user_facts")
             .select("key,value")
             .order("updated_at", { ascending: false })
-            .limit(toolsEnabled ? 12 : 3),
+            .limit(20),
           supabase
             .from("lessons_learned")
             .select("lesson,context")
             .order("created_at", { ascending: false })
-            .limit(toolsEnabled ? 8 : 0),
+            .limit(12),
           supabase
             .from("message_feedback")
             .select("rating,note,created_at")
             .eq("rating", "down")
             .order("created_at", { ascending: false })
-            .limit(toolsEnabled ? 3 : 0),
+            .limit(5),
           supabase
             .from("contacts")
             .select("name,email,notes")
             .order("name", { ascending: true })
-            .limit(toolsEnabled ? 50 : 0),
+            .limit(100),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         const rows = (histRes.data ?? []).slice().reverse();
@@ -401,14 +400,14 @@ export const Route = createFileRoute("/api/chat")({
         const factsBlock =
           factRows && factRows.length > 0
             ? `\n\n# Remembered facts about this user\n${factRows
-                .map((f) => `- ${f.key}: ${truncateForPrompt(f.value, 180)}`)
+                .map((f) => `- ${f.key}: ${f.value}`)
                 .join("\n")}\nUse these naturally. If a fact is wrong, offer to update or forget it.`
             : "";
 
         const lessonsBlock =
           lessonRows.length > 0
             ? `\n\n# Lessons learned (apply these automatically)\nThese are corrections and preferences captured from past conversations. Treat them as standing rules unless the user clearly overrides one.\n${lessonRows
-                .map((l) => `- ${truncateForPrompt(l.lesson, 180)}${l.context ? ` (context: ${truncateForPrompt(l.context, 120)})` : ""}`)
+                .map((l) => `- ${l.lesson}${l.context ? ` (context: ${l.context})` : ""}`)
                 .join("\n")}`
             : "";
 
@@ -449,7 +448,7 @@ export const Route = createFileRoute("/api/chat")({
           }
           return {
             role: r.role as "user" | "assistant" | "system",
-            content: truncateForPrompt(r.content, 1200),
+            content: r.content,
           };
         });
         const result = streamText({
@@ -475,7 +474,7 @@ export const Route = createFileRoute("/api/chat")({
               service_tier: "priority",
             },
           },
-          tools: toolsEnabled ? {
+          tools: {
             web_search: tool({
               description:
                 "Search the live web. Returns a list of results with title, url, and snippet. Use for current events, facts, prices, anything time-sensitive.",
