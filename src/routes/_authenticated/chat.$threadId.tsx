@@ -1267,6 +1267,26 @@ function ThreadView({ threadId }: { threadId: string }) {
         if (message.source === "user") {
           voiceUserHasSpokenRef.current = true;
           lastUserSpeechAtRef.current = Date.now();
+          // STT ghost filter: bare single-word farewells/greetings
+          // ("Bye.", "Hi.", "OK.", "Thanks.") that arrive within 3s of
+          // another user turn are almost always STT hallucinations from
+          // non-speech audio. Drop them so the model doesn't reply
+          // "Bye — reach out anytime" in the middle of a real question.
+          const now = Date.now();
+          const trimmed = text.trim();
+          const isBareFiller = /^(bye|hi|hey|ok|okay|thanks|thank you|yes|no|uh|um|mm|hm+)[.!?]?$/i.test(trimmed);
+          const veryClose = now - lastVoiceUserAtRef.current < 3000;
+          if (isBareFiller && veryClose) {
+            return;
+          }
+          lastVoiceUserAtRef.current = now;
+          // Any new user turn cancels an in-flight prefetch — the user
+          // changed topics, so posting the stale answer would be worse
+          // than nothing.
+          if (deepAnswerInFlightRef.current) {
+            try { deepAnswerInFlightRef.current.abort.abort(); } catch { /* noop */ }
+            deepAnswerInFlightRef.current = null;
+          }
           lastVoiceUserTextRef.current = text;
           // Reset 90s idle auto-stop on every user utterance.
           if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
@@ -1286,20 +1306,18 @@ function ThreadView({ threadId }: { threadId: string }) {
           // question, start the full deep-answer pipeline NOW in parallel
           // with the realtime model's tool-calling decision. When the model
           // then calls deep_answer, it awaits this same promise instead of
-          // firing a second request — eliminating the 10–20s of dead air
-          // between "I put the full breakdown in chat" and the chat actually
-          // getting the breakdown.
+          // firing a second request.
           if (looksLikeResearchQuery(text) && !deepAnswerInFlightRef.current) {
-            const promise = startDeepAnswer(text).finally(() => {
-              // Keep the resolved result around briefly so a late
-              // deep_answer tool call can still reuse it, then clear.
+            const abort = new AbortController();
+            const promise = startDeepAnswer(text, abort.signal);
+            deepAnswerInFlightRef.current = { query: text, promise, abort };
+            promise.finally(() => {
               window.setTimeout(() => {
                 if (deepAnswerInFlightRef.current?.query === text) {
                   deepAnswerInFlightRef.current = null;
                 }
               }, 2000);
             });
-            deepAnswerInFlightRef.current = { query: text, promise: promise as Promise<{ ok?: boolean; error?: string; note?: string }> };
           }
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
