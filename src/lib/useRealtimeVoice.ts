@@ -26,6 +26,14 @@ export type RealtimeAssistantDelta = {
   event_id?: string;
 };
 
+export type RealtimeUsage = {
+  inputAudioTokens: number;
+  outputAudioTokens: number;
+  inputTextTokens: number;
+  outputTextTokens: number;
+  responseId?: string;
+};
+
 export type UseRealtimeVoiceOptions = {
   clientTools?: Record<string, ClientTool>;
   toolDefs?: RealtimeToolDef[];
@@ -34,6 +42,7 @@ export type UseRealtimeVoiceOptions = {
   onError?: (message: string) => void;
   onMessage?: (m: RealtimeMessage) => void;
   onAssistantDelta?: (part: RealtimeAssistantDelta) => void;
+  onUsage?: (u: RealtimeUsage) => void;
 };
 
 export type RealtimeStatus = "disconnected" | "connecting" | "connected";
@@ -158,7 +167,41 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         type === "response.done"
       ) {
         setIsSpeaking(false);
-        if (type === "response.done") activeResponseRef.current = false;
+        if (type === "response.done") {
+          activeResponseRef.current = false;
+          // Extract token usage for spend tracking.
+          const response = msg.response as
+            | {
+                id?: string;
+                usage?: {
+                  input_tokens?: number;
+                  output_tokens?: number;
+                  input_token_details?: { audio_tokens?: number; text_tokens?: number };
+                  output_token_details?: { audio_tokens?: number; text_tokens?: number };
+                };
+              }
+            | undefined;
+          const usage = response?.usage;
+          if (usage && opts.onUsage) {
+            const inAudio = usage.input_token_details?.audio_tokens ?? 0;
+            const outAudio = usage.output_token_details?.audio_tokens ?? 0;
+            const inText = usage.input_token_details?.text_tokens ??
+              Math.max(0, (usage.input_tokens ?? 0) - inAudio);
+            const outText = usage.output_token_details?.text_tokens ??
+              Math.max(0, (usage.output_tokens ?? 0) - outAudio);
+            try {
+              opts.onUsage({
+                inputAudioTokens: inAudio,
+                outputAudioTokens: outAudio,
+                inputTextTokens: inText,
+                outputTextTokens: outText,
+                responseId: response?.id,
+              });
+            } catch (err) {
+              console.warn("onUsage handler failed", err);
+            }
+          }
+        }
         return;
       }
 
