@@ -3,7 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertUnderCap } from "@/lib/spend-cap.functions";
 
 // OpenAI Realtime — mini is ~4× cheaper than the full model and plenty for chat.
-const REALTIME_MODEL = "gpt-realtime-mini";
+const REALTIME_MODEL = "gpt-realtime";
 const REALTIME_VOICE = "alloy";
 
 export const createRealtimeSession = createServerFn({ method: "POST" })
