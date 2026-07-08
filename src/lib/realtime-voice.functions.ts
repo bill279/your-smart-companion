@@ -5,10 +5,7 @@ import { computeCost } from "@/lib/usage-pricing";
 import { z } from "zod";
 
 // OpenAI Realtime — mini is ~4× cheaper than the full model and plenty for chat.
-// Reverted from `gpt-realtime` to `gpt-realtime-mini` — the full model was
-// ~4× the cost with no perceptible quality improvement (the realtime pipeline
-// is bottlenecked by WebRTC/VAD/transcription, not the model).
-const REALTIME_MODEL = "gpt-realtime-mini";
+const REALTIME_MODEL = "gpt-realtime";
 const REALTIME_VOICE = "alloy";
 
 export const createRealtimeSession = createServerFn({ method: "POST" })
