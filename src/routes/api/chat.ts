@@ -487,7 +487,7 @@ function latestGeneratedDocsFromHistory(
   rows: ChatHistoryRow[],
   preferredFormats: GeneratedDocFormat[],
 ): NonNullable<ToolActivity["docFile"]>[] {
-  const wanted = preferredFormats.length > 0 ? preferredFormats : ["pdf"];
+  const wanted: GeneratedDocFormat[] = preferredFormats.length > 0 ? preferredFormats : ["pdf"];
   const found = new Map<GeneratedDocFormat, NonNullable<ToolActivity["docFile"]>>();
   for (const row of [...rows].reverse()) {
     if (row.role !== "assistant") continue;
@@ -495,8 +495,10 @@ function latestGeneratedDocsFromHistory(
     for (const activity of [...activities].reverse()) {
       const doc = activity.docFile;
       if (!doc?.url || !doc.filename) continue;
-      const ext = doc.filename.toLowerCase().split(".").pop() as GeneratedDocFormat | undefined;
-      if (!ext || !wanted.includes(ext) || found.has(ext)) continue;
+      const rawExt = doc.filename.toLowerCase().split(".").pop();
+      if (rawExt !== "pdf" && rawExt !== "docx" && rawExt !== "xlsx" && rawExt !== "csv") continue;
+      const ext: GeneratedDocFormat = rawExt;
+      if (!wanted.includes(ext) || found.has(ext)) continue;
       found.set(ext, doc);
       if (found.size === wanted.length) return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
     }
