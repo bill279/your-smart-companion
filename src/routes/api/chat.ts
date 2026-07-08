@@ -143,7 +143,7 @@ Memory
 
 Files
 - \`generate_document\` — real PDF/DOCX/XLSX/CSV downloads. Use whenever the user asks for a file/report/export/attachment. Default to PDF. The chat AUTOMATICALLY renders a preview + download card from the tool result — do NOT paste the URL or a Markdown link into the reply. Never claim you can't create files.
-- **"Convert this / that / your last reply / the above to a PDF"** → the \`markdown\` argument MUST be the FULL VERBATIM text of your most recent substantive assistant message in this thread (the long research/answer they're referring to), not a re-summary, not a shortened table, not a new paragraph. Copy the entire prior message body word-for-word into \`markdown\`. If you're unsure which message they mean and there's only one long recent answer, use that one — do NOT ask to clarify, do NOT regenerate a shorter version. Only ask which message when there are multiple long answers of similar size.
+- **"Convert this / that / your last reply / the above to a PDF"** → the \`markdown\` argument must contain ONLY the document body from your most recent substantive assistant message in this thread. No greeting, no "here's the document", no approval text, no user message text, no transcript fragments, no raw tool URLs. Keep the prior assistant answer complete — not a re-summary, not a shortened table, not a new paragraph. If you're unsure which message they mean and there's only one long recent answer, use that one — do NOT ask to clarify, do NOT regenerate a shorter version. Only ask which message when there are multiple long answers of similar size.
 - Call \`generate_document\` exactly ONCE per requested file format. If the user asks for both PDF and Word, call it once for PDF and once for DOCX from the SAME markdown/title. Never emit a chat summary before the tool call(s) — go straight to the tool(s), then a single short line like "Here are the PDF and Word files — preview or download them above." Do NOT include URLs, filenames in brackets, or Markdown links; the cards handle that.
 - **filename**: short, professional, human — e.g. \`Stereoscopic Cameras Comparison\`, \`Q3 Sales Report\`. NO underscores, NO snake_case, NO date stamps, NO file extension. The system slugifies it for the URL; keep the label clean.
 - **title**: a proper human title in Title Case (e.g. \`Top Stereoscopic Cameras for Underground Mining\`). Never a filename slug. Never with underscores. Do NOT repeat the filename verbatim.
@@ -470,7 +470,14 @@ function emailNeedsGeneratedAttachment(userText: string, subject: string, body: 
 function latestGeneratedDocFromHistory(
   rows: ChatHistoryRow[],
   preferredFormat: "pdf" | "docx" | "xlsx" | "csv" | null,
+  currentTurnActivity?: ToolActivity[],
 ): NonNullable<ToolActivity["docFile"]> | null {
+  for (const activity of [...(currentTurnActivity ?? [])].reverse()) {
+    const doc = activity.docFile;
+    if (!doc?.url || !doc.filename) continue;
+    const ext = doc.filename.toLowerCase().split(".").pop();
+    if (!preferredFormat || ext === preferredFormat) return doc;
+  }
   for (const row of [...rows].reverse()) {
     if (row.role !== "assistant") continue;
     const { activities } = extractToolActivity(row.content);
@@ -487,9 +494,20 @@ function latestGeneratedDocFromHistory(
 function latestGeneratedDocsFromHistory(
   rows: ChatHistoryRow[],
   preferredFormats: GeneratedDocFormat[],
+  currentTurnActivity?: ToolActivity[],
 ): NonNullable<ToolActivity["docFile"]>[] {
   const wanted: GeneratedDocFormat[] = preferredFormats.length > 0 ? preferredFormats : ["pdf"];
   const found = new Map<GeneratedDocFormat, NonNullable<ToolActivity["docFile"]>>();
+  for (const activity of [...(currentTurnActivity ?? [])].reverse()) {
+    const doc = activity.docFile;
+    if (!doc?.url || !doc.filename) continue;
+    const rawExt = doc.filename.toLowerCase().split(".").pop();
+    if (rawExt !== "pdf" && rawExt !== "docx" && rawExt !== "xlsx" && rawExt !== "csv") continue;
+    const ext: GeneratedDocFormat = rawExt;
+    if (!wanted.includes(ext) || found.has(ext)) continue;
+    found.set(ext, doc);
+    if (found.size === wanted.length) return wanted.map((fmt) => found.get(fmt)).filter(Boolean) as NonNullable<ToolActivity["docFile"]>[];
+  }
   for (const row of [...rows].reverse()) {
     if (row.role !== "assistant") continue;
     const { activities } = extractToolActivity(row.content);
