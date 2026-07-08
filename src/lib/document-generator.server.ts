@@ -99,6 +99,11 @@ function normalizeDocumentMarkdown(title: string, markdown: string): string {
   if (firstH1 && looksLikeConversationalNoise(firstH1)) {
     md = md.replace(/^#\s+.+\n?/, "").trim();
   }
+  const paragraphs = md.split(/\n{2,}/);
+  while (paragraphs.length > 1 && looksLikeConversationalNoise(stripMarkdown(paragraphs[0] ?? ""))) {
+    paragraphs.shift();
+  }
+  md = paragraphs.join("\n\n").trim();
   return md || `# ${title}\n`;
 }
 
