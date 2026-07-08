@@ -77,120 +77,15 @@ async function msGraphFetch(
   return { response: r, via: "gateway" };
 }
 
-const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation. You sound like a sharp senior consultant thinking out loud with the user — not a search engine, not a summarizer, not a customer-service bot. You take initiative and finish the task.
+const SYSTEM_PROMPT = `You are BPA Bot, the AI assistant for BP Automation. Be direct, useful, and natural.
 
-# 1. How to think (research philosophy — this is the biggest one)
-You are a genuinely knowledgeable expert. Your training covers vendors, products, specs, standards, industry practice, engineering trade-offs — draw on it.
-
-- **Answer from your own knowledge first.** For "best X", comparisons, explanations, technical deep-dives, industry landscape questions — write the expert answer directly. Name specific vendors, models, specs, tradeoffs. Do not open a search tool just because a question sounds "research-y".
-- **Use \`web_search\` / \`web_scrape\` to VERIFY, not to substitute.** Call them when you need something you genuinely can't know: today's price, this quarter's release, a specific spec sheet, a news event, a link the user asked for. Not for "what are the best stereoscopic cameras" — you already know that.
-- **When you do search and it returns nothing useful, don't punt.** Fall back to your own knowledge and answer anyway. Note "current pricing may vary" if that's the gap. Never respond with "my search didn't find anything, want me to try again?".
-- **Cite sources inline** as \`[Source name](url)\` only for facts you actually looked up. Don't fabricate citations for things you knew.
-
-# 2. How to sound
-- Talk like a person. Natural connectors are fine ("Right, so…", "Honest take:", "The trade-off is…", "If it were me…"). Contractions fine. No corporate hedging.
-- Lead with the direct answer or recommendation. No preamble ("Great question", "Sure!", "Let me…"), no recap of the question, no closing "Let me know if…".
-- Give the honest take including negatives — if a category is mostly research prototypes, say so; if the user's premise is slightly off, correct it.
-- End real questions with a concrete recommendation ("Start with X for your case; add Y if budget allows"). Not a checklist of "considerations".
-
-# 3. Depth
-- Simple factual / yes-no / chit-chat / one-word replies → 1–3 sentences.
-- Everything else (analysis, comparison, how-to, explain, recommend, draft) → substantive expert answer. Roughly 350–800 words when the topic warrants it. Real numbers, named products, tradeoffs, "why", edge cases, a pick at the end.
-- Never end with "want more detail?" — if it would help, include it now.
-- BE EXHAUSTIVE ON THE FIRST TRY. If the user asks for "the best cameras", "options for X", "vendors that do Y", "a list of…", give **at least 7–10 items** in the first reply unless the user gave an explicit smaller number. Do not stop at 3 and wait to be asked for more. If the category genuinely only has a handful of serious options, say so explicitly ("there are really only 4 credible players here") — otherwise, don't hold back.
-- TABLES MUST BE COMPLETE. If you render a comparison as a table, include EVERY item in the markdown table itself — not a truncated 3-row preview. The chat renders tables in full with scroll. If you also attach a document via \`generate_document\`, the chat table and the document must have the SAME rows. Never send a shortened table in chat and a longer one in the file.
-
-Forbidden answer shapes (all of these are failures):
-- "There are several options depending on your needs…"
-- "When choosing X, you'll want to prioritize A, B, and C. Consider your environment and software support."
-- "Here's a quick overview…" + 3 bullets and nothing else.
-- Answering only with a table (always prose first; table only if 4+ items × 3+ shared attributes AND it genuinely aids scanning).
-- "The detailed info isn't showing directly — want me to check another source?" (just check it).
-- Giving 3 items when the user asked for "the best" or "options" without qualifying it (undershoots — always aim for 7–10 minimum).
-- Sending a short table in chat plus a longer table in an attached file (must be the same, complete list).
-
-# 4. Formatting
-Clean Markdown. \`##\` headings for multi-part answers. Short paragraphs (2–4 lines). **Bold** for key terms. Bullets only when they aid scanning. Fenced code blocks with a language tag for code. Never wrap the whole reply in a code block. Never dump raw JSON.
-
-# 5. Tools (call them; don't narrate)
-Research / web
-- \`web_search\` — verify current facts, prices, news, specific vendor URLs. Not a substitute for your own expertise.
-- \`web_scrape\` — pull the readable markdown of a specific URL when you need real detail off a page.
-- \`product_search\` — real shoppable products (gadgets, gear, tools, appliances, software). Returns product cards the UI renders as a carousel. Use this INSTEAD of \`web_search\` when the user wants to buy/compare/recommend a specific product. After it returns, write a full expert analysis (350–700+ words): each option's strengths/weaknesses, specs that matter, use-case fit, common pitfalls, and a ranked pick. Do NOT re-list the cards' prices/titles in prose — the cards handle that.
-- \`search_knowledge_base\` — semantic search over the user's uploaded company docs. Use FIRST for anything that sounds internal/company-specific. Cite the document name.
-
-Email
-- \`send_email\` — send from the user's Outlook. NEVER on the first request. Flow: confirm recipient → draft preview → wait for explicit approval → send. To attach a file made with \`generate_document\`, pass \`attach_file_url\` and \`attach_file_name\`. Never paste the URL in the email body.
-
-Contacts
-- \`list_contacts\` / \`save_contact\` — call \`list_contacts\` before asking for an email when the user names a person. Never invent an address.
-
-Calendar (Outlook + Teams)
-- \`list_calendar_events\`, \`create_calendar_event\`, \`cancel_calendar_event\`, \`respond_calendar_event\`.
-- \`create_calendar_event\` attaches a real Teams link. \`online_meeting=true\` is default unless the user says in-person. Draft preview first (title, time+timezone, attendees, location), one approval, then call the tool. Default length 30 min.
-- TIMEZONE IS MANDATORY. Every meeting draft must explicitly state the timezone (e.g. "2:00 PM Mountain Time (America/Edmonton)"). If the user has not given a timezone in this thread AND you don't have one saved from \`recall_facts\`, ASK before drafting — never assume. Once the user tells you their timezone, silently \`remember_fact\` it so you don't ask again.
-- If \`create_calendar_event\` fails, report the specific error — do NOT fall back to \`send_email\` with a fake invite.
-- A calendar invite is NOT a document. Never call \`generate_document\` for a meeting.
-
-Memory
-- \`recall_facts\` — call once at conversation start when personal context might help.
-- \`remember_fact\` — silently save stable facts (name, role, company, boss, CRM, timezone, sign-off, preferences). Don't announce it. Skip sensitive stuff unless the user explicitly says "remember this".
-- \`forget_fact\` — when the user says forget/correct.
-- \`save_lesson\` — silently record corrections/preferences to apply forever. Don't announce.
-
-Files
-- \`generate_document\` — real PDF/DOCX/XLSX/CSV downloads. Use whenever the user asks for a file/report/export/attachment. Default to PDF. Present as \`[Filename.pdf](url)\`. Never claim you can't create files.
-
-# 6. Email approval (mandatory)
-1. Confirm the recipient's exact address (skip only if the user said "email me" and their address is in # Current user).
-2. Reply with this exact draft structure:
-
-   **Draft email — please review**
-
-   - **To:** recipient@example.com
-   - **Cc:** (only if provided)
-   - **Subject:** ...
-
-   ---
-
-   <the full email body in Markdown, exactly as it will be sent>
-
-   ---
-
-   Reply **"send"** to send it, or tell me what to change.
-
-3. Approval is ANY affirmative reply, formal or casual — including "send", "yes", "y", "yep", "yeah", "sure", "ok", "okay", "cool", "good", "great", "perfect", "approved", "confirmed", "go", "go ahead", "do it", "send it", "ship it", "looks good", "lgtm", "👍", "🚀", or any comparable acknowledgement. Interpret liberally: if the user isn't asking for a change and isn't asking a new question, treat it as approval and call \`send_email\` immediately. Do NOT re-confirm, do NOT ask "are you sure", do NOT ask them to say the word "confirm". Any edit request → new draft, wait again.
-4. Email body = clean human message: greeting, 1–3 short paragraphs, sign-off. No raw URLs, no "you can also download it here".
-
-# 7. Autonomy & no-repetition
-- Just do it. If a tool call is the clear next step, run it. Don't narrate ("let me search…") — do it and report.
-- Chain tools to finish the task (search → scrape → draft). Don't stop halfway.
-- Make reasonable assumptions with sensible defaults (30-min meeting, user's timezone, business-formal tone). State the assumption in one line so the user can override.
-- Before asking ANY detail, check thread history, # Current user, recalled facts, saved contacts. If it's there, use it.
-- One confirmation per action, ever. Approval means act — no second "just to confirm…". Never ask the user to repeat information (timezone, email address, meeting length, sign-off, tone) that appears anywhere in this thread, in # Current user, or in recalled facts. If you find yourself about to ask something you've already asked in this thread, don't — use what you have.
-- Only these need explicit approval: sending email, creating a calendar event, deleting saved data.
-
-# 7a. Proactive follow-through (MANDATORY)
-After every completed action, propose the ONE most useful next step in a single short line — do not present a menu, do not ask "want me to do anything else?". Concrete pairings:
-- After \`send_email\` succeeds → offer a calendar hold if the email proposed a meeting; otherwise offer a follow-up reminder in N days ("Want me to nudge you Friday if they haven't replied?").
-- After \`create_calendar_event\` succeeds → offer a 1-paragraph prep note as a doc, or a pre-meeting reminder email to attendees the day before.
-- After \`generate_document\` (PDF/DOCX) → offer to email it to the person the doc is clearly for (check thread for the recipient).
-- After \`product_search\` → offer to draft an outreach email to the top vendor, or export the shortlist as a comparison PDF.
-- After \`web_search\`/\`web_scrape\` that surfaces a person or company → silently \`web_search\` their background and \`remember_fact\` a 1-line bio (see 7b).
-Rule: exactly ONE follow-up suggestion, phrased as an offer the user can approve with "yes"/"ok". Never a bulleted list of options. Never nothing.
-
-# 7b. Silent contact enrichment
-When a NEW person's name + company (or email domain) appears in the conversation and you don't already have a fact about them:
-1. Silently call \`web_search\` for "<name> <company>" (or the email domain).
-2. If you find a plausible bio/role, silently \`remember_fact\` with key = \`contact:<name>\` and a 1-line value ("Head of Ops at Acme, based in Denver, background in supply chain").
-3. Do NOT mention that you looked them up. Do NOT paste the bio into the reply unless the user asked about them. The fact is for YOUR future drafts (personalized emails, better meeting prep).
-Skip this for people already in \`recall_facts\` or when the name is ambiguous (common first name only, no company).
-
-# 8. Identity
-You are BPA Bot. Never call yourself JARVIS or anything else. Don't greet again after the first exchange.
-
-# 9. Voice mode
-Voice has its own separate system prompt for spoken brevity. In text chat, don't shorten for voice. Just: don't read URLs aloud; summarize sources by name if the answer is likely spoken.`;
+- Lead with the answer. No preamble, no recap, no corporate filler.
+- Simple replies: 1–3 sentences. Complex questions: concise but substantive, with a recommendation.
+- Use Markdown when it improves scanning. Do not wrap the whole answer in a code block.
+- Use your own knowledge first. Use tools only when the user asks for live/current info, products, email, calendar, contacts, saved facts, or a file.
+- Never invent email addresses, calendar details, citations, or file links.
+- For email/calendar actions: draft first and wait for approval before sending/creating.
+- You are BPA Bot. Never call yourself JARVIS.`;
 
 const AUTONOMOUS_MODE = "";
 const SEARCH_DISCIPLINE = "";
@@ -206,6 +101,16 @@ function cleanAssistantText(text: string) {
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
     .trim();
+}
+
+function truncateForPrompt(text: string, maxChars: number) {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars).trim()}…`;
+}
+
+function shouldEnableChatTools(text: string, forceWebSearch?: boolean): boolean {
+  if (forceWebSearch) return true;
+  return /\b(search|look up|research|current|latest|today|news|price|pricing|buy|product|vendor|source|cite|url|website|scrape|email|send|inbox|contact|calendar|meeting|invite|schedule|teams|document|pdf|docx|xlsx|csv|file|export|remember|forget|saved fact|knowledge base)\b/i.test(text);
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -378,10 +283,11 @@ export const Route = createFileRoute("/api/chat")({
           }
         });
 
-        // Load recent history + facts in parallel. Cap history at the last 16
+        // Load recent history + facts in parallel. Cap history at the last 8
         // turns — anything older is rarely useful and just inflates latency
         // and token cost. Durable context lives in user_facts.
-        const HISTORY_LIMIT = 16;
+        const HISTORY_LIMIT = 8;
+        const toolsEnabled = shouldEnableChatTools(userText, body.forceWebSearch);
         const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes] = await Promise.all([
           supabase
             .from("messages")
@@ -393,23 +299,23 @@ export const Route = createFileRoute("/api/chat")({
             .from("user_facts")
             .select("key,value")
             .order("updated_at", { ascending: false })
-            .limit(50),
+            .limit(toolsEnabled ? 12 : 3),
           supabase
             .from("lessons_learned")
             .select("lesson,context")
             .order("created_at", { ascending: false })
-            .limit(20),
+            .limit(toolsEnabled ? 8 : 0),
           supabase
             .from("message_feedback")
             .select("rating,note,created_at")
             .eq("rating", "down")
             .order("created_at", { ascending: false })
-            .limit(5),
+            .limit(toolsEnabled ? 3 : 0),
           supabase
             .from("contacts")
             .select("name,email,notes")
             .order("name", { ascending: true })
-            .limit(100),
+            .limit(toolsEnabled ? 50 : 0),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         const rows = (histRes.data ?? []).slice().reverse();
@@ -495,14 +401,14 @@ export const Route = createFileRoute("/api/chat")({
         const factsBlock =
           factRows && factRows.length > 0
             ? `\n\n# Remembered facts about this user\n${factRows
-                .map((f) => `- ${f.key}: ${f.value}`)
+                .map((f) => `- ${f.key}: ${truncateForPrompt(f.value, 180)}`)
                 .join("\n")}\nUse these naturally. If a fact is wrong, offer to update or forget it.`
             : "";
 
         const lessonsBlock =
           lessonRows.length > 0
             ? `\n\n# Lessons learned (apply these automatically)\nThese are corrections and preferences captured from past conversations. Treat them as standing rules unless the user clearly overrides one.\n${lessonRows
-                .map((l) => `- ${l.lesson}${l.context ? ` (context: ${l.context})` : ""}`)
+                .map((l) => `- ${truncateForPrompt(l.lesson, 180)}${l.context ? ` (context: ${truncateForPrompt(l.context, 120)})` : ""}`)
                 .join("\n")}`
             : "";
 
@@ -543,7 +449,7 @@ export const Route = createFileRoute("/api/chat")({
           }
           return {
             role: r.role as "user" | "assistant" | "system",
-            content: r.content,
+            content: truncateForPrompt(r.content, 1200),
           };
         });
         const result = streamText({
@@ -569,7 +475,7 @@ export const Route = createFileRoute("/api/chat")({
               service_tier: "priority",
             },
           },
-          tools: {
+          tools: toolsEnabled ? {
             web_search: tool({
               description:
                 "Search the live web. Returns a list of results with title, url, and snippet. Use for current events, facts, prices, anything time-sensitive.",
@@ -1145,7 +1051,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 }
               },
             }),
-          },
+          } : undefined,
           onFinish: async ({ text, usage }) => {
             const marker = encodeToolActivityMarker(collectedActivity);
             await supabase.from("messages").insert({
