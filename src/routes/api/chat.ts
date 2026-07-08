@@ -435,7 +435,8 @@ function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow
   }
   const promptTitle = triggeringUserPrompt ? titleFromUserPrompt(triggeringUserPrompt) : null;
   const fallback = formats.includes("pdf") ? "Chat Export" : "Generated Document";
-  const title = cleanDocumentTitle(promptTitle ?? titleFromSource(source, fallback), fallback);
+  const sourceTitle = titleFromSource(source, fallback);
+  const title = cleanDocumentTitle(!looksLikeNoisyVoiceTitle(promptTitle) ? promptTitle : sourceTitle, fallback);
 
   const markdown = normalizeDocumentBody(source, title);
   return { formats, title, filename: cleanFilenameBase(title), markdown };
@@ -1152,6 +1153,19 @@ export const Route = createFileRoute("/api/chat")({
                     };
                   }
                   pendingAttachments.push(...docs.map((doc) => ({ url: doc.url, filename: doc.filename })));
+                }
+                const requestedForEmail = requestedFormats(`${subject}\n${emailBody}\n${userText}`);
+                if (pendingAttachments.length > 0 && requestedForEmail.length > 1) {
+                  const present = new Set(
+                    pendingAttachments
+                      .map((a) => a.filename.toLowerCase().split(".").pop())
+                      .filter(Boolean),
+                  );
+                  const missing = requestedForEmail.filter((fmt) => !present.has(fmt));
+                  if (missing.length > 0) {
+                    const docs = latestGeneratedDocsFromHistory(rows, missing);
+                    pendingAttachments.push(...docs.map((doc) => ({ url: doc.url, filename: doc.filename })));
+                  }
                 }
 
                 const emailAttachments: EmailAttachment[] = [];
