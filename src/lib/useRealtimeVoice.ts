@@ -114,7 +114,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     const pendingInstructions = responseInstructionsPendingRef.current;
     responseInstructionsPendingRef.current = undefined;
     const event = pendingInstructions
-      ? { type: "response.create", response: { instructions: pendingInstructions } }
+      ? { type: "response.create", response: { instructions: pendingInstructions, tool_choice: "none" } }
       : { type: "response.create" };
     if (!sendEvent(event)) {
       responseCreateInFlightRef.current = false;
