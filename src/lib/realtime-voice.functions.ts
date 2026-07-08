@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { assertUnderCap } from "@/lib/spend-cap.functions";
 
 // OpenAI Realtime — mini is ~4× cheaper than the full model and plenty for chat.
 const REALTIME_MODEL = "gpt-realtime-mini";
@@ -8,6 +9,8 @@ const REALTIME_VOICE = "alloy";
 export const createRealtimeSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    // Block if user is at/above their monthly spend cap.
+    await assertUnderCap(context.supabase, context.userId);
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new Error("OPENAI_API_KEY not configured");
     // `/v1/realtime/sessions` was retired — mint an ephemeral client secret
