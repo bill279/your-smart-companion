@@ -475,6 +475,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           const buf = new Uint8Array(analyser.fftSize);
           let quietCount = 0;
           let loudCount = 0;
+          let instantHitCount = 0;
           const tick = () => {
             if (!micMonitorRef.current) return;
             analyser.getByteTimeDomainData(buf);
@@ -485,14 +486,34 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               sum += v * v;
             }
             const rms = Math.sqrt(sum / buf.length);
-            // Noise-gated barge-in. Breathing / throat-clears / keyboard
-            // clicks are short, low-energy pops — a single loud frame is
-            // NOT enough. Require sustained voice-level energy across
-            // several consecutive frames before we call it speech. Frame
-            // cadence is ~16ms, so 3 frames ≈ 50ms — still snappy for
-            // interrupting the assistant, but immune to a single pop.
-            const SPEECH_RMS = 0.06;        // higher gate → ignores breath/hum
-            const SPEECH_FRAMES = 3;        // consecutive frames required
+            // Two-tier gate for true two-way-sync feel:
+            //  * INSTANT tier — very low latency local mute. As soon as
+            //    the mic sees mild energy over 2 frames (~32ms) while
+            //    the assistant is speaking, drop local playback. This
+            //    is what makes it FEEL like ChatGPT voice: the audio
+            //    stops the instant you open your mouth. If it turns
+            //    out to be a cough / keyboard click / breath, the
+            //    auto-release in instantMuteLocalPlayback unmutes.
+            //  * CONFIRM tier — the real "user is speaking" decision.
+            //    Only after sustained voice-level energy do we send
+            //    response.cancel to the server, so background noise
+            //    doesn't kill legitimate responses.
+            const INSTANT_RMS  = 0.035;     // low: catch first syllable
+            const INSTANT_FRAMES = 2;       // ~32ms
+            const SPEECH_RMS   = 0.07;      // higher gate for real speech
+            const SPEECH_FRAMES = 4;        // ~64ms sustained
+            if (rms > INSTANT_RMS) {
+              instantHitCount++;
+              if (
+                instantHitCount >= INSTANT_FRAMES &&
+                (assistantAudibleRef.current || activeResponseRef.current) &&
+                !localSpeechActiveRef.current
+              ) {
+                instantMuteLocalPlayback();
+              }
+            } else {
+              instantHitCount = 0;
+            }
             if (rms > SPEECH_RMS) {
               loudCount++;
               quietCount = 0;
