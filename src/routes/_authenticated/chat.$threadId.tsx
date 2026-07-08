@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
-import { createRealtimeSession } from "@/lib/realtime-voice.functions";
+import { createRealtimeSession, logVoiceUsage } from "@/lib/realtime-voice.functions";
 import {
   voiceWebScrape,
   voiceProductSearch,
@@ -529,6 +529,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
   const createSession = useServerFn(createRealtimeSession);
+  const logUsage = useServerFn(logVoiceUsage);
   const vScrape = useServerFn(voiceWebScrape);
   const vProducts = useServerFn(voiceProductSearch);
   const vKb = useServerFn(voiceKnowledgeSearch);
@@ -666,6 +667,10 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const conversation = useRealtimeVoice({
     toolDefs: REALTIME_TOOL_DEFS,
+    onUsage: (u) => {
+      // Fire-and-forget: log per-turn realtime token usage for the spend dashboard.
+      logUsage({ data: u }).catch((err) => console.warn("logVoiceUsage failed", err));
+    },
     clientTools: {
       show_in_chat: async (params) => {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
