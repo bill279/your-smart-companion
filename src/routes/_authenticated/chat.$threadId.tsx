@@ -2753,6 +2753,7 @@ function Bubble({
       artifactIds.push(id);
       return "";
     })
+    .replace(/(^|\n)\s*\|[^\n]*\|\s*\n\s*\|[\s\-:|]+\|\s*(?=\n\s*(?:\|[\s\-:|]*\|\s*)*$|\s*$)/g, "")
     .trim();
   if (isUser) {
     return (
@@ -3137,44 +3138,48 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
     }
   }
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
-      <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
-        <FileText size={18} />
-      </div>
-      <button
-        type="button"
-        onClick={canPreview ? openPreview : () => downloadArtifact(art)}
-        className="min-w-0 flex-1 text-left hover:opacity-80 transition"
-      >
-        <div className="text-sm font-medium truncate">{art.filename}</div>
-        <div className="text-xs text-muted-foreground">
-          {art.formatLabel} · {formatBytes(art.size)}
+    <div className="rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+          <FileText size={18} />
         </div>
-      </button>
-      {canPreview && (
         <button
           type="button"
-          onClick={openPreview}
+          onClick={canPreview ? openPreview : () => downloadArtifact(art)}
+          className="min-w-0 flex-1 text-left hover:opacity-80 transition"
+        >
+          <div className="text-sm font-medium truncate">{art.filename}</div>
+          <div className="text-xs text-muted-foreground truncate">
+            {art.formatLabel} · {formatBytes(art.size)}
+          </div>
+        </button>
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {canPreview && (
+          <button
+            type="button"
+            onClick={openPreview}
+            className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+          >
+            <Eye size={12} /> Preview
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => downloadArtifact(art)}
           className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
         >
-          <Eye size={12} /> Preview
+          <Download size={12} /> Download
         </button>
-      )}
-      <button
-        type="button"
-        onClick={() => downloadArtifact(art)}
-        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
-      >
-        <Download size={12} /> Download
-      </button>
-      <button
-        type="button"
-        onClick={emailToMe}
-        disabled={sending}
-        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
-      >
-        <Mail size={12} /> {sending ? "Sending…" : "Email to me"}
-      </button>
+        <button
+          type="button"
+          onClick={emailToMe}
+          disabled={sending}
+          className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
+        >
+          <Mail size={12} /> {sending ? "Sending…" : "Email to me"}
+        </button>
+      </div>
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-4xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0">
           <DialogHeader className="p-4 border-b border-border">
@@ -3279,48 +3284,52 @@ function RemoteDocCard({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
-      <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
-        <FileText size={18} />
-      </div>
-      <a
-        href={doc.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="min-w-0 flex-1 text-left hover:opacity-80 transition"
-      >
-        <div className="text-sm font-medium truncate">{doc.filename}</div>
-        <div className="text-xs text-muted-foreground">
-          {label}
-          {typeof doc.size === "number" ? ` · ${formatBytes(doc.size)}` : ""}
+    <div className="rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+          <FileText size={18} />
         </div>
-      </a>
-      {canPreview && (
-        <button
-          type="button"
-          onClick={() => setPreviewOpen(true)}
+        <a
+          href={doc.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="min-w-0 flex-1 text-left hover:opacity-80 transition"
+        >
+          <div className="text-sm font-medium truncate">{doc.filename}</div>
+          <div className="text-xs text-muted-foreground truncate">
+            {label}
+            {typeof doc.size === "number" ? ` · ${formatBytes(doc.size)}` : ""}
+          </div>
+        </a>
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {canPreview && (
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
+          >
+            <Eye size={12} /> Preview
+          </button>
+        )}
+        <a
+          href={doc.url}
+          download={doc.filename}
+          target="_blank"
+          rel="noopener noreferrer"
           className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
         >
-          <Eye size={12} /> Preview
+          <Download size={12} /> Download
+        </a>
+        <button
+          type="button"
+          onClick={emailToMe}
+          disabled={sending}
+          className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
+        >
+          <Mail size={12} /> {sending ? "Sending…" : "Email to me"}
         </button>
-      )}
-      <a
-        href={doc.url}
-        download={doc.filename}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
-      >
-        <Download size={12} /> Download
-      </a>
-      <button
-        type="button"
-        onClick={emailToMe}
-        disabled={sending}
-        className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
-      >
-        <Mail size={12} /> {sending ? "Sending…" : "Email to me"}
-      </button>
+      </div>
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-4xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0">
           <DialogHeader className="p-4 border-b border-border">
