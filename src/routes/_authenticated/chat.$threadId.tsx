@@ -171,9 +171,16 @@ function voiceStartMessage(error: unknown) {
 const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
   {
     type: "function",
+    name: "deep_answer",
+    description:
+      "PREFERRED for any research, comparison, list, ranking, 'best X', 'top N', 'options for Y', how-to, explain, recommend, draft, or any question that needs live web search or a substantive expert answer. Delegates to the full chat brain (stronger model + live web_search + web_scrape + product_search + knowledge base), which posts the researched answer (with citations, sources, and a full markdown table when relevant) directly into the chat. Do NOT compose the answer yourself with show_in_chat when deep_answer applies. After it returns, say ONE short spoken sentence pointing to the chat (e.g. \"I've put the full breakdown in the chat.\"). No arguments needed — it uses the user's most recent message in this thread.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
     name: "show_in_chat",
     description:
-      "Render rich markdown (tables, lists, code, long drafts, email drafts) directly in the chat WITHOUT speaking it. Use this whenever the user asks for a table, list, code, or any long content. Then say a brief one-sentence spoken summary — never read the content aloud.",
+      "Render rich markdown directly in the chat WITHOUT speaking it. Use this ONLY for short structured content you're composing yourself — a draft email you've written from the user's dictation, a code snippet, or a simple table with data you already have. For any research/list/comparison/'best X'/how-to/recommend question, call deep_answer instead — do NOT compose those answers yourself. After show_in_chat returns, say ONE short spoken summary sentence — never read the content aloud.",
     parameters: {
       type: "object",
       properties: {
