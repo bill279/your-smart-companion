@@ -47,6 +47,7 @@ export const Route = createFileRoute("/api/voice-readout")({
               stream_format: "sse",
               response_format: "pcm",
             }),
+            signal: request.signal,
           });
 
           if (!response.ok) {
