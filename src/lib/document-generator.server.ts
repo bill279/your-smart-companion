@@ -506,7 +506,8 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
     if (rows.length === 0) return;
     const cols = Math.max(...rows.map((r) => r.length));
     const colWidth = contentWidth / cols;
-    const tableFontSize = cols > 8 ? 7.5 : cols > 6 ? 8.5 : 10;
+    // Fixed 3-tier scale — no more per-doc "sometimes 10pt, sometimes 8.5pt".
+    const tableFontSize = cols >= 8 ? 8 : cols >= 6 ? 9 : 10;
     const lineHeight = tableFontSize + 3;
     pdf.setFontSize(tableFontSize);
 
