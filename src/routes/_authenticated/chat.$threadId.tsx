@@ -1671,7 +1671,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("Microphone recording is not available in this browser.");
       }
-      microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      microphoneStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
       const session = await createSession({});
       if (startAttemptRef.current !== attemptId) {
         stopMediaStream(microphoneStream);
