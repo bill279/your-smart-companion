@@ -763,18 +763,52 @@ function ThreadView({ threadId }: { threadId: string }) {
             const errText = await res.text().catch(() => "");
             return { error: `deep answer failed: ${errText.slice(0, 200)}` };
           }
-          // Drain the stream so the server-side onFinish (which inserts
-          // the assistant message) runs to completion before we return.
+          // Stream the deep chat answer into the UI immediately, while still
+          // draining the response so server-side onFinish saves the final
+          // assistant message.
           const reader = res.body?.getReader();
           if (reader) {
+            const decoder = new TextDecoder();
+            let acc = "";
+            let buf = "";
+            let inCtrl = false;
+            let activity: ToolActivity[] = [];
+            setPendingActivity([]);
+            setPendingAssistant("Researching…");
             // eslint-disable-next-line no-constant-condition
             while (true) {
-              const { done } = await reader.read();
+              const { value, done } = await reader.read();
               if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              while (true) {
+                const idx = buf.indexOf(TOOL_FRAME_DELIM);
+                if (idx === -1) break;
+                const chunk = buf.slice(0, idx);
+                buf = buf.slice(idx + 1);
+                if (!inCtrl) {
+                  if (chunk) acc += chunk;
+                } else {
+                  try {
+                    const ev = JSON.parse(chunk) as ToolEvent;
+                    activity = foldToolEvent(activity, ev);
+                    setPendingActivity(activity);
+                  } catch {
+                    // ignore malformed frame
+                  }
+                }
+                inCtrl = !inCtrl;
+              }
+              if (!inCtrl && buf) {
+                acc += buf;
+                buf = "";
+              }
+              setPendingAssistant(cleanAssistantText(acc));
             }
           }
           await qc.invalidateQueries({ queryKey: ["messages", threadId] });
           await qc.invalidateQueries({ queryKey: ["threads"] });
+          setPendingAssistant("");
+          setPendingActivity([]);
           return {
             ok: true,
             note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
