@@ -114,6 +114,36 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     }
   }, []);
 
+  // Cut the assistant off immediately at every layer. Called both from the
+  // server VAD event (input_audio_buffer.speech_started) and from a local
+  // WebAudio RMS monitor so the user doesn't have to wait for the server
+  // round-trip to feel the interruption.
+  const bargeInNow = useCallback(() => {
+    const now = Date.now();
+    // Debounce so server + local paths don't stomp each other repeatedly.
+    if (now - localBargeInAtRef.current < 150) return;
+    localBargeInAtRef.current = now;
+    const el = audioElRef.current;
+    if (el) {
+      try { el.muted = true; } catch (err) { console.warn(err); }
+      try { el.pause(); } catch (err) { console.warn(err); }
+      try { el.volume = 0; } catch (err) { console.warn(err); }
+    }
+    if (activeResponseRef.current) {
+      sendEvent({ type: "response.cancel" });
+    }
+    sendEvent({ type: "output_audio_buffer.clear" });
+    setIsSpeaking(false);
+  }, [sendEvent]);
+
+  const releaseBargeIn = useCallback(() => {
+    const el = audioElRef.current;
+    if (!el) return;
+    try { el.muted = false; } catch (err) { console.warn(err); }
+    try { el.volume = 1; } catch (err) { console.warn(err); }
+    if (el.paused) { el.play().catch(() => {}); }
+  }, []);
+
   const requestResponseCreate = useCallback((instructions?: string) => {
     if (instructions?.trim()) {
       responseInstructionsPendingRef.current = instructions.trim();
