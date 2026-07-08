@@ -62,6 +62,13 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   const responseCreatePendingRef = useRef(false);
   const responseCreateInFlightRef = useRef(false);
   const responseInstructionsPendingRef = useRef<string | undefined>(undefined);
+  const micMonitorRef = useRef<{
+    ctx: AudioContext;
+    analyser: AnalyserNode;
+    source: MediaStreamAudioSourceNode;
+    raf: number;
+  } | null>(null);
+  const localBargeInAtRef = useRef(0);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -78,6 +85,12 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     pcRef.current = null;
     try { localStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch (err) { console.warn(err); }
     localStreamRef.current = null;
+    if (micMonitorRef.current) {
+      try { cancelAnimationFrame(micMonitorRef.current.raf); } catch (err) { console.warn(err); }
+      try { micMonitorRef.current.source.disconnect(); } catch (err) { console.warn(err); }
+      try { micMonitorRef.current.ctx.close(); } catch (err) { console.warn(err); }
+      micMonitorRef.current = null;
+    }
     if (audioElRef.current) {
       try { audioElRef.current.srcObject = null; } catch (err) { console.warn(err); }
     }
@@ -99,6 +112,36 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       console.warn("send event failed", err);
       return false;
     }
+  }, []);
+
+  // Cut the assistant off immediately at every layer. Called both from the
+  // server VAD event (input_audio_buffer.speech_started) and from a local
+  // WebAudio RMS monitor so the user doesn't have to wait for the server
+  // round-trip to feel the interruption.
+  const bargeInNow = useCallback(() => {
+    const now = Date.now();
+    // Debounce so server + local paths don't stomp each other repeatedly.
+    if (now - localBargeInAtRef.current < 150) return;
+    localBargeInAtRef.current = now;
+    const el = audioElRef.current;
+    if (el) {
+      try { el.muted = true; } catch (err) { console.warn(err); }
+      try { el.pause(); } catch (err) { console.warn(err); }
+      try { el.volume = 0; } catch (err) { console.warn(err); }
+    }
+    if (activeResponseRef.current) {
+      sendEvent({ type: "response.cancel" });
+    }
+    sendEvent({ type: "output_audio_buffer.clear" });
+    setIsSpeaking(false);
+  }, [sendEvent]);
+
+  const releaseBargeIn = useCallback(() => {
+    const el = audioElRef.current;
+    if (!el) return;
+    try { el.muted = false; } catch (err) { console.warn(err); }
+    try { el.volume = 1; } catch (err) { console.warn(err); }
+    if (el.paused) { el.play().catch(() => {}); }
   }, []);
 
   const requestResponseCreate = useCallback((instructions?: string) => {
@@ -209,26 +252,13 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       //   2. Ask the server to cancel the in-flight response.
       //   3. Clear any audio still queued in the server's output buffer.
       if (type === "input_audio_buffer.speech_started") {
-        const el = audioElRef.current;
-        if (el) {
-          try { el.muted = true; } catch (err) { console.warn(err); }
-          try { el.pause(); } catch (err) { console.warn(err); }
-        }
-        if (activeResponseRef.current) {
-          sendEvent({ type: "response.cancel" });
-        }
-        sendEvent({ type: "output_audio_buffer.clear" });
-        setIsSpeaking(false);
+        bargeInNow();
         return;
       }
       // User's speech ended — re-enable the audio element so the next
       // assistant response is audible again.
       if (type === "input_audio_buffer.speech_stopped") {
-        const el = audioElRef.current;
-        if (el) {
-          try { el.muted = false; } catch (err) { console.warn(err); }
-          if (el.paused) { el.play().catch(() => {}); }
-        }
+        releaseBargeIn();
         return;
       }
 
@@ -342,6 +372,49 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         localStreamRef.current = stream;
         stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
+        // Local RMS monitor: fires bargeInNow() the instant the mic picks up
+        // voice-level energy, so we don't wait ~200–500ms for the server VAD
+        // event to round-trip back over the data channel.
+        try {
+          const AudioCtx =
+            (window.AudioContext ||
+              (window as unknown as { webkitAudioContext?: typeof AudioContext })
+                .webkitAudioContext)!;
+          const ctx = new AudioCtx();
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          analyser.smoothingTimeConstant = 0.2;
+          source.connect(analyser);
+          const buf = new Uint8Array(analyser.fftSize);
+          let aboveCount = 0;
+          const tick = () => {
+            if (!micMonitorRef.current) return;
+            analyser.getByteTimeDomainData(buf);
+            // RMS around 128 midpoint, 0..1
+            let sum = 0;
+            for (let i = 0; i < buf.length; i++) {
+              const v = (buf[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / buf.length);
+            // Only interrupt when the assistant is actively speaking.
+            if (rms > 0.04) {
+              aboveCount++;
+              if (aboveCount >= 2 && activeResponseRef.current) {
+                bargeInNow();
+              }
+            } else {
+              aboveCount = 0;
+            }
+            micMonitorRef.current.raf = requestAnimationFrame(tick);
+          };
+          micMonitorRef.current = { ctx, analyser, source, raf: 0 };
+          micMonitorRef.current.raf = requestAnimationFrame(tick);
+        } catch (err) {
+          console.warn("mic monitor init failed", err);
+        }
+
         const dc = pc.createDataChannel("oai-events");
         dcRef.current = dc;
 
@@ -357,11 +430,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
                   transcription: { model: "whisper-1" },
               turn_detection: {
                 type: "server_vad",
-                // Tuned for fast barge-in: lower threshold picks up speech
-                // sooner, shorter silence lets a real utterance end quickly.
-                threshold: 0.4,
-                prefix_padding_ms: 200,
-                silence_duration_ms: 250,
+                // Tuned for fastest barge-in: low threshold + minimal
+                // prefix/silence so a real utterance interrupts immediately.
+                // A local WebAudio RMS monitor also fires bargeInNow() so
+                // the assistant is muted before this server event even
+                // round-trips back over the data channel.
+                threshold: 0.25,
+                prefix_padding_ms: 100,
+                silence_duration_ms: 150,
                 create_response: false,
                 interrupt_response: true,
               },
