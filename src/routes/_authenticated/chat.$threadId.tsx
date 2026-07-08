@@ -697,6 +697,99 @@ function ThreadView({ threadId }: { threadId: string }) {
     scrollToLatest();
   }, [messages.length, pendingAssistant, pendingUser]);
 
+  // Kick off the full deep-research pipeline. Streams into the pending
+  // assistant bubble immediately so the user sees "Researching…" and live
+  // progress rather than silence. Returns a serialisable result for the
+  // realtime tool call.
+  const startDeepAnswer = useCallback(
+    async (query: string): Promise<{ ok?: boolean; error?: string; note?: string }> => {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) return { error: "not signed in" };
+      try {
+        setPendingActivity([]);
+        setPendingAssistant("Researching…");
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ threadId, content: query, skipUserInsert: true }),
+        });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          setPendingAssistant("");
+          setPendingActivity([]);
+          return { error: `deep answer failed: ${errText.slice(0, 200)}` };
+        }
+        const reader = res.body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          let acc = "";
+          let buf = "";
+          let inCtrl = false;
+          let activity: ToolActivity[] = [];
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            while (true) {
+              const idx = buf.indexOf(TOOL_FRAME_DELIM);
+              if (idx === -1) break;
+              const chunk = buf.slice(0, idx);
+              buf = buf.slice(idx + 1);
+              if (!inCtrl) {
+                if (chunk) acc += chunk;
+              } else {
+                try {
+                  const ev = JSON.parse(chunk) as ToolEvent;
+                  activity = foldToolEvent(activity, ev);
+                  setPendingActivity(activity);
+                } catch {
+                  // ignore malformed frame
+                }
+              }
+              inCtrl = !inCtrl;
+            }
+            if (!inCtrl && buf) {
+              acc += buf;
+              buf = "";
+            }
+            setPendingAssistant(cleanAssistantText(acc));
+          }
+        }
+        await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+        await qc.invalidateQueries({ queryKey: ["threads"] });
+        setPendingAssistant("");
+        setPendingActivity([]);
+        return {
+          ok: true,
+          note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
+        };
+      } catch (err) {
+        setPendingAssistant("");
+        setPendingActivity([]);
+        const msg = err instanceof Error ? err.message : "deep answer failed";
+        return { error: msg };
+      }
+    },
+    [threadId, qc],
+  );
+
+  // Heuristic: does this spoken turn deserve the full research pipeline?
+  // Keep it broad — false positives just do extra work quietly in the
+  // background, while false negatives are what the user is complaining
+  // about (voice claims "in chat", nothing there for 10s).
+  const RESEARCH_QUERY_RE =
+    /\b(best|top|compare|comparison|vs\.?|versus|options?|recommend|recommendation|which|what('?s| is)|find|list|show me|research|deep dive|breakdown|guide|how to|how do i|near|nearby|around|in|outside|cheapest|highest[- ]rated|top[- ]rated|reviews?|price|pricing|cost)\b/i;
+  function looksLikeResearchQuery(text: string): boolean {
+    const t = text.trim();
+    if (t.length < 12) return false;
+    return RESEARCH_QUERY_RE.test(t);
+  }
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
