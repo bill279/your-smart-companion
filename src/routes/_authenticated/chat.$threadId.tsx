@@ -702,6 +702,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   // see it" and the model retries), we short-circuit instead of re-running
   // the whole /api/chat pipeline and posting a duplicate answer.
   const lastDeepAnswerQueryRef = useRef<string>("");
+  const lastDeepAnswerCompletedAtRef = useRef<number>(0);
   const lastVoiceUserAtRef = useRef<number>(0);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
@@ -808,6 +809,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         setPendingAssistant("");
         setPendingActivity([]);
         lastDeepAnswerQueryRef.current = normalizeVoiceQuery(query);
+        lastDeepAnswerCompletedAtRef.current = Date.now();
         return {
           ok: true,
           note: "The full researched answer is now posted and visible in the chat. Say ONE short spoken sentence only — do NOT re-read the content aloud and do NOT post another chat message.",
@@ -1335,19 +1337,36 @@ function ThreadView({ threadId }: { threadId: string }) {
           // then calls deep_answer, it awaits this same promise instead of
           // firing a second request.
           if (looksLikeResearchQuery(text) && !deepAnswerInFlightRef.current) {
+            const textKey = normalizeVoiceQuery(text);
             const abort = new AbortController();
             const promise = startDeepAnswer(text, abort.signal);
-            deepAnswerInFlightRef.current = { query: text, promise, abort };
+            deepAnswerInFlightRef.current = { query: text, key: textKey, promise, abort };
+            promise.then((result) => {
+              if (lastVoiceUserTextRef.current && normalizeVoiceQuery(lastVoiceUserTextRef.current) !== textKey) return;
+              conversationRef.current?.createResponse(voiceFollowupInstructions(result));
+            }).catch((err) => {
+              conversationRef.current?.createResponse(voiceFollowupInstructions({
+                error: err instanceof Error ? err.message : "background answer failed",
+              }));
+            });
             promise.finally(() => {
               window.setTimeout(() => {
-                if (deepAnswerInFlightRef.current?.query === text) {
+                if (deepAnswerInFlightRef.current?.key === textKey) {
                   deepAnswerInFlightRef.current = null;
                 }
               }, 2000);
             });
+          } else {
+            conversationRef.current?.createResponse();
           }
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          const justCompletedDeepAnswer = Date.now() - lastDeepAnswerCompletedAtRef.current < 90_000;
+          if (justCompletedDeepAnswer && isVoiceChatPointer(cleaned)) {
+            setPendingAssistant("");
+            liveAssistantRef.current = "";
+            return;
+          }
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
