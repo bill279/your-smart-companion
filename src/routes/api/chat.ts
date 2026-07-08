@@ -9,6 +9,7 @@ import { assertUnderCap } from "@/lib/spend-cap.functions";
 import {
   TOOL_FRAME_DELIM,
   encodeToolActivityMarker,
+  extractToolActivity,
   foldToolEvent,
   type ToolActivity,
   type ToolEvent,
@@ -313,6 +314,36 @@ function storagePathFromSignedUrl(url: string) {
   } catch {
     return null;
   }
+}
+
+function requestedAttachmentFormat(text: string): "pdf" | "docx" | "xlsx" | "csv" | null {
+  if (/\bpdf\b/i.test(text)) return "pdf";
+  if (/\b(docx|word\s*(?:doc|document)?)\b/i.test(text)) return "docx";
+  if (/\b(xlsx|excel|spreadsheet)\b/i.test(text)) return "xlsx";
+  if (/\bcsv\b/i.test(text)) return "csv";
+  return null;
+}
+
+function emailNeedsGeneratedAttachment(userText: string, subject: string, body: string) {
+  const text = `${userText}\n${subject}\n${body}`;
+  return /\b(?:attach|attachment|attached|with\s+(?:the\s+)?(?:pdf|word|docx|document|file)|resend\b[\s\S]{0,80}\b(?:pdf|word|docx|document|file)|(?:send|email)\b[\s\S]{0,80}\b(?:pdf|word|docx|document|file))\b/i.test(text);
+}
+
+function latestGeneratedDocFromHistory(
+  rows: ChatHistoryRow[],
+  preferredFormat: "pdf" | "docx" | "xlsx" | "csv" | null,
+): NonNullable<ToolActivity["docFile"]> | null {
+  for (const row of [...rows].reverse()) {
+    if (row.role !== "assistant") continue;
+    const { activities } = extractToolActivity(row.content);
+    for (const activity of [...activities].reverse()) {
+      const doc = activity.docFile;
+      if (!doc?.url || !doc.filename) continue;
+      const ext = doc.filename.toLowerCase().split(".").pop();
+      if (!preferredFormat || ext === preferredFormat) return doc;
+    }
+  }
+  return null;
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -907,15 +938,29 @@ export const Route = createFileRoute("/api/chat")({
                 const { marked } = await import("marked");
                 // Optionally fetch the file bytes for attachment.
                 let attachment: { filename: string; mimeType: string; base64: string } | null = null;
-                if (attach_file_url) {
+                let effectiveAttachUrl = attach_file_url;
+                let effectiveAttachName = attach_file_name;
+                const mustAttach = emailNeedsGeneratedAttachment(userText, subject, emailBody);
+                if (!effectiveAttachUrl && mustAttach) {
+                  const doc = latestGeneratedDocFromHistory(rows, requestedAttachmentFormat(`${subject}\n${emailBody}\n${userText}`));
+                  if (!doc) {
+                    return {
+                      error:
+                        "No generated document was found to attach. Generate the PDF/Word document first, then send the email.",
+                    };
+                  }
+                  effectiveAttachUrl = doc.url;
+                  effectiveAttachName = doc.filename;
+                }
+                if (effectiveAttachUrl) {
                   try {
-                    const r = await fetch(attach_file_url);
+                    const r = await fetch(effectiveAttachUrl);
                     let mimeType = r.headers.get("content-type")?.split(";")[0].trim() || "application/octet-stream";
                     let buf: Uint8Array | null = null;
                     if (r.ok) {
                       buf = new Uint8Array(await r.arrayBuffer());
                     } else {
-                      const storagePath = storagePathFromSignedUrl(attach_file_url);
+                      const storagePath = storagePathFromSignedUrl(effectiveAttachUrl);
                       if (!storagePath) return { error: `Could not fetch attachment (${r.status})` };
                       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
                       const dl = await supabaseAdmin.storage.from("chat-uploads").download(storagePath);
@@ -927,7 +972,7 @@ export const Route = createFileRoute("/api/chat")({
                     let bin = "";
                     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
                     attachment = {
-                      filename: (attach_file_name || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
+                      filename: (effectiveAttachName || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160),
                       mimeType,
                       base64: Buffer.from(bin, "binary").toString("base64"),
                     };
