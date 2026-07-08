@@ -130,7 +130,16 @@ export async function generateDocument(opts: {
 
   if (format === "csv") {
     const tables = parseMarkdownTables(markdown);
-    const rows = tables[0] ?? [[stripMarkdown(markdown)]];
+    // Consistency: if the markdown has a table, export it verbatim. Otherwise
+    // export a two-column key/value dump with the title as the first row so
+    // the file always opens with context, never a raw paragraph blob.
+    const rows: string[][] = tables[0]
+      ? tables[0]
+      : [["Title", title], ...stripMarkdown(markdown)
+          .split(/\n{2,}/)
+          .map((p) => p.trim())
+          .filter(Boolean)
+          .map((p, idx) => [`Section ${idx + 1}`, p])];
     const csv = rows
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
       .join("\n");
@@ -145,11 +154,19 @@ export async function generateDocument(opts: {
     const tables = parseMarkdownTables(markdown);
     const wb = XLSX.utils.book_new();
     if (tables.length === 0) {
-      const ws = XLSX.utils.aoa_to_sheet([[title], [stripMarkdown(markdown)]]);
-      XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+      const sections = stripMarkdown(markdown)
+        .split(/\n{2,}/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const aoa: string[][] = [[title], [""], ...sections.map((s) => [s])];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      XLSX.utils.book_append_sheet(wb, ws, "Document");
     } else {
       tables.forEach((t, idx) => {
-        const ws = XLSX.utils.aoa_to_sheet(t);
+        // Prepend a title row so every sheet opens with context.
+        const aoa: string[][] =
+          idx === 0 ? [[title], [""], ...t] : t;
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
         XLSX.utils.book_append_sheet(wb, ws, `Sheet${idx + 1}`);
       });
     }
