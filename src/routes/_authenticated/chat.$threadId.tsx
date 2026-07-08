@@ -740,6 +740,55 @@ function ThreadView({ threadId }: { threadId: string }) {
       logUsage({ data: u }).catch((err) => console.warn("logVoiceUsage failed", err));
     },
     clientTools: {
+      deep_answer: async () => {
+        // Delegate to the same /api/chat pipeline the text UI uses — full
+        // gpt-5-mini + live web_search / web_scrape / product_search /
+        // knowledge base loop. Reuses the user's most recent turn (the
+        // spoken transcript we just persisted) via regenerate=true, so the
+        // researched answer is saved to this same thread as an assistant
+        // message. Voice then speaks a one-sentence summary.
+        try {
+          conversationRef.current?.cancelResponse();
+        } catch (err) {
+          console.warn("cancelResponse before deep_answer failed", err);
+        }
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) return { error: "not signed in" };
+        try {
+          const res = await fetch("/api/chat", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ threadId, regenerate: true }),
+          });
+          if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            return { error: `deep answer failed: ${errText.slice(0, 200)}` };
+          }
+          // Drain the stream so the server-side onFinish (which inserts
+          // the assistant message) runs to completion before we return.
+          const reader = res.body?.getReader();
+          if (reader) {
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+              const { done } = await reader.read();
+              if (done) break;
+            }
+          }
+          await qc.invalidateQueries({ queryKey: ["messages", threadId] });
+          await qc.invalidateQueries({ queryKey: ["threads"] });
+          return {
+            ok: true,
+            note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
+          };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "deep answer failed";
+          return { error: msg };
+        }
+      },
       show_in_chat: async (params) => {
         const md = String((params as { markdown?: string; content?: string }).markdown ?? (params as { content?: string }).content ?? "").trim();
         if (!md) return JSON.stringify({ error: "markdown required" });
