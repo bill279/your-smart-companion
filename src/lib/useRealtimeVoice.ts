@@ -61,6 +61,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   const activeResponseRef = useRef(false);
   const responseCreatePendingRef = useRef(false);
   const responseCreateInFlightRef = useRef(false);
+  const responseInstructionsPendingRef = useRef<string | undefined>(undefined);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -84,6 +85,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     activeResponseRef.current = false;
     responseCreatePendingRef.current = false;
     responseCreateInFlightRef.current = false;
+    responseInstructionsPendingRef.current = undefined;
     setIsSpeaking(false);
   }, []);
 
@@ -99,14 +101,22 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     }
   }, []);
 
-  const requestResponseCreate = useCallback(() => {
+  const requestResponseCreate = useCallback((instructions?: string) => {
+    if (instructions?.trim()) {
+      responseInstructionsPendingRef.current = instructions.trim();
+    }
     if (activeResponseRef.current || responseCreateInFlightRef.current) {
       responseCreatePendingRef.current = true;
       return;
     }
     responseCreatePendingRef.current = false;
     responseCreateInFlightRef.current = true;
-    if (!sendEvent({ type: "response.create" })) {
+    const pendingInstructions = responseInstructionsPendingRef.current;
+    responseInstructionsPendingRef.current = undefined;
+    const event = pendingInstructions
+      ? { type: "response.create", response: { instructions: pendingInstructions, tool_choice: "none" } }
+      : { type: "response.create" };
+    if (!sendEvent(event)) {
       responseCreateInFlightRef.current = false;
     }
   }, [sendEvent]);
@@ -318,6 +328,8 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
                     threshold: 0.5,
                     prefix_padding_ms: 300,
                     silence_duration_ms: 500,
+                    create_response: false,
+                    interrupt_response: true,
                   },
                 },
               },
@@ -386,7 +398,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   }, [cleanup]);
 
   const sendUserMessage = useCallback(
-    (text: string) => {
+    (text: string, opts?: { createResponse?: boolean; instructions?: string }) => {
       // If a prior response is still generating, cancel it so the new
       // user message doesn't collide with "active response in progress".
       if (activeResponseRef.current || responseCreateInFlightRef.current) {
@@ -400,16 +412,24 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
           content: [{ type: "input_text", text }],
         },
       });
-      requestResponseCreate();
+      if (opts?.createResponse !== false) requestResponseCreate(opts?.instructions);
     },
     [requestResponseCreate, sendEvent],
   );
 
   const cancelResponse = useCallback(() => {
     responseCreatePendingRef.current = false;
+    responseInstructionsPendingRef.current = undefined;
     if (!activeResponseRef.current && !responseCreateInFlightRef.current) return;
     sendEvent({ type: "response.cancel" });
   }, [sendEvent]);
+
+  const createResponse = useCallback(
+    (instructions?: string) => {
+      requestResponseCreate(instructions);
+    },
+    [requestResponseCreate],
+  );
 
   const sendContextualUpdate = useCallback(
     (text: string) => {
@@ -442,6 +462,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
     startSession,
     endSession,
     sendUserMessage,
+    createResponse,
     cancelResponse,
     sendContextualUpdate,
     setVolume,

@@ -71,6 +71,7 @@ You are a genuinely knowledgeable expert. Your training covers vendors, products
 - Use web_search / web_scrape to VERIFY, not to substitute. Call them when you genuinely can't know: today's price, this quarter's release, a specific spec sheet, a news event, a link the user asked for.
 - If a search returns nothing useful, don't punt. Fall back to your own knowledge and answer anyway. Never say "my search didn't find anything, want me to try again?".
 - Never invent facts, addresses, phone numbers, or pricing.
+- If the user says "Cloud Code from Anthropic", treat it as "Claude Code from Anthropic" unless they explicitly correct you. Do not keep asking that clarification.
 
 # 2. How to sound (voice-specific)
 - Talk like a person. Natural connectors are fine ("Right, so…", "Honest take:", "The trade-off is…", "If it were me…"). Contractions fine. No corporate hedging.
@@ -100,6 +101,7 @@ Clean Markdown. ## headings for multi-part answers. Short paragraphs (2–4 line
 
 # 5. Tools (call them; don't narrate)
 - deep_answer — YOUR PRIMARY TOOL for any research, comparison, ranking, list, "best X", "top N", "options for Y", how-to, explain, recommend, or long-draft question. Delegates to the full chat brain (stronger reasoning model + live web_search + web_scrape + product_search + knowledge base) which posts the full researched answer (with citations, sources, complete table when relevant) directly into the chat. YOU DO NOT compose these answers yourself. Call deep_answer with no arguments — it uses the user's most recent message. CRITICAL ORDERING: (1) call deep_answer FIRST, in silence — do NOT speak beforehand, do NOT say "let me search", "one sec", "I'll put it in the chat", or anything else before calling. (2) WAIT for the tool to return. (3) ONLY THEN speak ONE short sentence pointing to the chat ("The full breakdown's up in the chat — top pick is X.", "It's in the chat."). Never announce that something is in the chat before the tool has returned. Never re-read the content aloud.
+- IMPORTANT: for research/list/comparison questions, the app may already be running deep_answer in the background before you respond. If so, wait silently for the tool result / system instruction. Do not give a premature spoken placeholder.
 - show_in_chat — ONLY for short structured content you're composing yourself: a draft email you wrote from the user's dictation, a code snippet, or a simple table with data you already have in the conversation. NOT for research or "best X" answers — use deep_answer for those. After it returns, one short spoken summary sentence.
 - web_search / web_scrape / product_search / search_knowledge_base — you almost never need these directly, because deep_answer runs them inside the chat brain. Use them only for a quick spoken fact-check (a single price, a phone number, an address) where a full deep_answer would be overkill.
 - send_email — send from the user's Outlook. NEVER on the first request. Confirm the recipient's exact address out loud ("Just to confirm, send this to john@example.com?"), then draft, then wait for explicit approval, then send. Body = clean human message with greeting, 1–3 short paragraphs, sign-off. No raw URLs. To attach a document you just generated, call with attach_last_document=true. Approval is ANY affirmative reply — "send", "yes", "yep", "sure", "ok", "cool", "go ahead", "do it", "send it", "looks good", "lgtm" — interpret liberally and call the tool immediately. Do NOT re-confirm.
@@ -414,6 +416,30 @@ function cleanAssistantText(text: string) {
     .trim();
 }
 
+function normalizeVoiceQuery(text: string) {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function isVoiceChatPointer(text: string) {
+  return /\b(chat|breakdown|comparison|details|laid out|posted|full answer|full list)\b/i.test(text) &&
+    /\b(full|there|in the chat|take a look|posted|laid out|up)\b/i.test(text);
+}
+
+function voiceFollowupInstructions(result: { ok?: boolean; error?: string; note?: string }) {
+  if (result.ok) {
+    return [
+      "The full answer is already visible in the chat now.",
+      "Speak exactly one short sentence that says it is ready and give the top recommendation if the tool note includes one.",
+      "Do not add another list, table, comparison, or second summary to the chat.",
+    ].join(" ");
+  }
+  return [
+    `The background chat answer did not complete successfully: ${result.error ?? "unknown error"}.`,
+    "Apologize briefly and say you're retrying or ask for one short clarification if needed.",
+    "Do not claim anything is in the chat.",
+  ].join(" ");
+}
+
 function cleanThreadTitle(title: string) {
   const cleaned = cleanAssistantText(title);
   return !cleaned || /Alex|personal assistant/i.test(title) ? "New conversation" : cleaned;
@@ -669,6 +695,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   // is already streaming (or done). Massive perceived-latency win.
   const deepAnswerInFlightRef = useRef<{
     query: string;
+    key: string;
     promise: Promise<{ ok?: boolean; error?: string; note?: string }>;
     abort: AbortController;
   } | null>(null);
@@ -677,7 +704,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   // see it" and the model retries), we short-circuit instead of re-running
   // the whole /api/chat pipeline and posting a duplicate answer.
   const lastDeepAnswerQueryRef = useRef<string>("");
+  const lastDeepAnswerCompletedAtRef = useRef<number>(0);
   const lastVoiceUserAtRef = useRef<number>(0);
+  const suppressNextVoiceAssistantRef = useRef(false);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!exportOpen) return;
@@ -719,7 +748,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (!token) return { error: "not signed in" };
       try {
         setPendingActivity([]);
-        setPendingAssistant("🔍 Researching your question — pulling live sources and building the full answer. This usually takes 15–30 seconds…");
+        setPendingAssistant("🔍 Researching your question — pulling live sources and building the full answer now. I’ll speak once it’s actually in the chat.");
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: {
@@ -782,10 +811,11 @@ function ThreadView({ threadId }: { threadId: string }) {
         await qc.invalidateQueries({ queryKey: ["threads"] });
         setPendingAssistant("");
         setPendingActivity([]);
-        lastDeepAnswerQueryRef.current = query;
+        lastDeepAnswerQueryRef.current = normalizeVoiceQuery(query);
+        lastDeepAnswerCompletedAtRef.current = Date.now();
         return {
           ok: true,
-          note: "The full researched answer (with live web search, citations, and complete table if relevant) has been posted into the chat. Say ONE short spoken sentence pointing the user to it — do NOT re-read the content aloud.",
+          note: "The full researched answer is now posted and visible in the chat. Say ONE short spoken sentence only — do NOT re-read the content aloud and do NOT post another chat message.",
         };
       } catch (err) {
         setPendingAssistant("");
@@ -868,27 +898,28 @@ function ThreadView({ threadId }: { threadId: string }) {
           [...(messagesQ.data ?? [])].reverse().find((m) => m.role === "user")?.content?.trim() ||
           "";
         if (!latestUserMessage) return { error: "no user message available" };
+        const latestKey = normalizeVoiceQuery(latestUserMessage);
         // Reuse the speculative prefetch if it matches — this is the whole
         // point: by the time the model calls deep_answer, the answer is
         // usually already streaming into the chat.
         const inflight = deepAnswerInFlightRef.current;
-        if (inflight && inflight.query === latestUserMessage) {
+        if (inflight && inflight.key === latestKey) {
           return await inflight.promise;
         }
         // Dedupe: if this exact query was JUST completed (e.g. the model
         // heard "I don't see it" and is retrying), don't run the whole
         // pipeline again — the answer is already in chat.
-        if (lastDeepAnswerQueryRef.current === latestUserMessage) {
+        if (lastDeepAnswerQueryRef.current === latestKey) {
           return {
             ok: true,
-            note: "The researched answer for this exact question is already in the chat from a moment ago — do NOT run again. Just point the user to it in one short sentence.",
+            note: "The researched answer for this exact question is already in the chat from a moment ago — do NOT run again and do NOT post another chat message. Just point the user to it in one short spoken sentence.",
           };
         }
         const abort = new AbortController();
         const promise = startDeepAnswer(latestUserMessage, abort.signal);
-        deepAnswerInFlightRef.current = { query: latestUserMessage, promise, abort };
+        deepAnswerInFlightRef.current = { query: latestUserMessage, key: latestKey, promise, abort };
         const result = await promise;
-        if (deepAnswerInFlightRef.current?.query === latestUserMessage) {
+        if (deepAnswerInFlightRef.current?.key === latestKey) {
           deepAnswerInFlightRef.current = null;
         }
         return result;
@@ -1309,19 +1340,41 @@ function ThreadView({ threadId }: { threadId: string }) {
           // then calls deep_answer, it awaits this same promise instead of
           // firing a second request.
           if (looksLikeResearchQuery(text) && !deepAnswerInFlightRef.current) {
+            const textKey = normalizeVoiceQuery(text);
             const abort = new AbortController();
             const promise = startDeepAnswer(text, abort.signal);
-            deepAnswerInFlightRef.current = { query: text, promise, abort };
+            deepAnswerInFlightRef.current = { query: text, key: textKey, promise, abort };
+            promise.then((result) => {
+              if (lastVoiceUserTextRef.current && normalizeVoiceQuery(lastVoiceUserTextRef.current) !== textKey) return;
+              suppressNextVoiceAssistantRef.current = true;
+              conversationRef.current?.createResponse(voiceFollowupInstructions(result));
+            }).catch((err) => {
+              suppressNextVoiceAssistantRef.current = true;
+              conversationRef.current?.createResponse(voiceFollowupInstructions({
+                error: err instanceof Error ? err.message : "background answer failed",
+              }));
+            });
             promise.finally(() => {
               window.setTimeout(() => {
-                if (deepAnswerInFlightRef.current?.query === text) {
+                if (deepAnswerInFlightRef.current?.key === textKey) {
                   deepAnswerInFlightRef.current = null;
                 }
               }, 2000);
             });
+          } else {
+            conversationRef.current?.createResponse();
           }
         } else if (message.source === "ai") {
           const cleaned = cleanAssistantText(text);
+          const shouldSuppressVoiceFollowup = suppressNextVoiceAssistantRef.current &&
+            (isVoiceChatPointer(cleaned) || cleaned.length < 240);
+          if (shouldSuppressVoiceFollowup) {
+            suppressNextVoiceAssistantRef.current = false;
+            setPendingAssistant("");
+            liveAssistantRef.current = "";
+            return;
+          }
+          suppressNextVoiceAssistantRef.current = false;
           // Live update: show assistant turn the moment the transcript arrives.
           setPendingAssistant(cleaned);
           liveAssistantRef.current = cleaned;
@@ -1482,7 +1535,29 @@ function ThreadView({ threadId }: { threadId: string }) {
         lastVoiceUserTextRef.current = content;
         try { conversation.setVolume({ volume: 1 }); } catch (err) { console.warn(err); }
         await add({ data: { threadId, role: "user", content } });
-        conversation.sendUserMessage(content);
+        if (looksLikeResearchQuery(content)) {
+          const textKey = normalizeVoiceQuery(content);
+          const abort = new AbortController();
+          const promise = startDeepAnswer(content, abort.signal);
+          deepAnswerInFlightRef.current = { query: content, key: textKey, promise, abort };
+          conversation.sendUserMessage(content, { createResponse: false });
+          promise.then((result) => {
+            if (lastVoiceUserTextRef.current && normalizeVoiceQuery(lastVoiceUserTextRef.current) !== textKey) return;
+            suppressNextVoiceAssistantRef.current = true;
+            conversationRef.current?.createResponse(voiceFollowupInstructions(result));
+          }).catch((err) => {
+            suppressNextVoiceAssistantRef.current = true;
+            conversationRef.current?.createResponse(voiceFollowupInstructions({
+              error: err instanceof Error ? err.message : "background answer failed",
+            }));
+          }).finally(() => {
+            window.setTimeout(() => {
+              if (deepAnswerInFlightRef.current?.key === textKey) deepAnswerInFlightRef.current = null;
+            }, 2000);
+          });
+        } else {
+          conversation.sendUserMessage(content);
+        }
         setPendingUser(null);
         return;
       }
