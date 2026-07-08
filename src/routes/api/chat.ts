@@ -305,6 +305,18 @@ export const Route = createFileRoute("/api/chat")({
         if (!body.threadId || (!body.regenerate && !body.content?.trim() && attachments.length === 0)) {
           return new Response("Bad request", { status: 400 });
         }
+
+        // Enforce monthly spend cap before doing any AI work.
+        try {
+          await assertUnderCap(supabase, userId);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Spend cap reached";
+          return new Response(
+            JSON.stringify({ error: msg, code: "SPEND_CAP_REACHED" }),
+            { status: 402, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
         const userText = body.content?.trim() ?? "";
 
         // Save user message (with attachments metadata). Skip when regenerating —
