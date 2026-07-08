@@ -283,7 +283,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
                     type: "server_vad",
                     threshold: 0.5,
                     prefix_padding_ms: 300,
-                    silence_duration_ms: 900,
+                    silence_duration_ms: 500,
                   },
                 },
               },
@@ -353,6 +353,12 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
 
   const sendUserMessage = useCallback(
     (text: string) => {
+      // If a prior response is still generating, cancel it so the new
+      // user message doesn't collide with "active response in progress".
+      if (activeResponseRef.current) {
+        activeResponseRef.current = false;
+        sendEvent({ type: "response.cancel" });
+      }
       sendEvent({
         type: "conversation.item.create",
         item: {
