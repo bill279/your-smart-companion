@@ -330,10 +330,14 @@ function buildDocxTable(rows: string[][]): Table {
 // ---------------- PDF rendering ----------------
 
 function renderPdf(title: string, markdown: string): ArrayBuffer {
-  const wideTable = parseMarkdownTables(markdown).some(
-    (table) => Math.max(0, ...table.map((row) => row.length)) > 6,
-  );
-  const pdf = new jsPDF({ unit: "pt", format: "letter", orientation: wideTable ? "landscape" : "portrait" });
+  // Consistency rule: always portrait unless a table genuinely can't fit at
+  // a readable minimum column width (48pt/col). This stops the entire
+  // document orientation from flipping just because the model happened to
+  // emit a 7-column table.
+  const tables = parseMarkdownTables(markdown);
+  const maxCols = tables.reduce((m, t) => Math.max(m, ...t.map((r) => r.length)), 0);
+  const needsLandscape = maxCols >= 8;
+  const pdf = new jsPDF({ unit: "pt", format: "letter", orientation: needsLandscape ? "landscape" : "portrait" });
   const margin = 56;
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
