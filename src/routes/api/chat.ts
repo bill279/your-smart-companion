@@ -825,7 +825,13 @@ export const Route = createFileRoute("/api/chat")({
         const forceSearchBlock = body.forceWebSearch
           ? `\n\n# 🌐 Web-search mode is ON for this turn (user toggled it)\nYou MUST call the \`web_search\` tool at least once before answering. If the user is asking about specific products, gear, or things they might buy (phones, cameras, tools, gadgets, clothes, appliances, software, courses, etc.), call the \`product_search\` tool instead of \`web_search\`. After the tool returns, write a real answer that cites sources. Do NOT answer from memory when this mode is on.`
           : "";
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}`;
+        const attachmentsBlock =
+          attachments.length > 0
+            ? `\n\n# 📎 The user attached ${attachments.length} file${attachments.length === 1 ? "" : "s"} THIS TURN\n${attachments
+                .map((a) => `- ${a.name} (${a.mimeType})`)
+                .join("\n")}\n\nThe file bytes are inlined in the user message below (as image/file parts). READ THEM NOW and respond about them by default — do NOT wait for the user to explicitly ask "what's in this file". If the user typed a question, answer it using the attachment. If the user typed nothing (or just "here" / "look at this" / etc.), open the file, read every page/section, and give a substantive summary and take on it: what it is, the key points, notable numbers/tables/quotes, and — if it's a product spec sheet, comparison, or report — your recommendation. Cite the filename. Never say "I can't access the file" or "please share the file" — the bytes are already attached.`
+            : "";
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${attachmentsBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
