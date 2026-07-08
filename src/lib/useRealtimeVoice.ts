@@ -97,6 +97,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
       try { micMonitorRef.current.ctx.close(); } catch (err) { console.warn(err); }
       micMonitorRef.current = null;
     }
+    if (instantMuteReleaseTimerRef.current !== null) {
+      try { window.clearTimeout(instantMuteReleaseTimerRef.current); } catch (err) { console.warn(err); }
+      instantMuteReleaseTimerRef.current = null;
+    }
     if (audioElRef.current) {
       try { audioElRef.current.srcObject = null; } catch (err) { console.warn(err); }
     }
