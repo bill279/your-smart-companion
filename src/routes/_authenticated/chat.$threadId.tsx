@@ -703,7 +703,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const deepAnswerInFlightRef = useRef<{
     query: string;
     key: string;
-    promise: Promise<{ ok?: boolean; error?: string; note?: string }>;
+    promise: Promise<{ ok?: boolean; error?: string; note?: string; answer?: string }>;
     abort: AbortController;
   } | null>(null);
   // Query text of the most recently COMPLETED deep_answer run. If the model
@@ -712,6 +712,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   // the whole /api/chat pipeline and posting a duplicate answer.
   const lastDeepAnswerQueryRef = useRef<string>("");
   const lastDeepAnswerCompletedAtRef = useRef<number>(0);
+  const lastDeepAnswerTextRef = useRef<string>("");
   const lastVoiceUserAtRef = useRef<number>(0);
   const suppressNextVoiceAssistantRef = useRef(false);
   const [exportOpen, setExportOpen] = useState(false);
