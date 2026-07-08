@@ -1467,6 +1467,15 @@ function ThreadView({ threadId }: { threadId: string }) {
     onMessage: async (message) => {
       const text = message?.message;
       if (!text) return;
+      if (message.source === "user" && message.isFinal === false) {
+        voiceUserHasSpokenRef.current = true;
+        lastUserSpeechAtRef.current = Date.now();
+        lastVoiceUserTextRef.current = text;
+        stopReadAloud();
+        try { conversationRef.current?.cancelResponse(); } catch { /* noop */ }
+        setPendingUser(text);
+        return;
+      }
       const eventKey = `${message.source}:${message.event_id ?? text}`;
       if (seenVoiceEventsRef.current.has(eventKey)) return;
       seenVoiceEventsRef.current.add(eventKey);
@@ -1662,7 +1671,14 @@ function ThreadView({ threadId }: { threadId: string }) {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("Microphone recording is not available in this browser.");
       }
-      microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      microphoneStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
       const session = await createSession({});
       if (startAttemptRef.current !== attemptId) {
         stopMediaStream(microphoneStream);
