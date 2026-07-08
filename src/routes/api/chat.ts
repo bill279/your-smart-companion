@@ -228,6 +228,58 @@ const DOCUMENT_FORMAT_RE = /\b(pdf|docx|word\s*doc|word|xlsx|excel|csv|spreadshe
 const EXISTING_CONTENT_DOC_RE = /\b(convert|turn|make|generate|create|export|save)\b[\s\S]{0,80}\b(this|that|it|all|everything|above|previous|last|table|list|answer|response|reply|chat)\b/i;
 const DOCUMENT_META_RE = /(here(?:'|’)s the\s+(?:pdf|word|document)|preview or download|attached to this chat|downloadable preview card|draft email — please review|reply\s+["“]send["”]|attachment failed|could not fetch attachment|generated the word document|generated the pdf)/i;
 
+type GeneratedDocFormat = "pdf" | "docx" | "xlsx" | "csv";
+
+function requestedFormats(text: string): GeneratedDocFormat[] {
+  const formats: GeneratedDocFormat[] = [];
+  const add = (fmt: GeneratedDocFormat) => {
+    if (!formats.includes(fmt)) formats.push(fmt);
+  };
+  if (/\b(pdf)\b/i.test(text)) add("pdf");
+  if (/\b(docx|word\s*(?:doc|document)?|word)\b/i.test(text)) add("docx");
+  if (/\b(xlsx|excel|spreadsheet)\b/i.test(text)) add("xlsx");
+  if (/\b(csv)\b/i.test(text)) add("csv");
+  return formats;
+}
+
+function requestedFormat(text: string): GeneratedDocFormat | null {
+  return requestedFormats(text)[0] ?? null;
+}
+
+function looksLikeNoisyVoiceTitle(text: string | null | undefined) {
+  const t = (text ?? "").trim();
+  if (!t) return true;
+  if (t.length > 110) return true;
+  return /^(?:no|nah|yeah|yes|yep|okay|ok|sure|fine|cool|great|perfect|thanks?|that'?s fine)\b/i.test(t) ||
+    /\b(?:i want you to|go with|probably|best use of a camera|that'?s fine)\b/i.test(t);
+}
+
+function cleanDocumentTitle(title: string | null | undefined, fallback = "Generated Document") {
+  const raw = looksLikeNoisyVoiceTitle(title) ? fallback : title!.trim();
+  const cleaned = raw
+    .replace(/\.(pdf|docx|xlsx|csv)$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-zA-Z0-9 .:()/&-]+/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.!?,;:]+$/g, "")
+    .trim();
+  return cleaned || fallback;
+}
+
+function normalizeDocumentBody(markdown: string, title: string) {
+  let md = (markdown || "").trim();
+  const h1 = md.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  if (h1 && looksLikeNoisyVoiceTitle(h1)) {
+    md = md.replace(/^#\s+.+\n?/, "").trim();
+  }
+  const paragraphs = md.split(/\n{2,}/);
+  while (paragraphs.length > 1 && looksLikeNoisyVoiceTitle(paragraphs[0]?.replace(/^#+\s+/, ""))) {
+    paragraphs.shift();
+  }
+  md = paragraphs.join("\n\n").trim();
+  return /^#\s+\S/m.test(md) ? md : `# ${title}\n\n${md || title}`;
+}
+
 function requestedFormat(text: string): "pdf" | "docx" | "xlsx" | "csv" | null {
   if (/\b(pdf)\b/i.test(text)) return "pdf";
   if (/\b(docx|word\s*doc|word)\b/i.test(text)) return "docx";
