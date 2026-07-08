@@ -701,34 +701,43 @@ export const Route = createFileRoute("/api/chat")({
         if (directDoc) {
           try {
             const { generateDocument } = await import("@/lib/document-generator.server");
-            const { bytes, mimeType, extension } = await generateDocument({
-              format: directDoc.format,
-              title: directDoc.title,
-              markdown: directDoc.markdown,
-            });
-            const safeName = directDoc.filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "Document";
-            const path = `generated/${userId}/${Date.now().toString(36)}/${safeName}.${extension}`;
             const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-            const up = await supabaseAdmin.storage
-              .from("chat-uploads")
-              .upload(path, bytes, { contentType: mimeType, upsert: false });
-            if (up.error) throw new Error(up.error.message);
-            const signed = await supabaseAdmin.storage
-              .from("chat-uploads")
-              .createSignedUrl(path, 60 * 60 * 24 * 7);
-            if (signed.error) throw new Error(signed.error.message);
-
-            const filename = `${safeName}.${extension}`;
-            const formatLabel = formatLabelFor(extension);
-            const activity: ToolActivity[] = [
-              {
-                id: `direct_${Date.now().toString(36)}`,
+            const safeName = directDoc.filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "Document";
+            const activity: ToolActivity[] = [];
+            const generatedNames: string[] = [];
+            for (const format of directDoc.formats) {
+              const { bytes, mimeType, extension } = await generateDocument({
+                format,
+                title: directDoc.title,
+                markdown: directDoc.markdown,
+              });
+              const path = `generated/${userId}/${Date.now().toString(36)}-${extension}/${safeName}.${extension}`;
+              const up = await supabaseAdmin.storage
+                .from("chat-uploads")
+                .upload(path, bytes, { contentType: mimeType, upsert: false });
+              if (up.error) throw new Error(up.error.message);
+              const signed = await supabaseAdmin.storage
+                .from("chat-uploads")
+                .createSignedUrl(path, 60 * 60 * 24 * 7);
+              if (signed.error) throw new Error(signed.error.message);
+              const filename = `${safeName}.${extension}`;
+              const formatLabel = formatLabelFor(extension);
+              generatedNames.push(formatLabel);
+              activity.push({
+                id: `direct_${Date.now().toString(36)}_${extension}`,
                 name: "generate_document",
                 label: directDoc.title,
                 docFile: { url: signed.data.signedUrl, filename, formatLabel, mimeType, size: bytes.byteLength },
-              },
-            ];
-            const responseText = `Here's the ${formatLabel} — preview or download it above.`;
+              });
+              await logAction("generate_document", `Generated ${extension.toUpperCase()} "${safeName}"`, {
+                format,
+                filename,
+                path: "direct-existing-content",
+              });
+            }
+            const responseText = generatedNames.length > 1
+              ? `Here are the ${generatedNames.join(" and ")} files — preview or download them above.`
+              : `Here's the ${generatedNames[0]} — preview or download it above.`;
             const content = `${encodeToolActivityMarker(activity)}${responseText}`;
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
@@ -737,16 +746,11 @@ export const Route = createFileRoute("/api/chat")({
               content,
             });
             await supabase.from("threads").update({ updated_at: new Date().toISOString() }).eq("id", body.threadId!);
-            await logAction("generate_document", `Generated ${extension.toUpperCase()} "${safeName}"`, {
-              format: directDoc.format,
-              filename,
-              path: "direct-existing-content",
-            });
             return new Response(responseText, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
           } catch (e) {
             const msg = e instanceof Error ? e.message : "document generation failed";
-            await logAction("generate_document", `Failed to generate ${directDoc.format.toUpperCase()} from existing chat content`, { error: msg }, "error");
-            const content = `I couldn't generate the ${directDoc.format.toUpperCase()} because: ${msg}`;
+            await logAction("generate_document", `Failed to generate ${directDoc.formats.join("+").toUpperCase()} from existing chat content`, { error: msg }, "error");
+            const content = `I couldn't generate the requested files because: ${msg}`;
             await supabase.from("messages").insert({
               thread_id: body.threadId!,
               user_id: userId,
