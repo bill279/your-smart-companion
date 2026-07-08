@@ -2523,6 +2523,7 @@ function Bubble({
   messageId?: string;
   liveActivity?: ToolActivity[];
 }) {
+  // no-op marker to anchor patch context
   const isUser = role === "user";
   // Pull tool-activity marker out of persisted assistant messages so we can
   // render Claude-style search chips above the answer.
