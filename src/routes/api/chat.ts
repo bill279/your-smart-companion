@@ -295,6 +295,45 @@ function cleanFilenameBase(raw: string) {
     .slice(0, 80) || "Document";
 }
 
+// Strip conversational preamble ("Nice — straight answer first:", "Sure!",
+// "Great question — here's...", "Short, direct pick first:", etc.) from the
+// beginning of an assistant answer before we render it into a document.
+// Rule: if there's a real structural element downstream (heading, list, table,
+// or bold "Top picks" section), drop leading prose paragraphs that look
+// conversational; otherwise keep the answer as-is.
+function stripConversationalPreamble(md: string): string {
+  const text = md.replace(/^\s+/, "");
+  const hasStructure = /^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|\|)/m.test(text);
+  if (!hasStructure) {
+    // Only-prose answer — trim just a leading conversational sentence.
+    return text.replace(
+      /^(?:nice|great|sure|awesome|perfect|absolutely|alright|okay|ok|got it|cool|happy to help|of course)[\s\S]{0,220}?[—\-:.!]\s*/i,
+      "",
+    );
+  }
+  const paragraphs = text.split(/\n{2,}/);
+  const conversational =
+    /^(?:nice|great|sure|awesome|perfect|absolutely|alright|okay|ok|got it|cool|happy to help|of course|short[, ]|straight answer|quick take|tl;?dr|here'?s?\b|below\b)/i;
+  const answerFirst = /\b(?:answer first|pick first|take first|tl;?dr)\b/i;
+  let cut = 0;
+  for (const p of paragraphs) {
+    const trimmed = p.trim();
+    if (!trimmed) {
+      cut += p.length + 2;
+      continue;
+    }
+    // Stop as soon as we hit a structural line.
+    if (/^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|\|)/.test(trimmed)) break;
+    if (conversational.test(trimmed) || answerFirst.test(trimmed)) {
+      cut += p.length + 2;
+      continue;
+    }
+    break;
+  }
+  const result = text.slice(cut).replace(/^\s+/, "");
+  return result.length > 40 ? result : text;
+}
+
 function formatLabelFor(extension: string) {
   return extension === "pdf"
     ? "PDF"
@@ -334,9 +373,10 @@ function getDirectExistingDocumentRequest(userText: string, rows: ChatHistoryRow
   const tableSource = wantsTable
     ? [...priorAssistant].reverse().find((c) => /\|\s*[-:]{2,}/.test(c))
     : undefined;
-  const source = wantsAll
+  const rawSource = wantsAll
     ? priorAssistant.slice(-8).join("\n\n---\n\n")
     : tableSource ?? stripPersistedMarkers(priorRows[sourceIdx].content);
+  const source = stripConversationalPreamble(rawSource);
 
   // Prefer the user's own prompt (the one that triggered the source answer)
   // for the title — that's the actual topic. Fall back to headings, then a
