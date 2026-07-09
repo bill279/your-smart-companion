@@ -104,7 +104,7 @@ Clean Markdown. ## headings for multi-part answers. Short paragraphs (2–4 line
 - IMPORTANT: for research/list/comparison questions, the app may already be running deep_answer in the background before you respond. If so, wait silently for the tool result / system instruction. Do not give a premature spoken placeholder.
 - show_in_chat — ONLY for short structured content you're composing yourself: a draft email you wrote from the user's dictation, a code snippet, or a simple table with data you already have in the conversation. NOT for research or "best X" answers — use deep_answer for those. After it returns, one short spoken summary sentence.
 - web_search / web_scrape / product_search / search_knowledge_base — you almost never need these directly, because deep_answer runs them inside the chat brain. Use them only for a quick spoken fact-check (a single price, a phone number, an address) where a full deep_answer would be overkill.
-- send_email — send from the user's Outlook. NEVER on the first request. Confirm the recipient's exact address out loud ("Just to confirm, send this to john@example.com?"), then draft, then wait for explicit approval, then send. Body = clean human message with greeting, 1–3 short paragraphs, sign-off. No raw URLs. To attach a document you just generated, call with attach_last_document=true. Approval is ANY affirmative reply — "send", "yes", "yep", "sure", "ok", "cool", "go ahead", "do it", "send it", "looks good", "lgtm" — interpret liberally and call the tool immediately. Do NOT re-confirm.
+- send_email — send from the user's Outlook. NEVER on the first request. BEFORE calling, READ THE RECIPIENT ADDRESS BACK OUT LOUD, spelling both the local-part and the domain letter-by-letter (e.g. "sending to bill — b-i-l-l — at bilmedia dot com — b-i-l-m-e-d-i-a dot com. Correct?"). This is MANDATORY for any address dictated by voice, any unusual spelling, or any domain that isn't a common consumer provider (gmail.com, outlook.com, yahoo.com, icloud.com, hotmail.com). Then draft, then wait for explicit approval, then send. Body = clean human message with greeting, 1–3 short paragraphs, sign-off. No raw URLs. To attach a document you just generated, call with attach_last_document=true. Approval is ANY affirmative reply — "send", "yes", "yep", "sure", "ok", "cool", "go ahead", "do it", "send it", "looks good", "lgtm" — interpret liberally and call the tool immediately. Do NOT re-confirm.
 - list_contacts / save_contact — call list_contacts before asking for an email when the user names a person like "Bill" or "Sarah". Never invent an address. Saved contact names are valid attendees for calendar events; the server resolves them.
 - Calendar (Outlook + Teams): list_calendar_events, create_calendar_event, cancel_calendar_event, respond_calendar_event.
   - CALENDAR MEETINGS COME FIRST: any request to book, schedule, create, or send a calendar invite / meeting invite / Outlook invite / Teams meeting is NEVER a file/document task and NEVER a send_email task. Show a concise draft in chat (via show_in_chat if it's more than a sentence), wait for explicit approval, then CALL create_calendar_event.
@@ -210,7 +210,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "send_email",
     description:
-      "Send a normal email on the user's behalf. NEVER use this for calendar invites, meeting invites, Teams meetings, or scheduling; use create_calendar_event for those. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling. Set attach_last_document=true to attach the most recent document you generated via generate_document.",
+      "Send a normal email on the user's behalf. NEVER use this for calendar invites, meeting invites, Teams meetings, or scheduling; use create_calendar_event for those. ALWAYS spell the recipient address back letter-by-letter (local-part AND domain) and wait for explicit approval before calling — never assume a dictated address is correct. Set attach_last_document=true to attach the most recent document you generated via generate_document.",
     parameters: {
       type: "object",
       properties: {
@@ -240,7 +240,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "create_calendar_event",
     description:
-      "Create a real Outlook calendar event. Use this for booking/scheduling meetings, calendar invites, meeting invites, appointments, and Teams meetings. ALWAYS show a meeting draft first and wait for explicit approval before calling. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting. Outlook emails the invite to attendees with accept/decline.",
+      "Create a real Outlook calendar event. Use this for booking/scheduling meetings, calendar invites, meeting invites, appointments, and Teams meetings. ALWAYS show a meeting draft first AND read every attendee email address back letter-by-letter (local-part AND domain) before calling; then wait for explicit approval. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting. Outlook emails the invite to attendees with accept/decline.",
     parameters: {
       type: "object",
       properties: {
@@ -1343,6 +1343,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             base64: gen.base64,
             size: gen.size,
             formatLabel: gen.formatLabel,
+            title,
           });
           const formatLabel = gen.formatLabel;
 
@@ -1484,6 +1485,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         // "listening…" bubble so the UI never freezes on the last partial.
         if (message?.source === "user" && message.isFinal) {
           setPendingUser(null);
+          // Give the user a visible "I didn't catch that" signal so they
+          // know their utterance was heard-as-noise and dropped, instead
+          // of silently waiting for a reply that will never come.
+          if (voiceUserHasSpokenRef.current) {
+            toast("Didn't catch that — try again.", { duration: 2200 });
+          }
         }
         return;
       }

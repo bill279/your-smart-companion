@@ -14,12 +14,20 @@ export type Artifact = {
   size: number;
   /** Human label for the format ("PDF", "Word", etc.). */
   formatLabel: string;
+  /** Human title as chosen by the model (before extension). Used to resolve
+   *  later "convert that spec sheet to Word" style follow-ups where the user
+   *  refers to the doc by name rather than filename. Optional for backwards
+   *  compatibility with artifacts saved before this field existed. */
+  title?: string;
   createdAt: number;
 };
 
 const memory = new Map<string, Artifact>();
 const STORAGE_KEY = "bpa.artifacts.v1";
-const MAX_KEEP = 12;
+// Widen the ledger so format-conversion follow-ups ("convert that to Word",
+// "email me the spec sheet") still resolve hours later within the same
+// session, not just the last handful of artifacts.
+const MAX_KEEP = 20;
 // localStorage survives reloads and new tabs (unlike sessionStorage), so
 // artifact preview cards keep working after a refresh.
 
@@ -95,6 +103,25 @@ export function getLatestArtifact(): Artifact | undefined {
     if (!latest || a.createdAt > latest.createdAt) latest = a;
   }
   return latest;
+}
+
+/** Fuzzy lookup for follow-up references like "email me the pricing PDF" or
+ *  "convert the spec sheet to Word". Matches on filename OR title, case- and
+ *  extension-insensitive; returns the most recently created match. */
+export function findArtifactByName(query: string): Artifact | undefined {
+  loadFromStorage();
+  const q = query.trim().toLowerCase().replace(/\.(pdf|docx|xlsx|csv|txt)$/i, "");
+  if (!q) return undefined;
+  const candidates: Artifact[] = [];
+  for (const a of memory.values()) {
+    const name = a.filename.toLowerCase().replace(/\.(pdf|docx|xlsx|csv|txt)$/i, "");
+    const title = (a.title ?? "").toLowerCase();
+    if (name.includes(q) || (title && title.includes(q)) || q.includes(name) || (title && q.includes(title))) {
+      candidates.push(a);
+    }
+  }
+  candidates.sort((a, b) => b.createdAt - a.createdAt);
+  return candidates[0];
 }
 
 export function downloadArtifact(a: Artifact) {
