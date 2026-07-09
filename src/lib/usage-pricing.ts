@@ -11,6 +11,7 @@ const PRICES: Record<string, Price> = {
   "openai/text-embedding-3-small": { input: 0.02, output: 0 },
   "gpt-realtime-mini": { input: 10, output: 20 }, // audio tokens
   "gpt-realtime": { input: 32, output: 64 }, // audio tokens (per 1M)
+  "gpt-realtime-2.1": { input: 32, output: 64 }, // audio tokens (per 1M)
   "gpt-realtime-text": { input: 4, output: 16 }, // text tokens on realtime
 };
 
