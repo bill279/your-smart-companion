@@ -310,7 +310,8 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         },
         title: {
           type: "string",
-          description: "Document title / filename base (no extension).",
+          description:
+            "Document title / filename base (no extension). Professional, human, Title Case with spaces — e.g. 'Q4 Sales Report', 'Stereoscopic Cameras Comparison'. NEVER use underscores, snake_case, hashes, timestamps, or ids.",
         },
         content: {
           type: "string",
