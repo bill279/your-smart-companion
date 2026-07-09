@@ -1473,7 +1473,14 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onMessage: async (message) => {
       const text = message?.message;
-      if (!text) return;
+      if (!text) {
+        // Filtered / empty final transcript → clear the in-progress
+        // "listening…" bubble so the UI never freezes on the last partial.
+        if (message?.source === "user" && message.isFinal) {
+          setPendingUser(null);
+        }
+        return;
+      }
       if (message.source === "user" && message.isFinal === false) {
         voiceUserHasSpokenRef.current = true;
         lastUserSpeechAtRef.current = Date.now();
@@ -1503,6 +1510,7 @@ function ThreadView({ threadId }: { threadId: string }) {
           const isBareFiller = /^(bye|hi|hey|ok|okay|thanks|thank you|yes|no|uh|um|mm|hm+)[.!?]?$/i.test(trimmed);
           const veryClose = now - lastVoiceUserAtRef.current < 3000;
           if (isBareFiller && veryClose) {
+            setPendingUser(null);
             return;
           }
           lastVoiceUserAtRef.current = now;
