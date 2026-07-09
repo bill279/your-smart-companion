@@ -1485,6 +1485,12 @@ function ThreadView({ threadId }: { threadId: string }) {
         // "listening…" bubble so the UI never freezes on the last partial.
         if (message?.source === "user" && message.isFinal) {
           setPendingUser(null);
+          // Give the user a visible "I didn't catch that" signal so they
+          // know their utterance was heard-as-noise and dropped, instead
+          // of silently waiting for a reply that will never come.
+          if (voiceUserHasSpokenRef.current) {
+            toast("Didn't catch that — try again.", { duration: 2200 });
+          }
         }
         return;
       }
