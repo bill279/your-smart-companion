@@ -585,9 +585,18 @@ export const Route = createFileRoute("/api/chat")({
         }
         const userId = claims.claims.sub;
         // Read email straight from JWT claims; skip the extra getUser round-trip
-        // (saves ~150–300ms per chat request). If absent, the system prompt
-        // tells the model to ask for it.
-        const userEmail = (claims.claims as { email?: string }).email ?? null;
+        // (saves ~150–300ms per chat request). If absent (some auth providers
+        // don't include `email` in the claims payload), fall back to
+        // `getUser()` so "email it to me" never has to ask for the address.
+        let userEmail = (claims.claims as { email?: string }).email ?? null;
+        if (!userEmail) {
+          try {
+            const { data: userData } = await supabase.auth.getUser(token);
+            userEmail = userData?.user?.email ?? null;
+          } catch {
+            /* ignore — model will ask */
+          }
+        }
 
         // Fire-and-forget: ensure a briefing prefs row exists so the cron
         // starts sending morning briefings once the user has any activity.
