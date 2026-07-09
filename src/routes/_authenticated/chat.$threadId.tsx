@@ -1343,6 +1343,7 @@ function ThreadView({ threadId }: { threadId: string }) {
             base64: gen.base64,
             size: gen.size,
             formatLabel: gen.formatLabel,
+            title,
           });
           const formatLabel = gen.formatLabel;
 
