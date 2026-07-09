@@ -27,7 +27,6 @@ export function realtimeSessionConfig(input?: {
         transcription: {
           model: "gpt-realtime-whisper",
           language: "en",
-          prompt: TRANSCRIPTION_PROMPT,
         },
         turn_detection: {
           type: "semantic_vad",
