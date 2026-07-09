@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertUnderCap } from "@/lib/spend-cap.functions";
 import { computeCost } from "@/lib/usage-pricing";
+import { realtimeModelName, realtimeSessionConfig } from "@/lib/realtime-voice.server";
 import { z } from "zod";
 
 const RealtimeToolDefSchema = z.object({
@@ -10,47 +11,6 @@ const RealtimeToolDefSchema = z.object({
   description: z.string().min(1),
   parameters: z.record(z.string(), z.unknown()),
 });
-
-const TRANSCRIPTION_PROMPT =
-  "Business assistant voice commands. Common phrases: send it, email it to me, email that to, attach the PDF, convert to Word, convert to PDF, generate a report, add to calendar, book a meeting, cancel the meeting, reply to, follow up with, find, search for, look up. Common names include Bill, Randy, Jane, Mike, Sarah, John.";
-
-function realtimeSessionConfig(input?: {
-  instructions?: string;
-  tools?: z.infer<typeof RealtimeToolDefSchema>[];
-}) {
-  // Keep these inside/imported for TanStack server-function splitting safety.
-  const realtimeModel = "gpt-realtime-2.1";
-  const realtimeVoice = "marin";
-  const tools = input?.tools ?? [];
-  return {
-    type: "realtime",
-    model: realtimeModel,
-    output_modalities: ["audio"],
-    instructions: input?.instructions ?? "",
-    audio: {
-      input: {
-        transcription: {
-          model: "gpt-realtime-whisper",
-          language: "en",
-          prompt: TRANSCRIPTION_PROMPT,
-        },
-        turn_detection: {
-          type: "semantic_vad",
-          eagerness: "low",
-          create_response: false,
-          interrupt_response: true,
-        },
-      },
-      output: { voice: realtimeVoice },
-    },
-    tools,
-    tool_choice: tools.length > 0 ? "auto" : "none",
-  };
-}
-
-function realtimeModelName() {
-  return "gpt-realtime-2.1";
-}
 
 export const createRealtimeSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
