@@ -634,6 +634,24 @@ function stripInline(s: string): string {
     .replace(/\u2192/g, "->")            // right arrow (jsPDF Helvetica can't render it, letter-spaces cell)
     .replace(/\u2190/g, "<-")
     .replace(/\u21D2/g, "=>")
+    .replace(/\u21D0/g, "<=")
+    .replace(/[\u2194\u21D4]/g, "<->")   // bidirectional arrows
+    .replace(/[\u2191\u2193\u2195]/g, "|") // vertical arrows
+    .replace(/[\u00D7\u2715\u2716]/g, "x") // multiplication / cross
+    .replace(/[\u2212\u2010\u2011\u2012\u2015]/g, "-") // various dashes/minus
+    .replace(/\u00B7/g, "-")             // middle dot
+    .replace(/[\u2264]/g, "<=")
+    .replace(/[\u2265]/g, ">=")
+    .replace(/\u2260/g, "!=")
+    .replace(/\u2248/g, "~=")
+    .replace(/\u00B1/g, "+/-")
+    .replace(/\u00B0/g, " deg")
+    .replace(/[\u2713\u2714]/g, "[x]")   // check marks
+    .replace(/[\u2717\u2718]/g, "[ ]")   // ballot x
+    .replace(/[\u25CF\u25AA\u25AB\u25A0\u25A1\u25E6\u2023\u2043\u2219]/g, "•") // bullets → keep our bullet
     .replace(/\u2026/g, "...")           // ellipsis
-    .replace(/\u2022/g, "•");            // keep bullet, this one renders fine
+    .replace(/\u2022/g, "•")             // keep bullet, this one renders fine
+    // Final safety net: any remaining non-Latin1 char letter-spaces in
+    // jsPDF Helvetica. Drop it rather than ship broken glyphs.
+    .replace(/[^\x00-\xFF]/g, "");
 }
