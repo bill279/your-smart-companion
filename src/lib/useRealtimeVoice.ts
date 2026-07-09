@@ -578,7 +578,16 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
               instructions: opts.instructions ?? "",
               audio: {
                 input: {
-                  transcription: { model: "gpt-4o-transcribe", language: "en" },
+                  transcription: {
+                    model: "gpt-4o-transcribe",
+                    language: "en",
+                    // Biasing prompt: nudges the transcriber toward the
+                    // vocabulary the user actually uses so short commands
+                    // like "send it to Bill" stop coming out as
+                    // "Senator Bill", "email that to Jane", etc.
+                    prompt:
+                      "Business assistant voice commands. Common phrases: send it, email it to me, email that to, attach the PDF, convert to Word, convert to PDF, generate a report, add to calendar, book a meeting, cancel the meeting, reply to, follow up with, find, search for, look up. Common names include Bill, Randy, Jane, Mike, Sarah, John.",
+                  },
               // Semantic VAD uses a model to decide when the user is
               // actually speaking vs. making noise (breathing, throat
               // clearing, keyboard, background hum). "high" eagerness
