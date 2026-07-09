@@ -543,7 +543,21 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
   function drawTable(rows: string[][]) {
     if (rows.length === 0) return;
     const cols = Math.max(...rows.map((r) => r.length));
-    const colWidth = contentWidth / cols;
+    // Weight columns by content length so a wide "Notes" column doesn't
+    // get starved while short columns waste space. Bias with sqrt so one
+    // very long column doesn't dominate.
+    const colWeights: number[] = Array.from({ length: cols }, (_, c) => {
+      let maxLen = 0;
+      for (const row of rows) {
+        const cell = stripInline(row[c] ?? "");
+        const longestWord = cell.split(/\s+/).reduce((m, w) => Math.max(m, w.length), 0);
+        maxLen = Math.max(maxLen, cell.length, longestWord * 2);
+      }
+      return Math.max(6, Math.sqrt(maxLen));
+    });
+    const totalWeight = colWeights.reduce((s, w) => s + w, 0);
+    const colWidths = colWeights.map((w) => (contentWidth * w) / totalWeight);
+    const colX = (c: number) => margin + colWidths.slice(0, c).reduce((s, w) => s + w, 0);
     // Fixed 3-tier scale — no more per-doc "sometimes 10pt, sometimes 8.5pt".
     const tableFontSize = cols >= 8 ? 8 : cols >= 6 ? 9 : 10;
     const lineHeight = tableFontSize + 3;
@@ -554,43 +568,36 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
       let max = 0;
       for (let c = 0; c < cols; c++) {
         const cell = stripInline(row[c] ?? "");
-        const wrapped = pdf.splitTextToSize(cell, colWidth - 10) as string[];
+        const wrapped = pdf.splitTextToSize(cell, colWidths[c] - 10) as string[];
         max = Math.max(max, wrapped.length * lineHeight + 10);
       }
       return max;
     });
+    const headerHeight = rows.length > 0 ? rowHeights[0] : 0;
+    const headerRow = rows[0];
 
-    y += 4;
-    for (let r = 0; r < rows.length; r++) {
-      const h = rowHeights[r];
-      if (y + h > pageHeight - margin - 24) newPage();
-
-      // header fill
-      if (r === 0) {
+    const drawRow = (row: string[], h: number, isHeader: boolean, zebra: boolean) => {
+      if (isHeader) {
         pdf.setFillColor(...headerBg);
         pdf.rect(margin, y, contentWidth, h, "F");
-      } else if (r % 2 === 0) {
+      } else if (zebra) {
         pdf.setFillColor(250, 251, 252);
         pdf.rect(margin, y, contentWidth, h, "F");
       }
-
-      // borders
       pdf.setDrawColor(...rule);
       pdf.setLineWidth(0.5);
       pdf.rect(margin, y, contentWidth, h);
       for (let c = 1; c < cols; c++) {
-        const x = margin + colWidth * c;
+        const x = colX(c);
         pdf.line(x, y, x, y + h);
       }
-
-      // text
-      pdf.setFont("helvetica", r === 0 ? "bold" : "normal");
+      pdf.setFont("helvetica", isHeader ? "bold" : "normal");
       pdf.setFontSize(tableFontSize);
-      pdf.setTextColor(r === 0 ? brand[0] : 30, r === 0 ? brand[1] : 30, r === 0 ? brand[2] : 30);
+      pdf.setTextColor(isHeader ? brand[0] : 30, isHeader ? brand[1] : 30, isHeader ? brand[2] : 30);
       for (let c = 0; c < cols; c++) {
-        const cell = stripInline(rows[r][c] ?? "");
-        const wrapped = pdf.splitTextToSize(cell, colWidth - 10) as string[];
-        const x = margin + colWidth * c + 6;
+        const cell = stripInline(row[c] ?? "");
+        const wrapped = pdf.splitTextToSize(cell, colWidths[c] - 10) as string[];
+        const x = colX(c) + 6;
         let ty = y + tableFontSize + 3;
         for (const l of wrapped) {
           pdf.text(l, x, ty);
@@ -598,6 +605,17 @@ function renderPdf(title: string, markdown: string): ArrayBuffer {
         }
       }
       y += h;
+    };
+
+    y += 4;
+    for (let r = 0; r < rows.length; r++) {
+      const h = rowHeights[r];
+      if (y + h > pageHeight - margin - 24) {
+        newPage();
+        // Repeat header on continuation pages so column context isn't lost.
+        if (r > 0 && headerRow) drawRow(headerRow, headerHeight, true, false);
+      }
+      drawRow(rows[r], h, r === 0, r !== 0 && r % 2 === 0);
     }
     pdf.setTextColor(0, 0, 0);
     y += 8;
