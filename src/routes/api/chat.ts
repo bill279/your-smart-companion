@@ -1822,6 +1822,30 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
         // client can render Claude-style live search chips.
         const collectedActivity: ToolActivity[] = [];
         const encoder = new TextEncoder();
+        // Buffer text deltas until we hit a paragraph boundary (\n\n) so we
+        // can filter out any paragraph that looks like leaked internal
+        // reasoning ("The user hasn't replied…", "Reply with exact draft
+        // structure.", "per 7a…") before it ever reaches the client.
+        let paragraphBuffer = "";
+        const flushCompletedParagraphs = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+          const lastBreak = paragraphBuffer.lastIndexOf("\n\n");
+          if (lastBreak === -1) return;
+          const complete = paragraphBuffer.slice(0, lastBreak);
+          paragraphBuffer = paragraphBuffer.slice(lastBreak + 2);
+          const parts = complete.split(/\n{2,}/);
+          for (const p of parts) {
+            if (!p) continue;
+            if (INTERNAL_MONOLOGUE_RE.test(p)) continue;
+            controller.enqueue(encoder.encode(p + "\n\n"));
+          }
+        };
+        const flushRemaining = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+          const remaining = paragraphBuffer;
+          paragraphBuffer = "";
+          if (!remaining) return;
+          if (INTERNAL_MONOLOGUE_RE.test(remaining)) return;
+          controller.enqueue(encoder.encode(remaining));
+        };
         const stream = new ReadableStream<Uint8Array>({
           async start(controller) {
             try {
@@ -1830,8 +1854,14 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   const delta = (part as { text?: string; textDelta?: string }).text
                     ?? (part as { textDelta?: string }).textDelta
                     ?? "";
-                  if (delta) controller.enqueue(encoder.encode(delta));
+                  if (delta) {
+                    paragraphBuffer += delta;
+                    flushCompletedParagraphs(controller);
+                  }
                 } else if (part.type === "tool-call") {
+                  // Flush any pending text before the tool-activity frame so
+                  // ordering is preserved in the UI.
+                  flushRemaining(controller);
                   const name = (part as { toolName: string }).toolName;
                   if (isTrackedTool(name)) {
                     const rawInput = (part as { input?: Record<string, unknown> }).input ?? {};
@@ -1858,6 +1888,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                     );
                   }
                 } else if (part.type === "tool-result") {
+                  flushRemaining(controller);
                   const name = (part as { toolName: string }).toolName;
                   if (isTrackedTool(name)) {
                     const output = (part as { output?: unknown; result?: unknown }).output
@@ -1879,6 +1910,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   }
                 }
               }
+              flushRemaining(controller);
             } catch (e) {
               controller.enqueue(
                 encoder.encode(
