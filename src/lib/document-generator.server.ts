@@ -609,5 +609,13 @@ function stripInline(s: string): string {
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/\*(.+?)\*/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[\u2013\u2014]/g, "-")   // en/em dash → hyphen
+    .replace(/[\u2018\u2019]/g, "'")     // curly single quotes
+    .replace(/[\u201C\u201D]/g, '"')     // curly double quotes
+    .replace(/\u2192/g, "->")            // right arrow (jsPDF Helvetica can't render it, letter-spaces cell)
+    .replace(/\u2190/g, "<-")
+    .replace(/\u21D2/g, "=>")
+    .replace(/\u2026/g, "...")           // ellipsis
+    .replace(/\u2022/g, "•");            // keep bullet, this one renders fine
 }
