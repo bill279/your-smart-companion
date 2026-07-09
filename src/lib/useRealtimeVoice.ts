@@ -62,11 +62,10 @@ export type RealtimeUsage = {
 export type UseRealtimeVoiceOptions = {
   clientTools?: Record<string, ClientTool>;
   toolDefs?: RealtimeToolDef[];
-  exchangeSdp?: (input: {
-    sdp: string;
+  createSession?: (input: {
     instructions?: string;
     tools: RealtimeToolDef[];
-  }) => Promise<{ answerSdp: string }>;
+  }) => Promise<{ clientSecret: string }>;
   onConnect?: () => void;
   onDisconnect?: (details?: { reason?: string; message?: string }) => void;
   onError?: (message: string) => void;
@@ -611,13 +610,26 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         if (!offer.sdp) throw new Error("Browser did not create a voice connection offer");
-        const exchangeSdp = optionsRef.current.exchangeSdp;
-        if (!exchangeSdp) throw new Error("Voice backend exchange is not available");
-        const { answerSdp } = await exchangeSdp({
-          sdp: offer.sdp,
+        const createSession = optionsRef.current.createSession;
+        if (!createSession) throw new Error("Voice backend session is not available");
+        const { clientSecret } = await createSession({
           instructions: opts.instructions,
           tools: optionsRef.current.toolDefs ?? [],
         });
+        if (!clientSecret) throw new Error("Voice backend did not return a session token");
+        const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
+          method: "POST",
+          body: offer.sdp,
+          headers: {
+            Authorization: `Bearer ${clientSecret}`,
+            "Content-Type": "application/sdp",
+          },
+        });
+        const answerSdp = await sdpResponse.text().catch(() => "");
+        if (!sdpResponse.ok) {
+          throw new Error(`Realtime browser SDP exchange failed (${sdpResponse.status}): ${answerSdp.replace(/\s+/g, " ").trim().slice(0, 220) || "provider rejected the voice handshake"}`);
+        }
+        if (!answerSdp.trim()) throw new Error("Realtime browser SDP exchange returned an empty answer");
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
       } catch (err) {
         cleanup();
