@@ -14,13 +14,23 @@ const RealtimeToolDefSchema = z.object({
 
 export const createRealtimeSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z.object({
+      instructions: z.string().optional(),
+      tools: z.array(RealtimeToolDefSchema).default([]),
+    }).parse(d ?? {}),
+  )
+  .handler(async ({ context, data }) => {
     const realtimeModel = realtimeModelName();
     // Block if user is at/above their monthly spend cap.
     await assertUnderCap(context.supabase, context.userId);
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new Error("OPENAI_API_KEY not configured");
-    const { clientSecret, expiresAt } = await createRealtimeClientSecret({ apiKey: key });
+    const { clientSecret, expiresAt } = await createRealtimeClientSecret({
+      apiKey: key,
+      instructions: data.instructions,
+      tools: data.tools,
+    });
     // Log a marker event so voice sessions show up in the spend dashboard.
     // Actual audio-token totals aren't returned here; we log the start
     // event with 0 cost — see usage-pricing.ts for the per-token rate.
