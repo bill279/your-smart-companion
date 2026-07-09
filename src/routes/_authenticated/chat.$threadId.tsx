@@ -165,7 +165,10 @@ function voiceStartMessage(error: unknown) {
   if (/permission|notallowed|denied|blocked/i.test(`${name} ${message}`)) {
     return "Microphone permission is still being rejected by the browser. Check the site mic setting, then tap the mic.";
   }
-  return "Voice failed to connect. Tap the mic once to try again.";
+  const detail = message?.trim().slice(0, 140);
+  return detail
+    ? `Voice failed to connect: ${detail}. Tap the mic once to try again.`
+    : "Voice failed to connect. Tap the mic once to try again.";
 }
 
 // Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
