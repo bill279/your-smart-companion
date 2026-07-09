@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
-import { createRealtimeSession, logVoiceUsage } from "@/lib/realtime-voice.functions";
+import { exchangeRealtimeSdp, logVoiceUsage } from "@/lib/realtime-voice.functions";
 import {
   voiceWebScrape,
   voiceProductSearch,
@@ -688,7 +688,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const createSession = useServerFn(createRealtimeSession);
+  const exchangeSdp = useServerFn(exchangeRealtimeSdp);
   const logUsage = useServerFn(logVoiceUsage);
   const vScrape = useServerFn(voiceWebScrape);
   const vProducts = useServerFn(voiceProductSearch);
@@ -1070,6 +1070,8 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const conversation = useRealtimeVoice({
     toolDefs: REALTIME_TOOL_DEFS,
+    exchangeSdp: ({ sdp, instructions, tools }) =>
+      exchangeSdp({ data: { sdp, instructions, tools } }),
     onUsage: (u) => {
       // Fire-and-forget: log per-turn realtime token usage for the spend dashboard.
       logUsage({ data: u }).catch((err) => console.warn("logVoiceUsage failed", err));
@@ -1713,11 +1715,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           channelCount: 1,
         },
       });
-      const session = await createSession({});
-      if (startAttemptRef.current !== attemptId) {
-        stopMediaStream(microphoneStream);
-        return;
-      }
       const instructions = `${VOICE_SESSION_PROMPT}\n\n${buildVoiceContext()}`;
       pendingContextRef.current = "";
       clearVoiceConnectTimeout();
@@ -1729,8 +1726,6 @@ function ThreadView({ threadId }: { threadId: string }) {
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
       }, 20000);
       await conversation.startSession({
-        clientSecret: session.clientSecret,
-        model: session.model,
         instructions,
         microphoneStream,
       });
