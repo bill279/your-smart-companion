@@ -165,10 +165,39 @@ function voiceStartMessage(error: unknown) {
   if (/permission|notallowed|denied|blocked/i.test(`${name} ${message}`)) {
     return "Microphone permission is still being rejected by the browser. Check the site mic setting, then tap the mic.";
   }
-  const detail = message?.trim().slice(0, 140);
-  return detail
-    ? `Voice failed to connect: ${detail}. Tap the mic once to try again.`
-    : "Voice failed to connect. Tap the mic once to try again.";
+  return mapProviderVoiceError(message);
+}
+
+// Translate raw provider / network error strings into plain English the user
+// can act on. Anything unrecognised falls back to a short generic message so
+// we never surface a wall of provider jargon.
+function mapProviderVoiceError(raw: string): string {
+  const msg = (raw ?? "").trim();
+  if (!msg) return "Voice failed to connect. Tap the mic once to try again.";
+  const lower = msg.toLowerCase();
+  if (/timed? ?out|timeout|etimedout/.test(lower)) {
+    return "Voice took too long to connect. Check your internet and tap the mic to retry.";
+  }
+  if (/network|offline|failed to fetch|networkerror|err_network|dns/.test(lower)) {
+    return "Voice can't reach the server — network looks down. Reconnect and tap the mic.";
+  }
+  if (/\b(429)\b|rate ?limit|too many requests/.test(lower)) {
+    return "Voice is temporarily rate-limited. Wait a few seconds and tap the mic again.";
+  }
+  if (/\b(401|403)\b|unauthori[sz]ed|forbidden|invalid[_ ]?api[_ ]?key/.test(lower)) {
+    return "Voice couldn't authenticate. Reload the page and try again.";
+  }
+  if (/\b(5\d{2})\b|bad gateway|service unavailable|gateway timeout|provider/.test(lower)) {
+    return "The voice provider is having a hiccup. Tap the mic once to retry.";
+  }
+  if (/ice|dtls|sdp|webrtc|peer ?connection/.test(lower)) {
+    return "Voice connection dropped. Tap the mic once to reconnect.";
+  }
+  if (/quota|billing|insufficient/.test(lower)) {
+    return "Voice is temporarily unavailable (quota). Try again shortly.";
+  }
+  const detail = msg.slice(0, 120);
+  return `Voice failed to connect: ${detail}. Tap the mic once to try again.`;
 }
 
 // Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
@@ -1466,7 +1495,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       // Do not silently restart voice after disconnects; ask the user to tap again.
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
-        setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
+        setVoiceError(
+          closeText
+            ? mapProviderVoiceError(closeText)
+            : "Voice disconnected. Tap the mic once to reconnect.",
+        );
       }
     },
     onError: (e: string) => {
@@ -1476,7 +1509,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
+      setVoiceError(mapProviderVoiceError(msg));
     },
     onMessage: async (message) => {
       const text = message?.message;
@@ -3086,10 +3119,14 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
             .docx-preview h3{font-size:14px}
             .docx-preview p{margin:0 0 10px}
             .docx-preview ul,.docx-preview ol{margin:0 0 12px 22px}
-            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
-            .docx-preview th{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left}
-            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px}
-            .docx-preview tr:nth-child(even) td{background:#F8FAFC}
+            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;table-layout:fixed}
+            .docx-preview th,.docx-preview tr:first-child td{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left;vertical-align:top}
+            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}
+            .docx-preview tr:nth-child(even):not(:first-child) td{background:#F8FAFC}
+            .docx-preview strong,.docx-preview b{font-weight:700;color:#0f172a}
+            .docx-preview a{color:${brand};text-decoration:underline}
+            .docx-preview blockquote{border-left:3px solid ${brand};margin:8px 0;padding:2px 0 2px 12px;color:#334155}
+            .docx-preview img{max-width:100%;height:auto}
           </style>
           <div class="docx-preview">${titleHtml}${stripped || "<p><em>Document is empty.</em></p>"}</div>`,
         );
@@ -3279,10 +3316,14 @@ function RemoteDocCard({
             .docx-preview h3{font-size:14px}
             .docx-preview p{margin:0 0 10px}
             .docx-preview ul,.docx-preview ol{margin:0 0 12px 22px}
-            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
-            .docx-preview th{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left}
-            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px}
-            .docx-preview tr:nth-child(even) td{background:#F8FAFC}
+            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;table-layout:fixed}
+            .docx-preview th,.docx-preview tr:first-child td{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left;vertical-align:top}
+            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}
+            .docx-preview tr:nth-child(even):not(:first-child) td{background:#F8FAFC}
+            .docx-preview strong,.docx-preview b{font-weight:700;color:#0f172a}
+            .docx-preview a{color:${brand};text-decoration:underline}
+            .docx-preview blockquote{border-left:3px solid ${brand};margin:8px 0;padding:2px 0 2px 12px;color:#334155}
+            .docx-preview img{max-width:100%;height:auto}
           </style>
           <div class="docx-preview">${titleHtml}${stripped || "<p><em>Document is empty.</em></p>"}</div>`,
         );
