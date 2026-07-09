@@ -3119,10 +3119,14 @@ function ArtifactCard({ artifactId }: { artifactId: string }) {
             .docx-preview h3{font-size:14px}
             .docx-preview p{margin:0 0 10px}
             .docx-preview ul,.docx-preview ol{margin:0 0 12px 22px}
-            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
-            .docx-preview th{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left}
-            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px}
-            .docx-preview tr:nth-child(even) td{background:#F8FAFC}
+            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;table-layout:fixed}
+            .docx-preview th,.docx-preview tr:first-child td{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left;vertical-align:top}
+            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}
+            .docx-preview tr:nth-child(even):not(:first-child) td{background:#F8FAFC}
+            .docx-preview strong,.docx-preview b{font-weight:700;color:#0f172a}
+            .docx-preview a{color:${brand};text-decoration:underline}
+            .docx-preview blockquote{border-left:3px solid ${brand};margin:8px 0;padding:2px 0 2px 12px;color:#334155}
+            .docx-preview img{max-width:100%;height:auto}
           </style>
           <div class="docx-preview">${titleHtml}${stripped || "<p><em>Document is empty.</em></p>"}</div>`,
         );
@@ -3312,10 +3316,14 @@ function RemoteDocCard({
             .docx-preview h3{font-size:14px}
             .docx-preview p{margin:0 0 10px}
             .docx-preview ul,.docx-preview ol{margin:0 0 12px 22px}
-            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
-            .docx-preview th{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left}
-            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px}
-            .docx-preview tr:nth-child(even) td{background:#F8FAFC}
+            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;table-layout:fixed}
+            .docx-preview th,.docx-preview tr:first-child td{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left;vertical-align:top}
+            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}
+            .docx-preview tr:nth-child(even):not(:first-child) td{background:#F8FAFC}
+            .docx-preview strong,.docx-preview b{font-weight:700;color:#0f172a}
+            .docx-preview a{color:${brand};text-decoration:underline}
+            .docx-preview blockquote{border-left:3px solid ${brand};margin:8px 0;padding:2px 0 2px 12px;color:#334155}
+            .docx-preview img{max-width:100%;height:auto}
           </style>
           <div class="docx-preview">${titleHtml}${stripped || "<p><em>Document is empty.</em></p>"}</div>`,
         );
