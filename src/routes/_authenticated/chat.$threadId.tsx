@@ -210,7 +210,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "send_email",
     description:
-      "Send a normal email on the user's behalf. NEVER use this for calendar invites, meeting invites, Teams meetings, or scheduling; use create_calendar_event for those. ALWAYS confirm the recipient address out loud first and wait for explicit approval before calling. Set attach_last_document=true to attach the most recent document you generated via generate_document.",
+      "Send a normal email on the user's behalf. NEVER use this for calendar invites, meeting invites, Teams meetings, or scheduling; use create_calendar_event for those. ALWAYS spell the recipient address back letter-by-letter (local-part AND domain) and wait for explicit approval before calling — never assume a dictated address is correct. Set attach_last_document=true to attach the most recent document you generated via generate_document.",
     parameters: {
       type: "object",
       properties: {
@@ -240,7 +240,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
     type: "function",
     name: "create_calendar_event",
     description:
-      "Create a real Outlook calendar event. Use this for booking/scheduling meetings, calendar invites, meeting invites, appointments, and Teams meetings. ALWAYS show a meeting draft first and wait for explicit approval before calling. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting. Outlook emails the invite to attendees with accept/decline.",
+      "Create a real Outlook calendar event. Use this for booking/scheduling meetings, calendar invites, meeting invites, appointments, and Teams meetings. ALWAYS show a meeting draft first AND read every attendee email address back letter-by-letter (local-part AND domain) before calling; then wait for explicit approval. Microsoft Teams is default and Teams only; set online_meeting=true unless the user explicitly says no online meeting. Outlook emails the invite to attendees with accept/decline.",
     parameters: {
       type: "object",
       properties: {
