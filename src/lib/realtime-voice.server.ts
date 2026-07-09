@@ -29,7 +29,10 @@ export function realtimeSessionConfig(input?: {
           type: "server_vad",
           threshold: 0.7,
           prefix_padding_ms: 300,
-          silence_duration_ms: 600,
+          // Longer pause window so mid-sentence breaths ("no, can you just…",
+          // "convert this to a PDF… and a comparison table… underwordog")
+          // don't get split into three separate turns.
+          silence_duration_ms: 1200,
           create_response: false,
           interrupt_response: true,
         },
