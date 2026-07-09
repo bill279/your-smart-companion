@@ -18,6 +18,14 @@ function looksLikeVoiceGarbageFilename(raw: string): boolean {
     const ratio = vowels / t.length;
     if (ratio < 0.2 || ratio > 0.7) return true;
   }
+  // Stricter pass: require at least 2 real word-shaped tokens OR a document
+  // noun (report, spec, brief, memo, agenda, plan, list, notes, quote,
+  // invoice, proposal, summary, comparison, guide, sheet, doc). A single
+  // conversational token like "Cool", "Sure", "Convert" as the whole
+  // filename is almost always Whisper hearing filler as the doc name.
+  const words = t.split(/[\s_-]+/).filter(Boolean);
+  const documentNoun = /(report|spec|specs|brief|memo|agenda|plan|list|notes?|quote|invoice|proposal|summary|comparison|compare|guide|sheet|doc|overview|analysis|breakdown|roadmap|checklist|contract|agreement|policy|resume|cv|readme|minutes|recap)/i;
+  if (words.length < 2 && !documentNoun.test(t)) return true;
   return false;
 }
 
