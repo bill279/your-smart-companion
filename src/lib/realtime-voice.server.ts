@@ -1,6 +1,3 @@
-export const TRANSCRIPTION_PROMPT =
-  "Business assistant voice commands. Common phrases: send it, email it to me, email that to, attach the PDF, convert to Word, convert to PDF, generate a report, add to calendar, book a meeting, cancel the meeting, reply to, follow up with, find, search for, look up. Common names include Bill, Randy, Jane, Mike, Sarah, John.";
-
 type RealtimeToolDef = {
   type: "function";
   name: string;
@@ -27,11 +24,12 @@ export function realtimeSessionConfig(input?: {
         transcription: {
           model: "gpt-4o-transcribe",
           language: "en",
-          prompt: TRANSCRIPTION_PROMPT,
         },
         turn_detection: {
-          type: "semantic_vad",
-          eagerness: "low",
+          type: "server_vad",
+          threshold: 0.7,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 600,
           create_response: false,
           interrupt_response: true,
         },
