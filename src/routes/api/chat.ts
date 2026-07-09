@@ -1770,7 +1770,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
               thread_id: body.threadId!,
               user_id: userId,
               role: "assistant",
-              content: marker + cleanAssistantText(text),
+              content: marker + sanitizeAssistantText(text),
             });
             await supabase
               .from("threads")
