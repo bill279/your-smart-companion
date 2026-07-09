@@ -1,5 +1,3 @@
-import type { z } from "zod";
-
 export const TRANSCRIPTION_PROMPT =
   "Business assistant voice commands. Common phrases: send it, email it to me, email that to, attach the PDF, convert to Word, convert to PDF, generate a report, add to calendar, book a meeting, cancel the meeting, reply to, follow up with, find, search for, look up. Common names include Bill, Randy, Jane, Mike, Sarah, John.";
 
@@ -44,5 +42,3 @@ export function realtimeSessionConfig(input?: {
     tool_choice: tools.length > 0 ? "auto" : "none",
   } satisfies Record<string, unknown>;
 }
-
-export type RealtimeToolDefFromSchema<T extends z.ZodTypeAny> = z.infer<T>;
