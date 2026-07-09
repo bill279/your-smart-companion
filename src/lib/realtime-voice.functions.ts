@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertUnderCap } from "@/lib/spend-cap.functions";
 import { computeCost } from "@/lib/usage-pricing";
-import { realtimeModelName, realtimeSessionConfig } from "@/lib/realtime-voice.server";
+import { createRealtimeClientSecret, exchangeRealtimeOffer, realtimeModelName } from "@/lib/realtime-voice.server";
 import { z } from "zod";
 
 const RealtimeToolDefSchema = z.object({
@@ -20,32 +20,7 @@ export const createRealtimeSession = createServerFn({ method: "POST" })
     await assertUnderCap(context.supabase, context.userId);
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new Error("OPENAI_API_KEY not configured");
-    // `/v1/realtime/sessions` was retired — mint an ephemeral client secret
-    // from the new `/v1/realtime/client_secrets` endpoint instead.
-    const res = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        session: realtimeSessionConfig(),
-      }),
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`Realtime session failed (${res.status}): ${errText.slice(0, 200)}`);
-    }
-    // New response shape: `{ value, expires_at, session }`. Fall back to the
-    // old `{ client_secret: { value } }` shape for safety.
-    const data = (await res.json()) as {
-      value?: string;
-      expires_at?: number;
-      client_secret?: { value: string; expires_at?: number };
-    };
-    const clientSecret = data.value ?? data.client_secret?.value;
-    const expiresAt = data.expires_at ?? data.client_secret?.expires_at ?? null;
-    if (!clientSecret) throw new Error("Realtime session missing client_secret");
+    const { clientSecret, expiresAt } = await createRealtimeClientSecret({ apiKey: key });
     // Log a marker event so voice sessions show up in the spend dashboard.
     // Actual audio-token totals aren't returned here; we log the start
     // event with 0 cost — see usage-pricing.ts for the per-token rate.
@@ -84,23 +59,12 @@ export const exchangeRealtimeSdp = createServerFn({ method: "POST" })
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new Error("OPENAI_API_KEY not configured");
 
-    const fd = new FormData();
-    fd.set("sdp", data.sdp);
-    fd.set("session", JSON.stringify(realtimeSessionConfig({
+    const { answerSdp } = await exchangeRealtimeOffer({
+      apiKey: key,
+      sdp: data.sdp,
       instructions: data.instructions,
       tools: data.tools,
-    })));
-
-    const res = await fetch("https://api.openai.com/v1/realtime/calls", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}` },
-      body: fd,
     });
-    const answerSdp = await res.text().catch(() => "");
-    if (!res.ok) {
-      throw new Error(`Realtime SDP exchange failed (${res.status}): ${answerSdp.slice(0, 300)}`);
-    }
-    if (!answerSdp.trim()) throw new Error("Realtime SDP exchange returned an empty answer");
 
     try {
       await context.supabase.from("usage_events").insert({

@@ -1724,7 +1724,7 @@ function ThreadView({ threadId }: { threadId: string }) {
         pendingContextRef.current = "";
         setVoiceError("Voice took too long to connect. Tap the mic once to try again.");
         try { conversationRef.current?.endSession(); } catch (err) { console.warn(err); }
-      }, 20000);
+      }, 32000);
       await conversation.startSession({
         instructions,
         microphoneStream,
