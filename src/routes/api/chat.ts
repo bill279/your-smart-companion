@@ -954,11 +954,13 @@ export const Route = createFileRoute("/api/chat")({
         const priorDocs = listAllGeneratedDocs(rows ?? []);
         const docsLedgerBlock =
           priorDocs.length > 0
-            ? `\n\n# 📄 Generated documents in this thread (ledger)\nEach line is a real file already created earlier. When the user says "email/resend/attach the <X> PDF/Word", MATCH by topic/label and pass that file's exact url + filename in \`send_email\`'s \`attachments\` array. Do NOT call \`generate_document\` again for a file that already exists — regenerating creates a NEW file and the wrong one will be attached.\n${priorDocs
-                .map(
-                  (d, i) =>
-                    `${i + 1}. [${d.format.toUpperCase()}] "${d.label}" — filename: ${d.filename} — url: ${d.url}`,
-                )
+            ? `\n\n# 📄 Generated documents in this thread (ledger)\nEach line is a real file already created earlier. When the user says "email/resend/attach the <X> PDF/Word", MATCH by topic/label and pass that file's exact url + filename in \`send_email\`'s \`attachments\` array. Do NOT call \`generate_document\` again for a file that already exists — regenerating creates a NEW file and the wrong one will be attached.\n\nIf the user asks to CONVERT an existing file to a different format ("make that a Word doc", "convert it to PDF", "give me an Excel of that"), call \`generate_document\` with the new format AND re-use the same title + markdown from the ledger's \`source\` field below — do NOT reply that "we don't have the content ready". The source markdown IS the content.\n${priorDocs
+                .map((d, i) => {
+                  const head = `${i + 1}. [${d.format.toUpperCase()}] "${d.label}" — filename: ${d.filename} — url: ${d.url}`;
+                  if (!d.sourceExcerpt) return head;
+                  const title = d.sourceTitle ? ` — title: "${d.sourceTitle}"` : "";
+                  return `${head}${title}\n   source (markdown, truncated):\n   ${d.sourceExcerpt.replace(/\n/g, "\n   ")}`;
+                })
                 .join("\n")}`
             : "";
         const contactsBlock =
