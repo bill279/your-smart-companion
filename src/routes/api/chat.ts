@@ -533,6 +533,8 @@ type GeneratedDocLedgerEntry = {
   filename: string;
   url: string;
   format: string;
+  sourceExcerpt?: string;
+  sourceTitle?: string;
 };
 function listAllGeneratedDocs(rows: ChatHistoryRow[]): GeneratedDocLedgerEntry[] {
   const out: GeneratedDocLedgerEntry[] = [];
@@ -551,6 +553,8 @@ function listAllGeneratedDocs(rows: ChatHistoryRow[]): GeneratedDocLedgerEntry[]
         filename: doc.filename,
         url: doc.url,
         format: ext,
+        sourceExcerpt: doc.sourceMarkdown,
+        sourceTitle: doc.sourceTitle,
       });
     }
   }
