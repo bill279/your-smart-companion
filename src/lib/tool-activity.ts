@@ -58,6 +58,11 @@ export type ToolActivity = {
     formatLabel?: string;
     mimeType?: string;
     size?: number;
+    /** Source markdown the doc was generated from — lets the model
+     * re-generate the same doc in a different format without
+     * re-inventing the content. Truncated when persisted. */
+    sourceMarkdown?: string;
+    sourceTitle?: string;
   };
   error?: string;
 };
@@ -123,6 +128,21 @@ export function foldToolEvent(
       ev.input?.title ??
       ev.input?.to ??
       base.label;
+    if (ev.name === "generate_document") {
+      const src = (ev.input?.markdown ?? undefined) as string | undefined;
+      const title = (ev.input?.title ?? undefined) as string | undefined;
+      if (src && !base.docFile) {
+        base.docFile = {
+          url: "",
+          filename: "",
+          sourceMarkdown: src.slice(0, 4000),
+          sourceTitle: title,
+        };
+      } else if (src && base.docFile) {
+        base.docFile.sourceMarkdown = src.slice(0, 4000);
+        base.docFile.sourceTitle = title ?? base.docFile.sourceTitle;
+      }
+    }
   } else {
     const out = ev.output as {
       results?: Array<{ title?: string; url?: string; snippet?: string }>;
@@ -153,6 +173,7 @@ export function foldToolEvent(
         | null;
       if (doc?.url && doc?.filename) {
         base.docFile = {
+          ...(base.docFile ?? {}),
           url: doc.url,
           filename: doc.filename,
           formatLabel: doc.formatLabel,
