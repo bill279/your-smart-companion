@@ -53,10 +53,6 @@ type RealtimeExchangeResult = {
   providerStatus?: number;
 };
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function timeoutSignal(ms: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -117,54 +113,76 @@ export async function exchangeRealtimeOffer(input: {
   instructions?: string;
   tools?: RealtimeToolDef[];
 }): Promise<RealtimeExchangeResult> {
+  const session = realtimeSessionConfig({
+    instructions: input.instructions,
+    tools: input.tools,
+  });
   let lastError: Error | null = null;
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      const { clientSecret } = await createRealtimeClientSecret({
-        apiKey: input.apiKey,
-        instructions: input.instructions,
-        tools: input.tools,
-        timeoutMs: 8_000,
-      });
-      const timeout = timeoutSignal(9_000);
-      try {
-        const res = await fetch("https://api.openai.com/v1/realtime/calls", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${clientSecret}`,
-            "Content-Type": "application/sdp",
-          },
-          body: input.sdp,
-          signal: timeout.signal,
-        });
-        const answerSdp = await res.text().catch(() => "");
-        if (!res.ok) {
-          const detail = compactProviderError(answerSdp);
-          const error = new Error(`Realtime SDP exchange failed (${res.status}): ${detail || "provider rejected the voice handshake"}`);
-          lastError = error;
-          if (attempt < 2 && isRetryableRealtimeStatus(res.status)) {
-            await sleep(500);
-            continue;
-          }
-          throw error;
-        }
-        if (!answerSdp.trim()) throw new Error("Realtime SDP exchange returned an empty answer");
-        return { answerSdp, providerStatus: res.status };
-      } finally {
-        timeout.cancel();
-      }
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      lastError = error;
-      const aborted = error.name === "AbortError" || /aborted|timeout|timed out/i.test(error.message);
-      if (attempt < 2 && aborted) {
-        await sleep(500);
-        continue;
-      }
-      throw error;
+  // Primary path from the current Realtime WebRTC docs: backend sends the
+  // browser SDP + session config as multipart/form-data with the standard key.
+  const unifiedTimeout = timeoutSignal(12_000);
+  try {
+    const fd = new FormData();
+    fd.set("sdp", input.sdp);
+    fd.set("session", JSON.stringify(session));
+    const res = await fetch("https://api.openai.com/v1/realtime/calls", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${input.apiKey}` },
+      body: fd,
+      signal: unifiedTimeout.signal,
+    });
+    const answerSdp = await res.text().catch(() => "");
+    if (res.ok) {
+      if (!answerSdp.trim()) throw new Error("Realtime SDP exchange returned an empty answer");
+      return { answerSdp, providerStatus: res.status };
     }
+    const detail = compactProviderError(answerSdp);
+    lastError = new Error(`Realtime SDP exchange failed (${res.status}): ${detail || "provider rejected the voice handshake"}`);
+    if (!isRetryableRealtimeStatus(res.status)) throw lastError;
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    lastError = error.name === "AbortError"
+      ? new Error("Realtime provider timed out while starting voice")
+      : error;
+  } finally {
+    unifiedTimeout.cancel();
   }
 
-  throw lastError ?? new Error("Realtime SDP exchange failed");
+  // Fallback path: mint an ephemeral secret and perform a raw SDP exchange.
+  // This avoids leaving voice down when the unified multipart endpoint returns
+  // a transient gateway timeout for a specific request.
+  try {
+    const { clientSecret } = await createRealtimeClientSecret({
+      apiKey: input.apiKey,
+      instructions: input.instructions,
+      tools: input.tools,
+      timeoutMs: 5_000,
+    });
+    const fallbackTimeout = timeoutSignal(10_000);
+    try {
+      const res = await fetch("https://api.openai.com/v1/realtime/calls", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${clientSecret}`,
+          "Content-Type": "application/sdp",
+        },
+        body: input.sdp,
+        signal: fallbackTimeout.signal,
+      });
+      const answerSdp = await res.text().catch(() => "");
+      if (!res.ok) {
+        const detail = compactProviderError(answerSdp);
+        throw new Error(`Realtime SDP exchange failed (${res.status}): ${detail || "provider rejected the voice handshake"}`);
+      }
+      if (!answerSdp.trim()) throw new Error("Realtime SDP exchange returned an empty answer");
+      return { answerSdp, providerStatus: res.status };
+    } finally {
+      fallbackTimeout.cancel();
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    if (error.name === "AbortError") throw new Error("Realtime provider timed out while starting voice");
+    throw error.message ? error : (lastError ?? error);
+  }
 }
