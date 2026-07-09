@@ -1495,7 +1495,11 @@ function ThreadView({ threadId }: { threadId: string }) {
       // Do not silently restart voice after disconnects; ask the user to tap again.
       voiceUserHasSpokenRef.current = false;
       if (hasConnectedVoiceRef.current || details?.reason === "error") {
-        setVoiceError(closeText || "Voice disconnected. Tap the mic once to reconnect.");
+        setVoiceError(
+          closeText
+            ? mapProviderVoiceError(closeText)
+            : "Voice disconnected. Tap the mic once to reconnect.",
+        );
       }
     },
     onError: (e: string) => {
@@ -1505,7 +1509,7 @@ function ThreadView({ threadId }: { threadId: string }) {
       voiceStateRef.current = "idle";
       setVoiceUiState("idle");
       voiceUserHasSpokenRef.current = false;
-      setVoiceError(msg || "Voice failed to connect. Tap the mic once to try again.");
+      setVoiceError(mapProviderVoiceError(msg));
     },
     onMessage: async (message) => {
       const text = message?.message;
