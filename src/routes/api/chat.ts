@@ -533,6 +533,8 @@ type GeneratedDocLedgerEntry = {
   filename: string;
   url: string;
   format: string;
+  sourceExcerpt?: string;
+  sourceTitle?: string;
 };
 function listAllGeneratedDocs(rows: ChatHistoryRow[]): GeneratedDocLedgerEntry[] {
   const out: GeneratedDocLedgerEntry[] = [];
@@ -551,6 +553,8 @@ function listAllGeneratedDocs(rows: ChatHistoryRow[]): GeneratedDocLedgerEntry[]
         filename: doc.filename,
         url: doc.url,
         format: ext,
+        sourceExcerpt: doc.sourceMarkdown,
+        sourceTitle: doc.sourceTitle,
       });
     }
   }
@@ -585,9 +589,18 @@ export const Route = createFileRoute("/api/chat")({
         }
         const userId = claims.claims.sub;
         // Read email straight from JWT claims; skip the extra getUser round-trip
-        // (saves ~150–300ms per chat request). If absent, the system prompt
-        // tells the model to ask for it.
-        const userEmail = (claims.claims as { email?: string }).email ?? null;
+        // (saves ~150–300ms per chat request). If absent (some auth providers
+        // don't include `email` in the claims payload), fall back to
+        // `getUser()` so "email it to me" never has to ask for the address.
+        let userEmail = (claims.claims as { email?: string }).email ?? null;
+        if (!userEmail) {
+          try {
+            const { data: userData } = await supabase.auth.getUser(token);
+            userEmail = userData?.user?.email ?? null;
+          } catch {
+            /* ignore — model will ask */
+          }
+        }
 
         // Fire-and-forget: ensure a briefing prefs row exists so the cron
         // starts sending morning briefings once the user has any activity.
@@ -941,11 +954,13 @@ export const Route = createFileRoute("/api/chat")({
         const priorDocs = listAllGeneratedDocs(rows ?? []);
         const docsLedgerBlock =
           priorDocs.length > 0
-            ? `\n\n# 📄 Generated documents in this thread (ledger)\nEach line is a real file already created earlier. When the user says "email/resend/attach the <X> PDF/Word", MATCH by topic/label and pass that file's exact url + filename in \`send_email\`'s \`attachments\` array. Do NOT call \`generate_document\` again for a file that already exists — regenerating creates a NEW file and the wrong one will be attached.\n${priorDocs
-                .map(
-                  (d, i) =>
-                    `${i + 1}. [${d.format.toUpperCase()}] "${d.label}" — filename: ${d.filename} — url: ${d.url}`,
-                )
+            ? `\n\n# 📄 Generated documents in this thread (ledger)\nEach line is a real file already created earlier. When the user says "email/resend/attach the <X> PDF/Word", MATCH by topic/label and pass that file's exact url + filename in \`send_email\`'s \`attachments\` array. Do NOT call \`generate_document\` again for a file that already exists — regenerating creates a NEW file and the wrong one will be attached.\n\nIf the user asks to CONVERT an existing file to a different format ("make that a Word doc", "convert it to PDF", "give me an Excel of that"), call \`generate_document\` with the new format AND re-use the same title + markdown from the ledger's \`source\` field below — do NOT reply that "we don't have the content ready". The source markdown IS the content.\n${priorDocs
+                .map((d, i) => {
+                  const head = `${i + 1}. [${d.format.toUpperCase()}] "${d.label}" — filename: ${d.filename} — url: ${d.url}`;
+                  if (!d.sourceExcerpt) return head;
+                  const title = d.sourceTitle ? ` — title: "${d.sourceTitle}"` : "";
+                  return `${head}${title}\n   source (markdown, truncated):\n   ${d.sourceExcerpt.replace(/\n/g, "\n   ")}`;
+                })
                 .join("\n")}`
             : "";
         const contactsBlock =
