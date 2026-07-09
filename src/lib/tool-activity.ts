@@ -25,7 +25,7 @@ export type ToolEvent =
       t: "call";
       id: string;
       name: ToolName;
-      input: { query?: string; url?: string; limit?: number; subject?: string; title?: string; to?: string };
+      input: { query?: string; url?: string; limit?: number; subject?: string; title?: string; to?: string; markdown?: string };
     }
   | {
       t: "result";
