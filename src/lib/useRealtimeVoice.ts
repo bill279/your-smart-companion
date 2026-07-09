@@ -62,6 +62,11 @@ export type RealtimeUsage = {
 export type UseRealtimeVoiceOptions = {
   clientTools?: Record<string, ClientTool>;
   toolDefs?: RealtimeToolDef[];
+  exchangeSdp?: (input: {
+    sdp: string;
+    instructions?: string;
+    tools: RealtimeToolDef[];
+  }) => Promise<{ answerSdp: string }>;
   onConnect?: () => void;
   onDisconnect?: (details?: { reason?: string; message?: string }) => void;
   onError?: (message: string) => void;
@@ -461,7 +466,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
   );
 
   const startSession = useCallback(
-    async (opts: { clientSecret: string; model: string; instructions?: string; microphoneStream?: MediaStream }) => {
+    async (opts: { instructions?: string; microphoneStream?: MediaStream }) => {
       if (status === "connecting" || status === "connected") return;
       setStatus("connecting");
       try {
@@ -576,45 +581,6 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         dcRef.current = dc;
 
         dc.onopen = () => {
-          const tools = optionsRef.current.toolDefs ?? [];
-          sendEvent({
-            type: "session.update",
-            session: {
-              type: "realtime",
-              instructions: opts.instructions ?? "",
-              audio: {
-                input: {
-                  transcription: {
-                    model: "gpt-4o-transcribe",
-                    language: "en",
-                    // Biasing prompt: nudges the transcriber toward the
-                    // vocabulary the user actually uses so short commands
-                    // like "send it to Bill" stop coming out as
-                    // "Senator Bill", "email that to Jane", etc.
-                    prompt:
-                      "Business assistant voice commands. Common phrases: send it, email it to me, email that to, attach the PDF, convert to Word, convert to PDF, generate a report, add to calendar, book a meeting, cancel the meeting, reply to, follow up with, find, search for, look up. Common names include Bill, Randy, Jane, Mike, Sarah, John.",
-                  },
-              // Semantic VAD uses a model to decide when the user is
-              // actually speaking vs. making noise (breathing, throat
-              // clearing, keyboard, background hum). "high" eagerness
-              // reacts quickly to real speech while still rejecting
-              // non-speech energy — much better than raw energy-threshold
-              // server_vad, which trips on any sound above the level.
-              turn_detection: {
-                type: "semantic_vad",
-                // Conservative server turn detection prevents breaths,
-                // throat-clears, and background chatter from becoming chat
-                // turns. Local instant-mute still keeps real interruptions fast.
-                eagerness: "low",
-                create_response: false,
-                interrupt_response: true,
-              },
-                },
-              },
-              tools,
-              tool_choice: tools.length > 0 ? "auto" : "none",
-            },
-          });
           setStatus("connected");
           optionsRef.current.onConnect?.();
         };
@@ -644,20 +610,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-
-        const sdpRes = await fetch("https://api.openai.com/v1/realtime/calls", {
-          method: "POST",
-          body: offer.sdp,
-          headers: {
-            Authorization: `Bearer ${opts.clientSecret}`,
-            "Content-Type": "application/sdp",
-          },
+        if (!offer.sdp) throw new Error("Browser did not create a voice connection offer");
+        const exchangeSdp = optionsRef.current.exchangeSdp;
+        if (!exchangeSdp) throw new Error("Voice backend exchange is not available");
+        const { answerSdp } = await exchangeSdp({
+          sdp: offer.sdp,
+          instructions: opts.instructions,
+          tools: optionsRef.current.toolDefs ?? [],
         });
-        if (!sdpRes.ok) {
-          const t = await sdpRes.text().catch(() => "");
-          throw new Error(`SDP exchange failed (${sdpRes.status}): ${t.slice(0, 200)}`);
-        }
-        const answerSdp = await sdpRes.text();
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
       } catch (err) {
         cleanup();
