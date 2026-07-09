@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRealtimeVoice, type RealtimeToolDef } from "@/lib/useRealtimeVoice";
-import { exchangeRealtimeSdp, logVoiceUsage } from "@/lib/realtime-voice.functions";
+import { createRealtimeSession, logVoiceUsage } from "@/lib/realtime-voice.functions";
 import {
   voiceWebScrape,
   voiceProductSearch,
@@ -688,7 +688,7 @@ function ThreadView({ threadId }: { threadId: string }) {
   const getMsgs = useServerFn(getThreadMessages);
   const add = useServerFn(addMessage);
   const rename = useServerFn(renameThread);
-  const exchangeSdp = useServerFn(exchangeRealtimeSdp);
+  const createVoiceSession = useServerFn(createRealtimeSession);
   const logUsage = useServerFn(logVoiceUsage);
   const vScrape = useServerFn(voiceWebScrape);
   const vProducts = useServerFn(voiceProductSearch);
@@ -1070,8 +1070,8 @@ function ThreadView({ threadId }: { threadId: string }) {
 
   const conversation = useRealtimeVoice({
     toolDefs: REALTIME_TOOL_DEFS,
-    exchangeSdp: ({ sdp, instructions, tools }) =>
-      exchangeSdp({ data: { sdp, instructions, tools } }),
+    createSession: ({ instructions, tools }) =>
+      createVoiceSession({ data: { instructions, tools } }),
     onUsage: (u) => {
       // Fire-and-forget: log per-turn realtime token usage for the spend dashboard.
       logUsage({ data: u }).catch((err) => console.warn("logVoiceUsage failed", err));
