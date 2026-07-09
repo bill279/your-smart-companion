@@ -212,6 +212,24 @@ const DEPTH_MANDATE = "";
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
 
+// Detects paragraphs that are clearly the model's own internal reasoning /
+// planning leaking into the visible reply — things like
+// "After reading, need to respond. The user hasn't replied…",
+// "According to Email flow, we must…", "Reply with exact draft structure.",
+// "per 7a, after send…", "We'll proceed: send email…", "assistant must…".
+// These slipped through with gpt-5-mini + low reasoning effort. Filter them
+// both at stream time (paragraph-buffered) and before persisting.
+const INTERNAL_MONOLOGUE_RE =
+  /^(?:\s*)(?:the user\b(?:'s| has| hasn't| didn't| just| said| asked| wants| likely| probably)|so the user\b|user (?:hasn't|has not|just|likely|probably) (?:replied|answered|said|asked)|(?:we|i)(?:'| wi)?ll (?:proceed|need to|have to|prepare|compose|draft|reply|now|use|call|send|check)|(?:we|i) (?:must|should|need to|have to) (?:respond|reply|proceed|draft|call|use|check|confirm|follow|present|prepare|send)|let'?s (?:proceed|prepare|compose|draft|reply|use|call|send|check)|reply with (?:the )?exact draft structure|assistant (?:must|should|has|is)|per \d+[a-z]?\b|according to (?:the )?(?:email|calendar|memory|system|prompt) (?:flow|prompt|rules?)|now user\b|no attachments included yet|also per \d+|after reading[, ]|compose (?:a |the )?(?:short |brief )?email|include attachment[s]?:|use the exact draft structure|conversation ended\b|for now just present draft|good\.\s*$)/i;
+
+// Split into paragraphs and drop any that look like leaked reasoning.
+function stripInternalMonologue(text: string): string {
+  if (!text) return text;
+  const paras = text.split(/\n{2,}/);
+  const kept = paras.filter((p) => !INTERNAL_MONOLOGUE_RE.test(p));
+  return kept.join("\n\n").trim();
+}
+
 function cleanAssistantText(text: string) {
   return text
     .replace(/^\s*\[[^\]]+\]\s*/g, "")
@@ -219,7 +237,12 @@ function cleanAssistantText(text: string) {
     .replace(/^\s*How can I help you with web research or sending emails today\??\s*/i, "")
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
+    .replace(/(^|\n\n)\s*(?:After reading|Also per \d+|Reply with (?:the )?exact draft structure|No attachments included yet|For now just present draft)[\s\S]*?(?=\n\n|$)/gi, "")
     .trim();
+}
+
+function sanitizeAssistantText(text: string) {
+  return stripInternalMonologue(cleanAssistantText(text));
 }
 
 type ChatHistoryRow = { role: string; content: string };
