@@ -15,8 +15,10 @@ function isLikelyNoiseTranscript(raw: string): boolean {
   // filler token from the transcriber (user is speaking English).
   if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(text)) return true;
   // Very short single-word utterances with no context are almost always noise.
+  // Keep the threshold tight so real short commands ("Send.", "Stop.", "Yes.",
+  // "Next.") aren't silently dropped.
   const words = text.split(/\s+/).filter(Boolean);
-  if (words.length <= 1 && stripped.length < 6) return true;
+  if (words.length <= 1 && stripped.length < 3) return true;
   // Common single-token filler words the transcriber emits on breaths/hums.
   if (words.length === 1 && /^(uh|um|hmm+|mm+|mhm+|ah|oh|ok|okay|yeah|yep|nope|hi|hello|bye|thanks|thank you|the|a|and|so|you|i|it)[.!?,]*$/i.test(text)) return true;
   return false;
@@ -307,6 +309,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions) {
         if (itemId) userTranscriptAccumRef.current.delete(itemId);
         if (text && !isLikelyNoiseTranscript(text)) {
           opts.onMessage?.({ source: "user", message: text, event_id: itemId, isFinal: true });
+        } else {
+          // Filtered/empty: still signal the UI so the "listening…" bubble
+          // clears instead of freezing on the last partial transcript.
+          opts.onMessage?.({ source: "user", message: "", event_id: itemId, isFinal: true });
         }
         return;
       }
