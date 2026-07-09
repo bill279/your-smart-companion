@@ -21,15 +21,8 @@ export const generateAndStoreDocument = createServerFn({ method: "POST" })
       title: data.title,
       markdown: data.markdown,
     });
-    // Display filename keeps spaces + human casing (e.g. "Q4 Sales Report.pdf").
-    // The storage path uses a slug variant so URLs stay clean.
-    const displayName = data.filename
-      .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 80) || "Document";
-    const slugName = displayName.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
-    const path = `generated/${context.userId}/${Date.now().toString(36)}/${slugName}.${extension}`;
+    const safeName = data.filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
+    const path = `generated/${context.userId}/${Date.now().toString(36)}/${safeName}.${extension}`;
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const up = await supabaseAdmin.storage
       .from("chat-uploads")
@@ -48,7 +41,7 @@ export const generateAndStoreDocument = createServerFn({ method: "POST" })
     const base64 = btoa(binary);
     return {
       url: signed.data.signedUrl,
-      filename: `${displayName}.${extension}`,
+      filename: `${safeName}.${extension}`,
       mimeType,
       size: bytes.byteLength,
       base64,

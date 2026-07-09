@@ -165,10 +165,7 @@ function voiceStartMessage(error: unknown) {
   if (/permission|notallowed|denied|blocked/i.test(`${name} ${message}`)) {
     return "Microphone permission is still being rejected by the browser. Check the site mic setting, then tap the mic.";
   }
-  const detail = message?.trim().slice(0, 140);
-  return detail
-    ? `Voice failed to connect: ${detail}. Tap the mic once to try again.`
-    : "Voice failed to connect. Tap the mic once to try again.";
+  return "Voice failed to connect. Tap the mic once to try again.";
 }
 
 // Realtime voice tool catalog. Passed to OpenAI Realtime via session.update.
@@ -313,8 +310,7 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
         },
         title: {
           type: "string",
-          description:
-            "Document title / filename base (no extension). Professional, human, Title Case with spaces — e.g. 'Q4 Sales Report', 'Stereoscopic Cameras Comparison'. NEVER use underscores, snake_case, hashes, timestamps, or ids.",
+          description: "Document title / filename base (no extension).",
         },
         content: {
           type: "string",
@@ -1477,14 +1473,7 @@ function ThreadView({ threadId }: { threadId: string }) {
     },
     onMessage: async (message) => {
       const text = message?.message;
-      if (!text) {
-        // Filtered / empty final transcript → clear the in-progress
-        // "listening…" bubble so the UI never freezes on the last partial.
-        if (message?.source === "user" && message.isFinal) {
-          setPendingUser(null);
-        }
-        return;
-      }
+      if (!text) return;
       if (message.source === "user" && message.isFinal === false) {
         voiceUserHasSpokenRef.current = true;
         lastUserSpeechAtRef.current = Date.now();
@@ -1514,7 +1503,6 @@ function ThreadView({ threadId }: { threadId: string }) {
           const isBareFiller = /^(bye|hi|hey|ok|okay|thanks|thank you|yes|no|uh|um|mm|hm+)[.!?]?$/i.test(trimmed);
           const veryClose = now - lastVoiceUserAtRef.current < 3000;
           if (isBareFiller && veryClose) {
-            setPendingUser(null);
             return;
           }
           lastVoiceUserAtRef.current = now;
@@ -3248,62 +3236,6 @@ function RemoteDocCard({
   const ext = doc.filename.toLowerCase().split(".").pop() ?? "";
   const label = doc.formatLabel ?? ext.toUpperCase();
   const canPreview = ["pdf", "docx", "csv", "txt", "md", "xlsx", "xls"].includes(ext);
-  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
-  const [previewText, setPreviewText] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
-  async function openPreview() {
-    setPreviewOpen(true);
-    if (ext === "pdf" || previewHtml || previewText) return;
-    setPreviewLoading(true);
-    setPreviewError(null);
-    try {
-      const res = await fetch(doc.url);
-      if (!res.ok) throw new Error(`Could not load file (${res.status})`);
-      const blob = await res.blob();
-      if (ext === "docx") {
-        const buf = await blob.arrayBuffer();
-        const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });
-        const brand = "#0D4763";
-        const stripped = (value || "").replace(/^\s*<h1[^>]*>[^<]*<\/h1>/i, "");
-        const titleHtml = `<h1 style="font-size:26px;font-weight:700;color:${brand};margin:0 0 4px">${doc.filename.replace(/\.[^.]+$/, "")}</h1><div style="height:2px;background:${brand};width:64px;margin:0 0 20px"></div>`;
-        setPreviewHtml(
-          `<style>
-            .docx-preview{font-family:Arial,sans-serif;color:#1f2937;font-size:14px;line-height:1.55}
-            .docx-preview h1,.docx-preview h2,.docx-preview h3{color:${brand};font-weight:700;margin:18px 0 8px}
-            .docx-preview h1{font-size:20px}
-            .docx-preview h2{font-size:16px}
-            .docx-preview h3{font-size:14px}
-            .docx-preview p{margin:0 0 10px}
-            .docx-preview ul,.docx-preview ol{margin:0 0 12px 22px}
-            .docx-preview table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
-            .docx-preview th{background:#DCEAF2;color:${brand};font-weight:700;border:1px solid #CBD5E1;padding:6px 10px;text-align:left}
-            .docx-preview td{border:1px solid #CBD5E1;padding:6px 10px}
-            .docx-preview tr:nth-child(even) td{background:#F8FAFC}
-          </style>
-          <div class="docx-preview">${titleHtml}${stripped || "<p><em>Document is empty.</em></p>"}</div>`,
-        );
-      } else if (ext === "xlsx" || ext === "xls") {
-        const buf = await blob.arrayBuffer();
-        const wb = XLSX.read(buf, { type: "array" });
-        const parts = wb.SheetNames.map((name) => {
-          const sheet = wb.Sheets[name];
-          const html = XLSX.utils.sheet_to_html(sheet, { editable: false });
-          return `<h3 style="margin:16px 0 8px;font-size:14px;font-weight:600;color:#374151">${name}</h3>${html}`;
-        }).join("");
-        setPreviewHtml(
-          `<style>table{border-collapse:collapse;width:100%;font-size:12px}td,th{border:1px solid #e5e7eb;padding:4px 8px;text-align:left}tr:nth-child(even) td{background:#f9fafb}</style>${parts || "<p><em>Empty spreadsheet.</em></p>"}`,
-        );
-      } else if (ext === "csv" || ext === "txt" || ext === "md") {
-        setPreviewText(await blob.text());
-      }
-    } catch (e) {
-      setPreviewError(e instanceof Error ? e.message : "Could not preview file");
-    } finally {
-      setPreviewLoading(false);
-    }
-  }
 
   async function emailToMe() {
     setSending(true);
@@ -3374,7 +3306,7 @@ function RemoteDocCard({
         {canPreview && (
           <button
             type="button"
-            onClick={openPreview}
+            onClick={() => setPreviewOpen(true)}
             className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary flex items-center gap-1.5"
           >
             <Eye size={12} /> Preview
@@ -3406,25 +3338,15 @@ function RemoteDocCard({
             </DialogTitle>
           </DialogHeader>
           <div className="flex-1 overflow-auto bg-secondary/30">
-            {ext === "pdf" ? (
-              <iframe src={doc.url} title={doc.filename} className="w-full h-full bg-white" />
-            ) : previewLoading ? (
-              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                Loading preview…
-              </div>
-            ) : previewError ? (
-              <div className="h-full flex items-center justify-center text-sm text-destructive px-4 text-center">
-                {previewError}
-              </div>
-            ) : previewHtml ? (
-              <div className="p-6 bg-white min-h-full">
-                <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
-              </div>
-            ) : previewText ? (
-              <pre className="p-6 bg-white min-h-full text-xs whitespace-pre-wrap font-mono">
-                {previewText}
-              </pre>
-            ) : null}
+            <iframe
+              src={
+                ext === "pdf"
+                  ? doc.url
+                  : `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(doc.url)}`
+              }
+              title={doc.filename}
+              className="w-full h-full bg-white"
+            />
           </div>
           <div className="p-3 border-t border-border flex justify-end gap-2">
             <a
