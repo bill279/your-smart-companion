@@ -121,7 +121,7 @@ export async function exchangeRealtimeOffer(input: {
 
   // Primary path from the current Realtime WebRTC docs: backend sends the
   // browser SDP + session config as multipart/form-data with the standard key.
-  const unifiedTimeout = timeoutSignal(12_000);
+  const unifiedTimeout = timeoutSignal(8_000);
   try {
     const fd = new FormData();
     fd.set("sdp", input.sdp);
@@ -157,9 +157,9 @@ export async function exchangeRealtimeOffer(input: {
       apiKey: input.apiKey,
       instructions: input.instructions,
       tools: input.tools,
-      timeoutMs: 5_000,
+      timeoutMs: 3_500,
     });
-    const fallbackTimeout = timeoutSignal(10_000);
+    const fallbackTimeout = timeoutSignal(7_000);
     try {
       const res = await fetch("https://api.openai.com/v1/realtime/calls", {
         method: "POST",
