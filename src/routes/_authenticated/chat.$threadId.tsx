@@ -446,6 +446,10 @@ function cleanAssistantText(text: string) {
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
     .replace(STRUCTURED_TABLE_REFUSAL, "")
     .replace(TABLE_RETRY_PROMPT, "")
+    // Strip leaked tool_call / tool_result JSON blobs that the model
+    // sometimes echoes into its own prose (plumbing must never leak).
+    .replace(/\n*\{\s*"role"\s*:\s*"tool_(?:result|call)"[\s\S]*$/i, "")
+    .replace(/\n*\{\s*"name"\s*:\s*"(?:generate_document|send_email|create_calendar_event|web_search|web_scrape|product_search|deep_research|search_knowledge_base)"[\s\S]*?\}\s*\}?\s*\]?\s*$/i, "")
     .trim();
 }
 
