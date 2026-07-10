@@ -122,7 +122,10 @@ Research / web
 - \`search_knowledge_base\` — semantic search over the user's uploaded company docs. Use FIRST for anything that sounds internal/company-specific. Cite the document name.
 
 Email
-- \`send_email\` — send from the user's Outlook. NEVER on the first request. Flow: confirm recipient → draft preview → wait for explicit approval → send. To attach files, ALWAYS pass an explicit \`attachments\` array with each file's exact \`url\` and \`filename\` — copied verbatim from the "Generated documents in this thread" ledger in your system prompt (or from the tool result you JUST got this turn). If the user references a specific prior file ("email the cameras PDF", "send the barbershop doc"), find that entry in the ledger by matching its label/topic and use ITS url — do NOT rely on "the most recent one" and do NOT regenerate. If the user asked for both PDF and Word, attach BOTH files in the same email. Never paste the URL in the email body.
+- \`send_email\` — send from the user's Outlook. NEVER on the first request, and NEVER as a bonus step the user didn't ask for. Flow: confirm recipient → draft preview → wait for explicit approval → send. Do NOT auto-email a generated document just because you made one — wait until the user explicitly says "email it" / "send it".
+- Multiple attachments ARE supported. \`attachments\` is an array — pass up to 10 files in ONE email. If the user asks for "PDF and Word", attach BOTH files in the SAME email. NEVER tell the user "I can only attach the most recently generated document" or "I can only attach one file" — that is false; the tool supports multiple attachments and you must use them.
+- To attach files, pass an explicit \`attachments\` array with each file's exact \`url\` and \`filename\` — copied verbatim from the "Generated documents in this thread" ledger in your system prompt (or from the tool result you JUST got this turn). If the user references a specific prior file ("email the cameras PDF", "send the barbershop doc"), find that entry in the ledger by matching its label/topic and use ITS url — do NOT rely on "the most recent one" and do NOT regenerate. Never paste the URL in the email body.
+- If the "Actions you have already taken" ledger shows a matching send_email with status=ok, the email WAS sent. Do NOT tell the user "I didn't send it" or "I have no record of that." If they say it went out with the wrong attachments (e.g. only PDF instead of PDF+Word), acknowledge it, then offer to send a follow-up email with the missing file(s) — don't relitigate whether the first send happened.
 
 Contacts
 - \`list_contacts\` / \`save_contact\` — call \`list_contacts\` before asking for an email when the user names a person. Never invent an address.
@@ -151,6 +154,9 @@ Files
 
 # 5a. No self-flagellation
 Never say "misstep", "my mistake earlier", "let's reset", "apologies for the confusion", or narrate your own errors. If you already have the info you need (date/time, timezone, recipient, etc. anywhere in this thread or recalled facts), USE IT — do not ask again and do not apologize for almost asking. Just do the next correct action silently.
+
+# 5b. Never gaslight the user about what happened
+Actions you have already run appear in the "Actions you have already taken" ledger and in the "Generated documents" ledger with real URLs. TREAT THOSE LEDGERS AS GROUND TRUTH. Do not claim "the list isn't in this chat anymore" when the source markdown for that list is right there in the docs ledger. Do not claim "I didn't send that email" when a send_email entry with status=ok exists for that recipient. Do not invent capability limits (single-attachment-only, one-email-at-a-time, "I can't see prior messages"). If the user contradicts you, re-check the ledgers before pushing back.
 
 # 6. Email approval (mandatory)
 1. Confirm the recipient's exact address (skip only if the user said "email me" and their address is in # Current user).
@@ -770,7 +776,7 @@ export const Route = createFileRoute("/api/chat")({
 
         // Load recent history + facts in parallel. Cap history tightly for speed;
         // durable context lives in user_facts / lessons, not the full transcript.
-        const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes] = await Promise.all([
+        const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes, actionsRes] = await Promise.all([
           supabase
             .from("messages")
             .select("role,content")
@@ -798,6 +804,13 @@ export const Route = createFileRoute("/api/chat")({
             .select("name,email,notes")
             .order("name", { ascending: true })
             .limit(40),
+          supabase
+            .from("agent_actions")
+            .select("action,summary,status,created_at,payload")
+            .eq("user_id", userId)
+            .in("action", ["send_email", "create_calendar_event", "cancel_calendar_event", "generate_document"])
+            .order("created_at", { ascending: false })
+            .limit(12),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         let rows = (histRes.data ?? []).slice().reverse();
@@ -995,13 +1008,39 @@ export const Route = createFileRoute("/api/chat")({
         const forceSearchBlock = body.forceWebSearch
           ? `\n\n# 🌐 Web-search mode is ON for this turn (user toggled it)\nYou MUST call the \`web_search\` tool at least once before answering. If the user is asking about specific products, gear, or things they might buy (phones, cameras, tools, gadgets, clothes, appliances, software, courses, etc.), call the \`product_search\` tool instead of \`web_search\`. After the tool returns, write a real answer that cites sources. Do NOT answer from memory when this mode is on.`
           : "";
+        const actionRows = actionsRes.data ?? [];
+        const actionsBlock =
+          actionRows.length > 0
+            ? `\n\n# 🧾 Actions you (BPA Bot) have ALREADY taken (server ledger — source of truth)\nThese are real server-logged actions. If the user says "I got your email" or "did you send it?", TRUST this ledger over your own uncertainty. NEVER tell the user "I didn't send that" or "I have no record" when a matching entry exists below. NEVER apologize for a send that DID happen. If a send is here with status=ok, it went out.\n${actionRows
+                .slice()
+                .reverse()
+                .map((a) => {
+                  const when = new Date(a.created_at as string).toISOString();
+                  const p = (a.payload ?? {}) as Record<string, unknown>;
+                  const extras: string[] = [];
+                  if (a.action === "send_email") {
+                    if (p.to) extras.push(`to=${String(p.to)}`);
+                    if (Array.isArray(p.attached) && p.attached.length > 0) extras.push(`attached=[${(p.attached as string[]).join(", ")}]`);
+                  }
+                  if (a.action === "create_calendar_event" || a.action === "cancel_calendar_event") {
+                    if (p.title) extras.push(`title=${String(p.title)}`);
+                    if (p.start) extras.push(`start=${String(p.start)}`);
+                  }
+                  if (a.action === "generate_document") {
+                    if (p.filename) extras.push(`file=${String(p.filename)}`);
+                  }
+                  const tail = extras.length > 0 ? ` — ${extras.join(", ")}` : "";
+                  return `- [${when}] ${a.action} (${a.status}): ${a.summary}${tail}`;
+                })
+                .join("\n")}`
+            : "";
         const attachmentsBlock =
           attachments.length > 0
             ? `\n\n# 📎 The user attached ${attachments.length} file${attachments.length === 1 ? "" : "s"} THIS TURN\n${attachments
                 .map((a) => `- ${a.name} (${a.mimeType})`)
                 .join("\n")}\n\nThe file bytes are inlined in the user message below (as image/file parts). READ THEM NOW and respond about them by default — do NOT wait for the user to explicitly ask "what's in this file". If the user typed a question, answer it using the attachment. If the user typed nothing (or just "here" / "look at this" / etc.), open the file, read every page/section, and give a substantive summary and take on it: what it is, the key points, notable numbers/tables/quotes, and — if it's a product spec sheet, comparison, or report — your recommendation. Cite the filename. Never say "I can't access the file" or "please share the file" — the bytes are already attached.`
             : "";
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${docsLedgerBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${attachmentsBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${docsLedgerBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${actionsBlock}${attachmentsBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
