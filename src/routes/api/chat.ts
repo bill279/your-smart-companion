@@ -244,6 +244,11 @@ function cleanAssistantText(text: string) {
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
     .replace(/(^|\n\n)\s*(?:After reading|Also per \d+|Reply with (?:the )?exact draft structure|No attachments included yet|For now just present draft)[\s\S]*?(?=\n\n|$)/gi, "")
+    // Strip leaked tool_call / tool_result JSON blobs the model sometimes
+    // echoes into its own prose. These are internal plumbing that must never
+    // appear to the user.
+    .replace(/\n*\{\s*"role"\s*:\s*"tool_(?:result|call)"[\s\S]*$/i, "")
+    .replace(/\n*\{\s*"name"\s*:\s*"(?:generate_document|send_email|create_calendar_event|web_search|web_scrape|product_search|deep_research|search_knowledge_base)"[\s\S]*?\}\s*\}?\s*\]?\s*$/i, "")
     .trim();
 }
 
