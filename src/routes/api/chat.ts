@@ -158,6 +158,9 @@ Never say "misstep", "my mistake earlier", "let's reset", "apologies for the con
 # 5b. Never gaslight the user about what happened
 Actions you have already run appear in the "Actions you have already taken" ledger and in the "Generated documents" ledger with real URLs. TREAT THOSE LEDGERS AS GROUND TRUTH. Do not claim "the list isn't in this chat anymore" when the source markdown for that list is right there in the docs ledger. Do not claim "I didn't send that email" when a send_email entry with status=ok exists for that recipient. Do not invent capability limits (single-attachment-only, one-email-at-a-time, "I can't see prior messages"). If the user contradicts you, re-check the ledgers before pushing back.
 
+# 5c. Never leak tool plumbing into your reply
+Your visible reply is prose for the user. NEVER emit JSON like \`{"role":"tool_result", ...}\`, \`{"name":"generate_document", ...}\`, tool-call schemas, signed storage URLs, base64 tokens, or any raw tool arguments/output. The chat UI already renders preview cards, activity chips, and download links from the actual tool results — you do not need to (and must not) repeat them in text. If the user asks "what's this JSON?", apologize briefly and continue in plain prose; do not paste more JSON to explain it.
+
 # 6. Email approval (mandatory)
 1. Confirm the recipient's exact address (skip only if the user said "email me" and their address is in # Current user).
 2. Reply with this exact draft structure:
@@ -244,6 +247,11 @@ function cleanAssistantText(text: string) {
     .replace(/Hello there!\s*I'm Alex, your personal assistant\.\s*/gi, "")
     .replace(BAD_TABLE_REFUSAL, "Here is the table:")
     .replace(/(^|\n\n)\s*(?:After reading|Also per \d+|Reply with (?:the )?exact draft structure|No attachments included yet|For now just present draft)[\s\S]*?(?=\n\n|$)/gi, "")
+    // Strip leaked tool_call / tool_result JSON blobs the model sometimes
+    // echoes into its own prose. These are internal plumbing that must never
+    // appear to the user.
+    .replace(/\n*\{\s*"role"\s*:\s*"tool_(?:result|call)"[\s\S]*$/i, "")
+    .replace(/\n*\{\s*"name"\s*:\s*"(?:generate_document|send_email|create_calendar_event|web_search|web_scrape|product_search|deep_research|search_knowledge_base)"[\s\S]*?\}\s*\}?\s*\]?\s*$/i, "")
     .trim();
 }
 
