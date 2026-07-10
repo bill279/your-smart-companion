@@ -1002,13 +1002,39 @@ export const Route = createFileRoute("/api/chat")({
         const forceSearchBlock = body.forceWebSearch
           ? `\n\n# 🌐 Web-search mode is ON for this turn (user toggled it)\nYou MUST call the \`web_search\` tool at least once before answering. If the user is asking about specific products, gear, or things they might buy (phones, cameras, tools, gadgets, clothes, appliances, software, courses, etc.), call the \`product_search\` tool instead of \`web_search\`. After the tool returns, write a real answer that cites sources. Do NOT answer from memory when this mode is on.`
           : "";
+        const actionRows = actionsRes.data ?? [];
+        const actionsBlock =
+          actionRows.length > 0
+            ? `\n\n# 🧾 Actions you (BPA Bot) have ALREADY taken (server ledger — source of truth)\nThese are real server-logged actions. If the user says "I got your email" or "did you send it?", TRUST this ledger over your own uncertainty. NEVER tell the user "I didn't send that" or "I have no record" when a matching entry exists below. NEVER apologize for a send that DID happen. If a send is here with status=ok, it went out.\n${actionRows
+                .slice()
+                .reverse()
+                .map((a) => {
+                  const when = new Date(a.created_at as string).toISOString();
+                  const p = (a.payload ?? {}) as Record<string, unknown>;
+                  const extras: string[] = [];
+                  if (a.action === "send_email") {
+                    if (p.to) extras.push(`to=${String(p.to)}`);
+                    if (Array.isArray(p.attached) && p.attached.length > 0) extras.push(`attached=[${(p.attached as string[]).join(", ")}]`);
+                  }
+                  if (a.action === "create_calendar_event" || a.action === "cancel_calendar_event") {
+                    if (p.title) extras.push(`title=${String(p.title)}`);
+                    if (p.start) extras.push(`start=${String(p.start)}`);
+                  }
+                  if (a.action === "generate_document") {
+                    if (p.filename) extras.push(`file=${String(p.filename)}`);
+                  }
+                  const tail = extras.length > 0 ? ` — ${extras.join(", ")}` : "";
+                  return `- [${when}] ${a.action} (${a.status}): ${a.summary}${tail}`;
+                })
+                .join("\n")}`
+            : "";
         const attachmentsBlock =
           attachments.length > 0
             ? `\n\n# 📎 The user attached ${attachments.length} file${attachments.length === 1 ? "" : "s"} THIS TURN\n${attachments
                 .map((a) => `- ${a.name} (${a.mimeType})`)
                 .join("\n")}\n\nThe file bytes are inlined in the user message below (as image/file parts). READ THEM NOW and respond about them by default — do NOT wait for the user to explicitly ask "what's in this file". If the user typed a question, answer it using the attachment. If the user typed nothing (or just "here" / "look at this" / etc.), open the file, read every page/section, and give a substantive summary and take on it: what it is, the key points, notable numbers/tables/quotes, and — if it's a product spec sheet, comparison, or report — your recommendation. Cite the filename. Never say "I can't access the file" or "please share the file" — the bytes are already attached.`
             : "";
-        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${docsLedgerBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${attachmentsBlock}`;
+        const systemWithUser = `${SYSTEM_PROMPT}${AUTONOMOUS_MODE}${SEARCH_DISCIPLINE}${DEPTH_MANDATE}${runtimeBlock}${docsLedgerBlock}${userBlock}${contactsBlock}${factsBlock}${lessonsBlock}${feedbackBlock}${forceSearchBlock}${actionsBlock}${attachmentsBlock}`;
         // Build messages: history as text, but replace the final user turn
         // with a multimodal payload if this request includes attachments.
         const history = rows ?? [];
