@@ -770,7 +770,7 @@ export const Route = createFileRoute("/api/chat")({
 
         // Load recent history + facts in parallel. Cap history tightly for speed;
         // durable context lives in user_facts / lessons, not the full transcript.
-        const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes] = await Promise.all([
+        const [histRes, factsRes, lessonsRes, feedbackRes, contactsRes, actionsRes] = await Promise.all([
           supabase
             .from("messages")
             .select("role,content")
@@ -798,6 +798,13 @@ export const Route = createFileRoute("/api/chat")({
             .select("name,email,notes")
             .order("name", { ascending: true })
             .limit(40),
+          supabase
+            .from("agent_actions")
+            .select("action,summary,status,created_at,payload")
+            .eq("user_id", userId)
+            .in("action", ["send_email", "create_calendar_event", "cancel_calendar_event", "generate_document"])
+            .order("created_at", { ascending: false })
+            .limit(12),
         ]);
         if (histRes.error) return new Response(histRes.error.message, { status: 400 });
         let rows = (histRes.data ?? []).slice().reverse();
