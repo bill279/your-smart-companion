@@ -17,7 +17,7 @@ function tenantAuthority() {
   // Use Microsoft's multi-account authority so both work/school accounts and
   // personal Outlook/Live accounts can complete consent. A tenant-specific
   // authority sends personal accounts to that tenant and triggers AADSTS50020.
-  const tenant = process.env.MS_AUTHORITY_TENANT || "common";
+  const tenant = process.env.MS_TENANT_ID || "common";
   return `https://login.microsoftonline.com/${tenant}`;
 }
 
