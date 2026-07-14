@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import bpaLogo from "@/assets/bpa-logo.png.asset.json";
+import { signUpWithAllowedDomain } from "@/lib/auth-signup.functions";
+
+const ALLOWED_DOMAINS = ["bpautomation.com", "bilmedia.com", "adstractdigital.com"];
 
 export const Route = createFileRoute("/auth")({
   validateSearch: (s: Record<string, unknown>) => ({
@@ -37,12 +40,15 @@ function AuthPage() {
     setLoading(true);
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { emailRedirectTo: `${window.location.origin}${returnTo}` },
-        });
-        if (error) throw error;
+        const domain = email.trim().toLowerCase().split("@")[1] ?? "";
+        if (!ALLOWED_DOMAINS.includes(domain)) {
+          throw new Error(
+            `Sign-ups are restricted to: ${ALLOWED_DOMAINS.join(", ")}`,
+          );
+        }
+        await signUpWithAllowedDomain({ data: { email, password } });
+        const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+        if (signInErr) throw signInErr;
         toast.success("Account created. You're in.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
