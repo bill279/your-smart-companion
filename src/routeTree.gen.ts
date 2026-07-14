@@ -25,6 +25,7 @@ import { Route as Char91DotmcpChar93ListToolsRouteImport } from './routes/[.mcp]
 import { Route as AuthenticatedChatIndexRouteImport } from './routes/_authenticated/chat.index'
 import { Route as ApiPublicWebSearchRouteImport } from './routes/api/public/web-search'
 import { Route as AuthenticatedChatThreadIdRouteImport } from './routes/_authenticated/chat.$threadId'
+import { Route as AuthenticatedAdminUsersRouteImport } from './routes/_authenticated/admin.users'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as ApiPublicMsOauthCallbackRouteImport } from './routes/api/public/ms-oauth/callback'
@@ -117,6 +118,11 @@ const AuthenticatedChatThreadIdRoute =
     path: '/chat/$threadId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedAdminUsersRoute = AuthenticatedAdminUsersRouteImport.update({
+  id: '/admin/users',
+  path: '/admin/users',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const Char91DotmcpChar93InvokeToolToolRoute =
   Char91DotmcpChar93InvokeToolToolRouteImport.update({
     id: '/.mcp/invoke-tool/$tool',
@@ -185,6 +191,7 @@ export interface FileRoutesByFullPath {
   '/api/voice-readout': typeof ApiVoiceReadoutRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/admin/users': typeof AuthenticatedAdminUsersRoute
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/chat/': typeof AuthenticatedChatIndexRoute
@@ -211,6 +218,7 @@ export interface FileRoutesByTo {
   '/api/voice-readout': typeof ApiVoiceReadoutRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/admin/users': typeof AuthenticatedAdminUsersRoute
   '/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/chat': typeof AuthenticatedChatIndexRoute
@@ -239,6 +247,7 @@ export interface FileRoutesById {
   '/api/voice-readout': typeof ApiVoiceReadoutRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/_authenticated/admin/users': typeof AuthenticatedAdminUsersRoute
   '/_authenticated/chat/$threadId': typeof AuthenticatedChatThreadIdRoute
   '/api/public/web-search': typeof ApiPublicWebSearchRoute
   '/_authenticated/chat/': typeof AuthenticatedChatIndexRoute
@@ -267,6 +276,7 @@ export interface FileRouteTypes {
     | '/api/voice-readout'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/admin/users'
     | '/chat/$threadId'
     | '/api/public/web-search'
     | '/chat/'
@@ -293,6 +303,7 @@ export interface FileRouteTypes {
     | '/api/voice-readout'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/admin/users'
     | '/chat/$threadId'
     | '/api/public/web-search'
     | '/chat'
@@ -320,6 +331,7 @@ export interface FileRouteTypes {
     | '/api/voice-readout'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/_authenticated/admin/users'
     | '/_authenticated/chat/$threadId'
     | '/api/public/web-search'
     | '/_authenticated/chat/'
@@ -467,6 +479,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatThreadIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/admin/users': {
+      id: '/_authenticated/admin/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AuthenticatedAdminUsersRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/.mcp/invoke-tool/$tool': {
       id: '/.mcp/invoke-tool/$tool'
       path: '/.mcp/invoke-tool/$tool'
@@ -539,6 +558,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
   AuthenticatedKnowledgeRoute: typeof AuthenticatedKnowledgeRoute
   AuthenticatedUsageRoute: typeof AuthenticatedUsageRoute
+  AuthenticatedAdminUsersRoute: typeof AuthenticatedAdminUsersRoute
   AuthenticatedChatThreadIdRoute: typeof AuthenticatedChatThreadIdRoute
   AuthenticatedChatIndexRoute: typeof AuthenticatedChatIndexRoute
 }
@@ -549,6 +569,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,
   AuthenticatedKnowledgeRoute: AuthenticatedKnowledgeRoute,
   AuthenticatedUsageRoute: AuthenticatedUsageRoute,
+  AuthenticatedAdminUsersRoute: AuthenticatedAdminUsersRoute,
   AuthenticatedChatThreadIdRoute: AuthenticatedChatThreadIdRoute,
   AuthenticatedChatIndexRoute: AuthenticatedChatIndexRoute,
 }
