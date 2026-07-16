@@ -1754,14 +1754,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
             _placeholder_email_end: tool({
               description: "internal",
               inputSchema: z.object({}),
-              execute: async () => {
-                const { data, error } = await supabase
-                  .from("user_facts")
-                  .select("key,value,source,updated_at")
-                  .order("updated_at", { ascending: false });
-                if (error) return { error: error.message };
-                return { facts: data ?? [] };
-              },
+              execute: async () => ({ ok: true }),
             }),
             remember_fact: tool({
               description:
