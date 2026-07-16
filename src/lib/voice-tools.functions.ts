@@ -2,6 +2,38 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { computeCost } from "@/lib/usage-pricing";
+import { getMicrosoftAccessToken } from "@/lib/ms-graph.server";
+
+async function msGraphFetchForVoice(
+  userId: string,
+  graphPath: string,
+  init: RequestInit = {},
+): Promise<{ ok: boolean; status: number; body: string; connected: boolean }> {
+  const user = await getMicrosoftAccessToken(userId);
+  if (user) {
+    const r = await fetch(`https://graph.microsoft.com/v1.0${graphPath}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${user.accessToken}`,
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+    });
+    return { ok: r.ok, status: r.status, body: await r.text(), connected: true };
+  }
+  if (!process.env.MICROSOFT_OUTLOOK_API_KEY) {
+    return { ok: false, status: 0, body: "", connected: false };
+  }
+  const { gatewayHeaders } = await import("@/lib/jarvis-tools.server");
+  const r = await fetch(`https://connector-gateway.lovable.dev/microsoft_outlook${graphPath}`, {
+    ...init,
+    headers: {
+      ...gatewayHeaders("MICROSOFT_OUTLOOK_API_KEY"),
+      ...(init.headers ?? {}),
+    },
+  });
+  return { ok: r.ok, status: r.status, body: await r.text(), connected: true };
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function logUsage(sb: any, userId: string, kind: string, model: string | null, inTok: number, outTok: number, cost: number, meta: Record<string, unknown> = {}) {
