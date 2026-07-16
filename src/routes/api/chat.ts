@@ -1625,6 +1625,144 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 return { facts: data ?? [] };
               },
             }),
+            search_emails: tool({
+              description:
+                "Search the user's Outlook inbox for recent emails. Use this to answer questions like 'did I get an email from X?', 'what did Y send me?', 'any emails about the invoice?'. Returns id, subject, sender, preview, date. Use `read_email` afterwards to fetch a full message body.",
+              inputSchema: z.object({
+                query: z
+                  .string()
+                  .max(300)
+                  .optional()
+                  .describe("Optional free-text search (matches subject, body, sender). Leave empty to list the most recent messages."),
+                from: z.string().max(200).optional().describe("Filter by sender name or email substring."),
+                unread_only: z.boolean().optional().describe("Only return unread messages."),
+                days: z.number().int().min(1).max(90).optional().describe("Only messages from the last N days. Default 30."),
+                limit: z.number().int().min(1).max(25).optional().describe("Max results. Default 10."),
+              }),
+              execute: async ({ query, from, unread_only, days, limit }) => {
+                const top = limit ?? 10;
+                const sinceDays = days ?? 30;
+                const sinceIso = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
+                const filters: string[] = [`receivedDateTime ge ${sinceIso}`];
+                if (unread_only) filters.push("isRead eq false");
+                if (from) {
+                  const safe = from.replace(/'/g, "''");
+                  filters.push(`(contains(from/emailAddress/address,'${safe}') or contains(from/emailAddress/name,'${safe}'))`);
+                }
+                const params = new URLSearchParams();
+                params.set("$top", String(top));
+                params.set("$select", "id,subject,from,bodyPreview,receivedDateTime,isRead,webLink,hasAttachments");
+                params.set("$orderby", "receivedDateTime desc");
+                if (query && query.trim()) {
+                  params.set("$search", `"${query.trim().replace(/"/g, '\\"')}"`);
+                } else {
+                  params.set("$filter", filters.join(" and "));
+                }
+                const path = `/me/messages?${params.toString()}`;
+                const result = await msGraphFetch(userId, path, {
+                  method: "GET",
+                  headers: query && query.trim() ? { ConsistencyLevel: "eventual" } : {},
+                });
+                if (!result) return { error: "Microsoft is not connected. Open Activity & memory and click Connect Microsoft." };
+                if (!result.response.ok) {
+                  const text = await result.response.text();
+                  return { error: `Outlook search failed (${result.response.status})`, detail: text.slice(0, 300) };
+                }
+                const j = (await result.response.json()) as {
+                  value?: Array<{
+                    id: string;
+                    subject?: string;
+                    from?: { emailAddress?: { name?: string; address?: string } };
+                    bodyPreview?: string;
+                    receivedDateTime: string;
+                    isRead?: boolean;
+                    webLink?: string;
+                    hasAttachments?: boolean;
+                  }>;
+                };
+                return {
+                  messages: (j.value ?? []).map((m) => ({
+                    id: m.id,
+                    subject: m.subject ?? "(no subject)",
+                    from_name: m.from?.emailAddress?.name ?? "",
+                    from_email: m.from?.emailAddress?.address ?? "",
+                    preview: (m.bodyPreview ?? "").slice(0, 300),
+                    received_at: m.receivedDateTime,
+                    is_read: m.isRead ?? true,
+                    has_attachments: m.hasAttachments ?? false,
+                    web_link: m.webLink ?? null,
+                  })),
+                };
+              },
+            }),
+            read_email: tool({
+              description:
+                "Read the full body of one Outlook email by id. Get the id from `search_emails` first. Returns the plain-text body plus recipients so you can summarize or read it aloud.",
+              inputSchema: z.object({
+                message_id: z.string().min(1).describe("Outlook message id from search_emails."),
+              }),
+              execute: async ({ message_id }) => {
+                const path = `/me/messages/${encodeURIComponent(message_id)}?$select=id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,webLink,hasAttachments`;
+                const result = await msGraphFetch(userId, path, { method: "GET" });
+                if (!result) return { error: "Microsoft is not connected." };
+                if (!result.response.ok) {
+                  const text = await result.response.text();
+                  return { error: `Couldn't load that email (${result.response.status})`, detail: text.slice(0, 300) };
+                }
+                const m = (await result.response.json()) as {
+                  id: string;
+                  subject?: string;
+                  from?: { emailAddress?: { name?: string; address?: string } };
+                  toRecipients?: Array<{ emailAddress?: { name?: string; address?: string } }>;
+                  ccRecipients?: Array<{ emailAddress?: { name?: string; address?: string } }>;
+                  receivedDateTime: string;
+                  body?: { contentType?: string; content?: string };
+                  bodyPreview?: string;
+                  webLink?: string;
+                  hasAttachments?: boolean;
+                };
+                let text = m.body?.content ?? m.bodyPreview ?? "";
+                if ((m.body?.contentType ?? "").toLowerCase() === "html") {
+                  text = text
+                    .replace(/<style[\s\S]*?<\/style>/gi, "")
+                    .replace(/<script[\s\S]*?<\/script>/gi, "")
+                    .replace(/<br\s*\/?>/gi, "\n")
+                    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+                    .replace(/<[^>]+>/g, "")
+                    .replace(/&nbsp;/g, " ")
+                    .replace(/&amp;/g, "&")
+                    .replace(/&lt;/g, "<")
+                    .replace(/&gt;/g, ">")
+                    .replace(/&quot;/g, '"')
+                    .replace(/\n{3,}/g, "\n\n")
+                    .trim();
+                }
+                return {
+                  id: m.id,
+                  subject: m.subject ?? "(no subject)",
+                  from_name: m.from?.emailAddress?.name ?? "",
+                  from_email: m.from?.emailAddress?.address ?? "",
+                  to: (m.toRecipients ?? []).map((r) => r.emailAddress?.address ?? "").filter(Boolean),
+                  cc: (m.ccRecipients ?? []).map((r) => r.emailAddress?.address ?? "").filter(Boolean),
+                  received_at: m.receivedDateTime,
+                  has_attachments: m.hasAttachments ?? false,
+                  web_link: m.webLink ?? null,
+                  body: text.slice(0, 8000),
+                };
+              },
+            }),
+            _placeholder_email_end: tool({
+              description: "internal",
+              inputSchema: z.object({}),
+              execute: async () => {
+                const { data, error } = await supabase
+                  .from("user_facts")
+                  .select("key,value,source,updated_at")
+                  .order("updated_at", { ascending: false });
+                if (error) return { error: error.message };
+                return { facts: data ?? [] };
+              },
+            }),
             remember_fact: tool({
               description:
                 "Save a durable fact about the user so you remember it across every future conversation. Key is a short snake_case slug (e.g. 'boss', 'company', 'crm', 'preferred_signoff'). Value is the natural-language fact.",
