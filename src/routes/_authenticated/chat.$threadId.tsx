@@ -429,6 +429,35 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
       required: ["lesson"],
     },
   },
+  {
+    type: "function",
+    name: "search_emails",
+    description:
+      "Search the user's Outlook inbox. Use this whenever the user asks about emails — 'did I get an email from X?', 'any emails from Shane?', 'read me my unread emails', 'what did Bill send?'. Returns id, subject, sender, preview, date. Call read_email afterwards when you need the full body to read aloud or summarize. NEVER tell the user you can't access their email — call this tool.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Optional free-text search (subject/body/sender)." },
+        from: { type: "string", description: "Filter by sender name or email substring." },
+        unread_only: { type: "boolean" },
+        days: { type: "number", description: "Only messages from the last N days. Default 30." },
+        limit: { type: "number", description: "Max results. Default 10." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "read_email",
+    description:
+      "Read the full body of one Outlook email by id (from search_emails). Use when the user wants the email read aloud or summarized. Summarize naturally — never read raw HTML or long headers.",
+    parameters: {
+      type: "object",
+      properties: {
+        message_id: { type: "string" },
+      },
+      required: ["message_id"],
+    },
+  },
 ];
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
