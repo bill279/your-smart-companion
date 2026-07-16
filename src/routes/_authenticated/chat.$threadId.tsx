@@ -1496,6 +1496,31 @@ function ThreadView({ threadId }: { threadId: string }) {
           return JSON.stringify({ error: e instanceof Error ? e.message : "lesson failed" });
         }
       },
+      search_emails: async (params) => {
+        const p = params as {
+          query?: string;
+          from?: string;
+          unread_only?: boolean;
+          days?: number;
+          limit?: number;
+        };
+        try {
+          const r = await vSearchEmails({ data: p });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "email search failed" });
+        }
+      },
+      read_email: async (params) => {
+        const p = params as { message_id?: string };
+        if (!p.message_id) return JSON.stringify({ error: "message_id required" });
+        try {
+          const r = await vReadEmail({ data: { message_id: p.message_id } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "read email failed" });
+        }
+      },
     },
     onAssistantDelta: (part) => {
       // Stream assistant transcript in real time as OpenAI Realtime generates it.
