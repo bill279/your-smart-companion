@@ -460,6 +460,32 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
       required: ["message_id"],
     },
   },
+  {
+    type: "function",
+    name: "list_email_attachments",
+    description:
+      "List the attachments on one Outlook email by id. Returns id, name, content_type, size for each. Use this when has_attachments is true and the user wants to know what's attached, or to pick one before calling read_email_attachment.",
+    parameters: {
+      type: "object",
+      properties: { message_id: { type: "string" } },
+      required: ["message_id"],
+    },
+  },
+  {
+    type: "function",
+    name: "read_email_attachment",
+    description:
+      "Open and read an attachment on an Outlook email. Handles PDFs, Word/Excel/PowerPoint docs, images, and plain text. If attachment_id is omitted and there's only one attachment, it reads that one; if there are several, first call list_email_attachments and pass the chosen attachment_id. Optionally pass a `prompt` to focus the read (e.g. 'just tell me the invoice total'). Summarize the returned content naturally when speaking.",
+    parameters: {
+      type: "object",
+      properties: {
+        message_id: { type: "string" },
+        attachment_id: { type: "string", description: "Optional. Omit to auto-pick when only one attachment exists." },
+        prompt: { type: "string", description: "Optional focus for how to read/summarize the attachment." },
+      },
+      required: ["message_id"],
+    },
+  },
 ];
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
