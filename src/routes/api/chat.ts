@@ -1751,7 +1751,6 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                 };
               },
             }),
-            _placeholder_email_end: tool({
             remember_fact: tool({
               description:
                 "Save a durable fact about the user so you remember it across every future conversation. Key is a short snake_case slug (e.g. 'boss', 'company', 'crm', 'preferred_signoff'). Value is the natural-language fact.",
