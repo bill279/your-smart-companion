@@ -11,6 +11,8 @@ import {
   voiceRecallFacts,
   voiceRememberFact,
   voiceSaveLesson,
+  voiceSearchEmails,
+  voiceReadEmail,
 } from "@/lib/voice-tools.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -427,6 +429,35 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
       required: ["lesson"],
     },
   },
+  {
+    type: "function",
+    name: "search_emails",
+    description:
+      "Search the user's Outlook inbox. Use this whenever the user asks about emails — 'did I get an email from X?', 'any emails from Shane?', 'read me my unread emails', 'what did Bill send?'. Returns id, subject, sender, preview, date. Call read_email afterwards when you need the full body to read aloud or summarize. NEVER tell the user you can't access their email — call this tool.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Optional free-text search (subject/body/sender)." },
+        from: { type: "string", description: "Filter by sender name or email substring." },
+        unread_only: { type: "boolean" },
+        days: { type: "number", description: "Only messages from the last N days. Default 30." },
+        limit: { type: "number", description: "Max results. Default 10." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "read_email",
+    description:
+      "Read the full body of one Outlook email by id (from search_emails). Use when the user wants the email read aloud or summarized. Summarize naturally — never read raw HTML or long headers.",
+    parameters: {
+      type: "object",
+      properties: {
+        message_id: { type: "string" },
+      },
+      required: ["message_id"],
+    },
+  },
 ];
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
@@ -729,6 +760,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const vRecall = useServerFn(voiceRecallFacts);
   const vRemember = useServerFn(voiceRememberFact);
   const vLesson = useServerFn(voiceSaveLesson);
+  const vSearchEmails = useServerFn(voiceSearchEmails);
+  const vReadEmail = useServerFn(voiceReadEmail);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -1461,6 +1494,31 @@ function ThreadView({ threadId }: { threadId: string }) {
           return JSON.stringify(r);
         } catch (e) {
           return JSON.stringify({ error: e instanceof Error ? e.message : "lesson failed" });
+        }
+      },
+      search_emails: async (params) => {
+        const p = params as {
+          query?: string;
+          from?: string;
+          unread_only?: boolean;
+          days?: number;
+          limit?: number;
+        };
+        try {
+          const r = await vSearchEmails({ data: p });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "email search failed" });
+        }
+      },
+      read_email: async (params) => {
+        const p = params as { message_id?: string };
+        if (!p.message_id) return JSON.stringify({ error: "message_id required" });
+        try {
+          const r = await vReadEmail({ data: { message_id: p.message_id } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "read email failed" });
         }
       },
     },
