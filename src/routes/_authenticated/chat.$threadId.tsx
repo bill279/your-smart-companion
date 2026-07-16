@@ -790,6 +790,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const vLesson = useServerFn(voiceSaveLesson);
   const vSearchEmails = useServerFn(voiceSearchEmails);
   const vReadEmail = useServerFn(voiceReadEmail);
+  const vListEmailAttachments = useServerFn(voiceListEmailAttachments);
+  const vReadEmailAttachment = useServerFn(voiceReadEmailAttachment);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
