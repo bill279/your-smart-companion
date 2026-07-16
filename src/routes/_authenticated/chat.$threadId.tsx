@@ -731,6 +731,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const vRecall = useServerFn(voiceRecallFacts);
   const vRemember = useServerFn(voiceRememberFact);
   const vLesson = useServerFn(voiceSaveLesson);
+  const vSearchEmails = useServerFn(voiceSearchEmails);
+  const vReadEmail = useServerFn(voiceReadEmail);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
