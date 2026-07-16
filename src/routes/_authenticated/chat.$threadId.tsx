@@ -11,6 +11,8 @@ import {
   voiceRecallFacts,
   voiceRememberFact,
   voiceSaveLesson,
+  voiceSearchEmails,
+  voiceReadEmail,
 } from "@/lib/voice-tools.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
