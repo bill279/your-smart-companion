@@ -31,6 +31,8 @@ const TRACKED_TOOL_NAMES = new Set([
   "create_calendar_event",
   "cancel_calendar_event",
   "respond_calendar_event",
+  "search_emails",
+  "read_email",
   "generate_document",
   "recall_facts",
   "remember_fact",
