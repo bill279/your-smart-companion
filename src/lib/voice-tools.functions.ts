@@ -329,3 +329,163 @@ export const voiceReadEmail = createServerFn({ method: "POST" })
       body: text.slice(0, 6000),
     };
   });
+
+export const voiceListEmailAttachments = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ message_id: z.string().min(1) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const path = `/me/messages/${encodeURIComponent(data.message_id)}/attachments?$select=id,name,contentType,size`;
+    const r = await msGraphFetchForVoice(context.userId, path, { method: "GET" });
+    if (!r.connected) return { error: "Microsoft is not connected." };
+    if (!r.ok) return { error: `Couldn't list attachments (${r.status})`, detail: r.body.slice(0, 300) };
+    const j = JSON.parse(r.body) as {
+      value?: Array<{ id: string; name?: string; contentType?: string; size?: number }>;
+    };
+    return {
+      attachments: (j.value ?? []).map((a) => ({
+        id: a.id,
+        name: a.name ?? "(unnamed)",
+        content_type: a.contentType ?? "application/octet-stream",
+        size: a.size ?? 0,
+      })),
+    };
+  });
+
+export const voiceReadEmailAttachment = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        message_id: z.string().min(1),
+        attachment_id: z.string().min(1).optional(),
+        prompt: z.string().max(500).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    // List attachments, then pick the requested one (or the first if unspecified).
+    const listPath = `/me/messages/${encodeURIComponent(data.message_id)}/attachments?$select=id,name,contentType,size`;
+    const listR = await msGraphFetchForVoice(context.userId, listPath, { method: "GET" });
+    if (!listR.connected) return { error: "Microsoft is not connected." };
+    if (!listR.ok) return { error: `Couldn't list attachments (${listR.status})`, detail: listR.body.slice(0, 300) };
+    const list = JSON.parse(listR.body) as {
+      value?: Array<{ id: string; name?: string; contentType?: string; size?: number }>;
+    };
+    const atts = list.value ?? [];
+    if (atts.length === 0) return { error: "This email has no attachments." };
+    const target = data.attachment_id ? atts.find((a) => a.id === data.attachment_id) : atts[0];
+    if (!target) {
+      return {
+        error: "Attachment not found. Ask which one.",
+        attachments: atts.map((a) => ({ id: a.id, name: a.name, content_type: a.contentType, size: a.size })),
+      };
+    }
+
+    // Fetch full attachment bytes.
+    const getPath = `/me/messages/${encodeURIComponent(data.message_id)}/attachments/${encodeURIComponent(target.id)}`;
+    const r = await msGraphFetchForVoice(context.userId, getPath, { method: "GET" });
+    if (!r.ok) return { error: `Couldn't fetch attachment (${r.status})`, detail: r.body.slice(0, 300) };
+    const att = JSON.parse(r.body) as {
+      name?: string;
+      contentType?: string;
+      contentBytes?: string;
+      size?: number;
+      "@odata.type"?: string;
+    };
+    const mime = (att.contentType || "application/octet-stream").toLowerCase();
+    const b64 = att.contentBytes || "";
+    if (!b64) return { error: "Attachment has no downloadable content (may be an inline reference)." };
+
+    // Text-like: decode directly.
+    if (
+      mime.startsWith("text/") ||
+      mime === "application/json" ||
+      mime === "application/xml" ||
+      mime === "application/csv"
+    ) {
+      const txt = Buffer.from(b64, "base64").toString("utf8");
+      return {
+        name: att.name,
+        content_type: mime,
+        size: att.size,
+        text: txt.slice(0, 8000),
+      };
+    }
+
+    // Otherwise, ask the AI gateway to read/summarize the file (PDF, image, Office doc).
+    const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY;
+    if (!LOVABLE_API_KEY) return { error: "AI gateway not configured", name: att.name, content_type: mime };
+    const promptText =
+      data.prompt?.trim() ||
+      `Read this attachment ("${att.name ?? "file"}") and summarize it clearly for the user so it can be read aloud. Include key facts, dates, names, numbers, tables, and any action items. If it looks like a form or invoice, list the important fields.`;
+    const isImage = mime.startsWith("image/");
+    const isDoc =
+      mime === "application/pdf" ||
+      mime.includes("word") ||
+      mime.includes("excel") ||
+      mime.includes("spreadsheet") ||
+      mime.includes("presentation") ||
+      mime.includes("officedocument");
+
+    type ContentBlock =
+      | { type: "text"; text: string }
+      | { type: "image_url"; image_url: { url: string } }
+      | { type: "file"; file: { filename: string; file_data: string } };
+    const content: ContentBlock[] = [{ type: "text", text: promptText }];
+    if (isImage) {
+      content.push({ type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } });
+    } else if (isDoc) {
+      content.push({
+        type: "file",
+        file: { filename: att.name || "attachment", file_data: `data:${mime};base64,${b64}` },
+      });
+    } else {
+      return {
+        error: `Attachment type not supported for reading (${mime}). Try downloading it in Outlook.`,
+        name: att.name,
+        content_type: mime,
+        size: att.size,
+      };
+    }
+
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": LOVABLE_API_KEY,
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [{ role: "user", content }],
+      }),
+    });
+    if (!resp.ok) {
+      const t = await resp.text();
+      return { error: `AI read failed (${resp.status})`, detail: t.slice(0, 300), name: att.name, content_type: mime };
+    }
+    const j = (await resp.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    const summary = j.choices?.[0]?.message?.content ?? "";
+    const inTok = j.usage?.prompt_tokens ?? 0;
+    const outTok = j.usage?.completion_tokens ?? 0;
+    await logUsage(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      context.supabase as any,
+      context.userId,
+      "chat_completion",
+      "google/gemini-2.5-flash",
+      inTok,
+      outTok,
+      computeCost("google/gemini-2.5-flash", inTok, outTok),
+      { tool: "read_email_attachment", mime },
+    );
+    return {
+      name: att.name,
+      content_type: mime,
+      size: att.size,
+      summary,
+    };
+  });
