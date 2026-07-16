@@ -31,6 +31,8 @@ const TRACKED_TOOL_NAMES = new Set([
   "create_calendar_event",
   "cancel_calendar_event",
   "respond_calendar_event",
+  "search_emails",
+  "read_email",
   "generate_document",
   "recall_facts",
   "remember_fact",
@@ -122,6 +124,8 @@ Research / web
 - \`search_knowledge_base\` — semantic search over the user's uploaded company docs. Use FIRST for anything that sounds internal/company-specific. Cite the document name.
 
 Email
+- \`search_emails\` — search the user's Outlook inbox. Call this whenever the user asks whether they got an email, what someone said, unread count, "read me my emails", "any emails from X", etc. Prefer \`from\` for a person, \`query\` for a topic, \`unread_only\` for "unread". Then optionally call \`read_email\` with the id to get the full body when the user wants details or wants it read aloud.
+- \`read_email\` — fetch one email's full body by id (from \`search_emails\`). Use when the user wants the contents summarized or read to them. Summarize naturally — never dump raw HTML or long headers.
 - \`send_email\` — send from the user's Outlook. NEVER on the first request, and NEVER as a bonus step the user didn't ask for. Flow: confirm recipient → draft preview → wait for explicit approval → send. Do NOT auto-email a generated document just because you made one — wait until the user explicitly says "email it" / "send it".
 - Multiple attachments ARE supported. \`attachments\` is an array — pass up to 10 files in ONE email. If the user asks for "PDF and Word", attach BOTH files in the SAME email. NEVER tell the user "I can only attach the most recently generated document" or "I can only attach one file" — that is false; the tool supports multiple attachments and you must use them.
 - To attach files, pass an explicit \`attachments\` array with each file's exact \`url\` and \`filename\` — copied verbatim from the "Generated documents in this thread" ledger in your system prompt (or from the tool result you JUST got this turn). If the user references a specific prior file ("email the cameras PDF", "send the barbershop doc"), find that entry in the ledger by matching its label/topic and use ITS url — do NOT rely on "the most recent one" and do NOT regenerate. Never paste the URL in the email body.
@@ -1621,6 +1625,132 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0;}
                   .order("updated_at", { ascending: false });
                 if (error) return { error: error.message };
                 return { facts: data ?? [] };
+              },
+            }),
+            search_emails: tool({
+              description:
+                "Search the user's Outlook inbox for recent emails. Use this to answer questions like 'did I get an email from X?', 'what did Y send me?', 'any emails about the invoice?'. Returns id, subject, sender, preview, date. Use `read_email` afterwards to fetch a full message body.",
+              inputSchema: z.object({
+                query: z
+                  .string()
+                  .max(300)
+                  .optional()
+                  .describe("Optional free-text search (matches subject, body, sender). Leave empty to list the most recent messages."),
+                from: z.string().max(200).optional().describe("Filter by sender name or email substring."),
+                unread_only: z.boolean().optional().describe("Only return unread messages."),
+                days: z.number().int().min(1).max(90).optional().describe("Only messages from the last N days. Default 30."),
+                limit: z.number().int().min(1).max(25).optional().describe("Max results. Default 10."),
+              }),
+              execute: async ({ query, from, unread_only, days, limit }) => {
+                const top = limit ?? 10;
+                const sinceDays = days ?? 30;
+                const sinceIso = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
+                const filters: string[] = [`receivedDateTime ge ${sinceIso}`];
+                if (unread_only) filters.push("isRead eq false");
+                if (from) {
+                  const safe = from.replace(/'/g, "''");
+                  filters.push(`(contains(from/emailAddress/address,'${safe}') or contains(from/emailAddress/name,'${safe}'))`);
+                }
+                const params = new URLSearchParams();
+                params.set("$top", String(top));
+                params.set("$select", "id,subject,from,bodyPreview,receivedDateTime,isRead,webLink,hasAttachments");
+                params.set("$orderby", "receivedDateTime desc");
+                if (query && query.trim()) {
+                  params.set("$search", `"${query.trim().replace(/"/g, '\\"')}"`);
+                } else {
+                  params.set("$filter", filters.join(" and "));
+                }
+                const path = `/me/messages?${params.toString()}`;
+                const result = await msGraphFetch(userId, path, {
+                  method: "GET",
+                  headers: query && query.trim() ? { ConsistencyLevel: "eventual" } : {},
+                });
+                if (!result) return { error: "Microsoft is not connected. Open Activity & memory and click Connect Microsoft." };
+                if (!result.response.ok) {
+                  const text = await result.response.text();
+                  return { error: `Outlook search failed (${result.response.status})`, detail: text.slice(0, 300) };
+                }
+                const j = (await result.response.json()) as {
+                  value?: Array<{
+                    id: string;
+                    subject?: string;
+                    from?: { emailAddress?: { name?: string; address?: string } };
+                    bodyPreview?: string;
+                    receivedDateTime: string;
+                    isRead?: boolean;
+                    webLink?: string;
+                    hasAttachments?: boolean;
+                  }>;
+                };
+                return {
+                  messages: (j.value ?? []).map((m) => ({
+                    id: m.id,
+                    subject: m.subject ?? "(no subject)",
+                    from_name: m.from?.emailAddress?.name ?? "",
+                    from_email: m.from?.emailAddress?.address ?? "",
+                    preview: (m.bodyPreview ?? "").slice(0, 300),
+                    received_at: m.receivedDateTime,
+                    is_read: m.isRead ?? true,
+                    has_attachments: m.hasAttachments ?? false,
+                    web_link: m.webLink ?? null,
+                  })),
+                };
+              },
+            }),
+            read_email: tool({
+              description:
+                "Read the full body of one Outlook email by id. Get the id from `search_emails` first. Returns the plain-text body plus recipients so you can summarize or read it aloud.",
+              inputSchema: z.object({
+                message_id: z.string().min(1).describe("Outlook message id from search_emails."),
+              }),
+              execute: async ({ message_id }) => {
+                const path = `/me/messages/${encodeURIComponent(message_id)}?$select=id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,webLink,hasAttachments`;
+                const result = await msGraphFetch(userId, path, { method: "GET" });
+                if (!result) return { error: "Microsoft is not connected." };
+                if (!result.response.ok) {
+                  const text = await result.response.text();
+                  return { error: `Couldn't load that email (${result.response.status})`, detail: text.slice(0, 300) };
+                }
+                const m = (await result.response.json()) as {
+                  id: string;
+                  subject?: string;
+                  from?: { emailAddress?: { name?: string; address?: string } };
+                  toRecipients?: Array<{ emailAddress?: { name?: string; address?: string } }>;
+                  ccRecipients?: Array<{ emailAddress?: { name?: string; address?: string } }>;
+                  receivedDateTime: string;
+                  body?: { contentType?: string; content?: string };
+                  bodyPreview?: string;
+                  webLink?: string;
+                  hasAttachments?: boolean;
+                };
+                let text = m.body?.content ?? m.bodyPreview ?? "";
+                if ((m.body?.contentType ?? "").toLowerCase() === "html") {
+                  text = text
+                    .replace(/<style[\s\S]*?<\/style>/gi, "")
+                    .replace(/<script[\s\S]*?<\/script>/gi, "")
+                    .replace(/<br\s*\/?>/gi, "\n")
+                    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+                    .replace(/<[^>]+>/g, "")
+                    .replace(/&nbsp;/g, " ")
+                    .replace(/&amp;/g, "&")
+                    .replace(/&lt;/g, "<")
+                    .replace(/&gt;/g, ">")
+                    .replace(/&quot;/g, '"')
+                    .replace(/\n{3,}/g, "\n\n")
+                    .trim();
+                }
+                return {
+                  id: m.id,
+                  subject: m.subject ?? "(no subject)",
+                  from_name: m.from?.emailAddress?.name ?? "",
+                  from_email: m.from?.emailAddress?.address ?? "",
+                  to: (m.toRecipients ?? []).map((r) => r.emailAddress?.address ?? "").filter(Boolean),
+                  cc: (m.ccRecipients ?? []).map((r) => r.emailAddress?.address ?? "").filter(Boolean),
+                  received_at: m.receivedDateTime,
+                  has_attachments: m.hasAttachments ?? false,
+                  web_link: m.webLink ?? null,
+                  body: text.slice(0, 8000),
+                };
               },
             }),
             remember_fact: tool({
