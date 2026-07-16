@@ -13,6 +13,8 @@ import {
   voiceSaveLesson,
   voiceSearchEmails,
   voiceReadEmail,
+  voiceListEmailAttachments,
+  voiceReadEmailAttachment,
 } from "@/lib/voice-tools.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -458,6 +460,32 @@ const REALTIME_TOOL_DEFS: RealtimeToolDef[] = [
       required: ["message_id"],
     },
   },
+  {
+    type: "function",
+    name: "list_email_attachments",
+    description:
+      "List the attachments on one Outlook email by id. Returns id, name, content_type, size for each. Use this when has_attachments is true and the user wants to know what's attached, or to pick one before calling read_email_attachment.",
+    parameters: {
+      type: "object",
+      properties: { message_id: { type: "string" } },
+      required: ["message_id"],
+    },
+  },
+  {
+    type: "function",
+    name: "read_email_attachment",
+    description:
+      "Open and read an attachment on an Outlook email. Handles PDFs, Word/Excel/PowerPoint docs, images, and plain text. If attachment_id is omitted and there's only one attachment, it reads that one; if there are several, first call list_email_attachments and pass the chosen attachment_id. Optionally pass a `prompt` to focus the read (e.g. 'just tell me the invoice total'). Summarize the returned content naturally when speaking.",
+    parameters: {
+      type: "object",
+      properties: {
+        message_id: { type: "string" },
+        attachment_id: { type: "string", description: "Optional. Omit to auto-pick when only one attachment exists." },
+        prompt: { type: "string", description: "Optional focus for how to read/summarize the attachment." },
+      },
+      required: ["message_id"],
+    },
+  },
 ];
 
 const BAD_TABLE_REFUSAL = /(?:I(?:'m| am)\s+)?unable to display a visual table directly in this chat interface\.?/gi;
@@ -762,6 +790,8 @@ function ThreadView({ threadId }: { threadId: string }) {
   const vLesson = useServerFn(voiceSaveLesson);
   const vSearchEmails = useServerFn(voiceSearchEmails);
   const vReadEmail = useServerFn(voiceReadEmail);
+  const vListEmailAttachments = useServerFn(voiceListEmailAttachments);
+  const vReadEmailAttachment = useServerFn(voiceReadEmailAttachment);
   const createUploadUrl = useServerFn(createChatUploadUrl);
   const searchFn = useServerFn(searchChats);
 
@@ -1519,6 +1549,32 @@ function ThreadView({ threadId }: { threadId: string }) {
           return JSON.stringify(r);
         } catch (e) {
           return JSON.stringify({ error: e instanceof Error ? e.message : "read email failed" });
+        }
+      },
+      list_email_attachments: async (params) => {
+        const p = params as { message_id?: string };
+        if (!p.message_id) return JSON.stringify({ error: "message_id required" });
+        try {
+          const r = await vListEmailAttachments({ data: { message_id: p.message_id } });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "list attachments failed" });
+        }
+      },
+      read_email_attachment: async (params) => {
+        const p = params as { message_id?: string; attachment_id?: string; prompt?: string };
+        if (!p.message_id) return JSON.stringify({ error: "message_id required" });
+        try {
+          const r = await vReadEmailAttachment({
+            data: {
+              message_id: p.message_id,
+              attachment_id: p.attachment_id,
+              prompt: p.prompt,
+            },
+          });
+          return JSON.stringify(r);
+        } catch (e) {
+          return JSON.stringify({ error: e instanceof Error ? e.message : "read attachment failed" });
         }
       },
     },
