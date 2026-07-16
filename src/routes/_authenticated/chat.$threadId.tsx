@@ -13,6 +13,8 @@ import {
   voiceSaveLesson,
   voiceSearchEmails,
   voiceReadEmail,
+  voiceListEmailAttachments,
+  voiceReadEmailAttachment,
 } from "@/lib/voice-tools.functions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
